@@ -1,0 +1,14 @@
+{
+  "name": "polyswarm-relay-truffle",
+  "version": "0.1.0",
+  "description": "Truffle project for polyswarm-relay contracts",
+  "main": "truffle.js",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "test": "truffle test"
+  },
+  "author": "PolySwarm Developers (info@polyswarm.io)",
+  "license": "MIT"
+}

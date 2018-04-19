@@ -1,24 +1,37 @@
+extern crate clap;
 extern crate web3;
 
-use web3::futures::{Future, Stream};
+use clap::{App, Arg};
+
+mod relay;
 
 fn main() {
-    let (_eloop, ws) = web3::transports::WebSocket::new("ws://localhost:8546").unwrap();
-    let web3 = web3::Web3::new(ws.clone());
-    let mut sub = web3.eth_subscribe().subscribe_new_heads().wait().unwrap();
+    let matches = App::new("Rust CLI example")
+                    .version("0.0.1")
+                    .author("Robert Lathrop <rl@polyswarm.io>")
+                    .about("Bridges between two contracts on different networks.")
+                    .arg(Arg::with_name("address")
+                        .short("a")
+                        .long("address")
+                        .value_name("Ethereum Contract Address")
+                        .help("Sets address to filter")
+                        .takes_value(true))
+                    .arg(Arg::with_name("port")
+                        .short("p")
+                        .long("port")
+                        .value_name("Number")
+                        .help("Sets port we are listening on")
+                        .takes_value(true))
+                    .get_matches();
+    
+    let address = matches.value_of("address").unwrap_or("0x9e46a38f5daabe8683e10793b06749eef7d733d1");
+    println!("address: {}", address);
 
-    println!("Got subscription id: {:?}", sub.id());
+    let port = matches.value_of("port").unwrap_or("8545");
+    println!("port: {}", port);
 
-    (&mut sub)
-        .take(5)
-        .for_each(|x| {
-            println!("Got: {:?}", x);
-            Ok(())
-        })
-        .wait()
-        .unwrap();
+    let host = "ws://localhost";
 
-    sub.unsubscribe();
-
-    drop(web3);
+    let home = relay::Relay::new(host, port, address);
+    home.listen();
 }

@@ -1,3 +1,8 @@
+<<<<<<< HEAD
 *.swp
 /target/
+=======
+
+/target
+>>>>>>> Initial Commit.
 **/*.rs.bk

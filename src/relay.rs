@@ -17,20 +17,37 @@ impl Relay {
         }
     }
 
-    pub fn listen(&self) {
-        // Probably should actually check this is a value addr
+    fn from_hex_to_vec(hex: &str) -> Result<Vec<u8>, String> {
+        let mut vec: Vec<u8> = vec![];
+        for x in 1..(hex.len()/2) {
+            let byte = u8::from_str_radix(&hex[2*x..2*x+2], 16);
+            match byte {
+                Ok(b) => { vec.push(b); },
+                Err(_) => { return Err(format!("Failed to convert {}", hex))},
+            }
+        }
+        Ok(vec)
+    }
+
+    /// 
+    /// ## getHost
+    ///
+    /// This function combines the host, and port joined on a :
+    ///
+    fn get_host(&self) -> String {
+        let host_vec = vec![self.host.as_str(), self.port.as_str()];
         // Allocate a string object with a scope of lifetime
-        let mut host: String  = self.host.to_owned();
-        // append rest of strings
-        host.push_str(":");
-        host.push_str(&self.port[..]);
+        let host = host_vec.join(":");
+        println!("Host: {}", host);
+        host
+    }
 
-        // Allocate address
-        let address = from_hex_to_vec(&self.address).unwrap();
+    pub fn listen(&self) {
+        let host = self.get_host();
+
         // Create an H160 address from address
+        let address = Relay::from_hex_to_vec(&self.address).unwrap();
         let hex_address = vec![H160::from(&address[..20])];
-
-        println!("Address hash {:?}", hex_address[0]);
 
         // Filter all logs on the specified address
         let fb: FilterBuilder = FilterBuilder::default().address(hex_address);
@@ -57,14 +74,26 @@ impl Relay {
     }
 }
 
-fn from_hex_to_vec(hex: &str) -> Result<Vec<u8>, String> {
-    let mut vec: Vec<u8> = vec![];
-    for x in 1..(hex.len()/2) {
-        let byte = u8::from_str_radix(&hex[2*x..2*x+2], 16);
-        match byte {
-            Ok(b) => { vec.push(b); },
-            Err(_) => { return Err(format!("Failed to convert {}", hex))},
-        }
+trait Join<T, U> {
+    fn join(&self, middle: T) -> U;
+}
+
+impl<'a> Join<&'a str, String> for Vec<&'a str> {
+
+    ///
+    /// ## Join
+    ///
+    /// This function joins a vector of &strs and turns it into a single string,
+    /// with the given middle: &str between each element.
+    /// 
+    fn join(&self, middle: &'a str) -> String {
+        let mut joined = String::new();
+        for i in 0..self.len() {
+            joined.push_str(self[i]);
+            if i != self.len() -1 {
+                joined.push_str(middle);
+            }
+        };
+        joined
     }
-    Ok(vec)
 }

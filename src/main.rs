@@ -23,11 +23,11 @@ fn main() {
                         .value_name("Relay address to monitor deposits")
                         .help("Sets Transfer to address to filter against")
                         .takes_value(true))
-                    .arg(Arg::with_name("port")
-                        .short("p")
-                        .long("port")
-                        .value_name("Number")
-                        .help("Sets port we are listening on")
+                    .arg(Arg::with_name("host")
+                        .short("h")
+                        .long("host")
+                        .value_name("URI")
+                        .help("Sets geth Websocket host we are listening on")
                         .takes_value(true))
                     .get_matches();
     
@@ -37,11 +37,9 @@ fn main() {
     let relay = matches.value_of("relay").unwrap_or("0x0000000000000000000000000000000000000000");
     println!("relay: {}", relay);
 
-    let port = matches.value_of("port").unwrap_or("8545");
-    println!("port: {}", port);
+    let host = matches.value_of("host").unwrap_or("ws://localhost:8545");
+    println!("host: {}", host);
 
-    let host = "ws://localhost";
-
-    let home = relay::Relay::new(host, port, token, relay);
-    home.listen();
+    let private = relay::Network::new("PrivateTestnet", host, token, relay);
+    private.listen();
 }

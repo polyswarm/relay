@@ -5,10 +5,11 @@ use web3::futures::{Future, Stream};
 use web3::types::{FilterBuilder, H160, H256, Bytes, Address};
 use ethabi::{EventParam, Event, ParamType, Hash};
 
+#[derive(Debug)]
 pub struct Network {
     name: String,
     host: String,
-    filter: Filter,
+    contracts: Contracts,
 }
 
 impl Network {
@@ -16,17 +17,21 @@ impl Network {
         Network {
             name: name.to_string(),
             host: host.to_string(),
-            filter: Filter::new(token, relay),
+            contracts: Contracts::new(token, relay),
         }
     }
 
-    pub fn listen(&self) {
-        let filter = &self.filter;
-        // Filter all logs on the specified address
-        let token = vec![filter.token_addr];
+    pub fn mint(&self, sender: Address) {
 
-        // Filter logs on transfer topic
-        let event_prototype = Filter::generate_topic_filter();
+    }
+
+    pub fn listen(&self) {
+        let contracts = &self.contracts;
+        // Contractsall logs on the specified address
+        let token = vec![contracts.token_addr];
+
+        // Contractslogs on transfer topic
+        let event_prototype = Contracts::generate_topic_filter();
 
         // Create filter on our subscription
         let fb: FilterBuilder = FilterBuilder::default()
@@ -47,7 +52,7 @@ impl Network {
                  * subscribe_logs does not work.
                  */
                 if x.topics[0] == event_prototype
-                    && x.topics[2] == H256::from(&filter.relay_addr)
+                    && x.topics[2] == H256::from(&contracts.relay_addr)
                 {
                     // Fold the data to an amount
                     let Bytes(d) = x.data;
@@ -75,50 +80,33 @@ impl Network {
 }
 
 ///
-/// # Filter
+/// # Contracts
 ///
 /// This struct points to the relay & token contracts on the network. Use it
 /// to generate the log filters (eventually)
 ///
-pub struct Filter {
+#[derive(Debug)]
+pub struct Contracts{
     // contract address to subscribe to
     token_addr: Address,
     // Relay contract address (Only care about deposits into that addr)
     relay_addr: Address,
 }
 
-impl Filter {
-    pub fn new(token: &str, relay: &str) -> Filter {
+impl Contracts{
+    pub fn new(token: &str, relay: &str) -> Contracts{
         // Create an H160 address from address
-        let token_vec = Filter::from_hex_to_vec(token).unwrap();
-        let token_hex: Address = H160::from(&token_vec[..20]);
+        let token_hex: Address = H160::custom_from(token);
 
-        let relay_vec = Filter::from_hex_to_vec(relay).unwrap();
-        let relay_hex: Address = H160::from(&relay_vec[..20]);
+        let relay_hex: Address = H160::custom_from(relay);
 
-        Filter {
+        Contracts{
             token_addr: token_hex,
             relay_addr: relay_hex,
         }
     }
 
-    ///
-    /// # From Hex To Vec
-    ///
-    /// This converts a hex string to a vector of u8 values, representing the
-    /// hex value. (Skips the 0x, which it expects)
-    ///
-    fn from_hex_to_vec(hex: &str) -> Result<Vec<u8>, String> {
-        let mut vec: Vec<u8> = vec![];
-        for x in 1..(hex.len()/2) {
-            let byte = u8::from_str_radix(&hex[2*x..2*x+2], 16);
-            match byte {
-                Ok(b) => { vec.push(b); },
-                Err(_) => { return Err(format!("Failed to convert {}", hex))},
-            }
-        }
-        Ok(vec)
-    }
+
 
     ///
     /// # Generate Topic Filter
@@ -154,5 +142,39 @@ impl Filter {
             anonymous: false,
         };
         transfer_event.signature()
+    }
+}
+
+///
+/// Unfortunately, I can't implement normal From on H160 for two reasons. First,
+/// neither exists in my scope. So I create a new From. But, using fn from 
+/// conflicts with From<&'static str>::from, so I had to change the name a bit.
+///
+trait From<T> {
+     fn custom_from (T) -> Self;
+}
+
+
+impl<'a> From<&'a str> for H160 {
+    ///
+    /// # custom_from
+    ///
+    /// This converts a hex string to an H160, representing the
+    /// hex value.
+    ///
+    fn custom_from(hex: &'a str) -> Self {
+        let mut array: [u8; 20] = [0; 20];
+        let start = match hex.starts_with("0x") {
+            true => 1,
+            false => 0
+        };
+        for x in start..21 {
+            let byte = u8::from_str_radix(&hex[2*x..2*x+2], 16);
+            match byte {
+                Ok(b) => { array[x-1] = b; },
+                Err(_) => { panic!(format!("Failed to convert {}", hex))},
+            }
+        }
+        H160::from(array)
     }
 }

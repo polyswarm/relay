@@ -1,5 +1,6 @@
 extern crate clap;
 extern crate web3;
+extern crate ethabi;
 
 use clap::{App, Arg};
 
@@ -13,7 +14,7 @@ fn main() {
                     .arg(Arg::with_name("address")
                         .short("a")
                         .long("address")
-                        .value_name("Ethereum Contract Address")
+                        .value_name("Token Contract Address")
                         .help("Sets address to filter")
                         .takes_value(true))
                     .arg(Arg::with_name("port")

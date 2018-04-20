@@ -618,8 +618,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 name = "polyswarm-relay"
 version = "0.1.0"
 dependencies = [
- "web3 0.3.0 (git+https://github.com/tomusdrw/rust-web3.git)",
-  "clap 2.31.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "clap 2.31.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "ethabi 5.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "web3 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]

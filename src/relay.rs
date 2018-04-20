@@ -1,22 +1,43 @@
-use web3;
-use web3::futures::{Future, Stream};
-use web3::types::{FilterBuilder, H160, H256, Bytes};
+extern crate web3;
+extern crate ethabi;
 
+use web3::futures::{Future, Stream};
+use web3::types::{FilterBuilder, H160, H256, Bytes, Address};
+use ethabi::{EventParam, Event, ParamType, Hash};
+
+///
+/// # Relay
+///
+/// This struct represents a the Relay contract on a network.
+///
 pub struct Relay {
+    // host for websocket connection
     host: String,
+    // port to listen on
     port: String,
-    address: String,
+    // contract address to subscribe to
+    address: Address,
 }
 
 impl Relay {
     pub fn new(host: &str, port: &str, address: &str) -> Relay {
+        // Create an H160 address from address
+        let address = Relay::from_hex_to_vec(address).unwrap();
+        let hex_address: Address = H160::from(&address[..20]);
+
         Relay {
             host: String::from(host),
             port: String::from(port),
-            address: String::from(address),
+            address: hex_address,
         }
     }
 
+    ///
+    /// # From Hex To Vec
+    ///
+    /// This converts a hex string to a vector of u8 values, representing the
+    /// hex value. (Skips the 0x, which it expects)
+    ///
     fn from_hex_to_vec(hex: &str) -> Result<Vec<u8>, String> {
         let mut vec: Vec<u8> = vec![];
         for x in 1..(hex.len()/2) {
@@ -42,15 +63,51 @@ impl Relay {
         host
     }
 
+    fn generate_topic_filter() -> Hash {
+        // event Transfer(address indexed from, address indexed to, uint256 value)
+        let from = EventParam {
+            name: "from".to_string(),
+            kind: ParamType::Address,
+            indexed: true,
+        };
+
+        let to = EventParam {
+            name: "to".to_string(),
+            kind: ParamType::Address,
+            indexed: true,
+        };
+
+        let value = EventParam {
+            name: "value".to_string(),
+            kind: ParamType::Uint(256),
+            indexed: false,
+        };
+
+        let transfer_event = Event {
+            name: "Transfer".to_string(),
+            inputs: vec![from, to, value],
+            anonymous: false,
+        };
+        transfer_event.signature()
+    }
+
     pub fn listen(&self) {
         let host = self.get_host();
 
-        // Create an H160 address from address
-        let address = Relay::from_hex_to_vec(&self.address).unwrap();
-        let hex_address = vec![H160::from(&address[..20])];
-
         // Filter all logs on the specified address
-        let fb: FilterBuilder = FilterBuilder::default().address(hex_address);
+        let addresses = vec![self.address];
+
+        // Filter logs on transfer topic
+        let event_prototype = Relay::generate_topic_filter();
+
+        println!("Signature {:?}", event_prototype);
+
+        // Create filter on our subscription
+        let fb: FilterBuilder = FilterBuilder::default()
+            .address(addresses);
+
+        // Start listening to events
+        // Open Websocket and create RPC conn
         let (_eloop, ws) = web3::transports::WebSocket::new(&host).unwrap();
         let web3 = web3::Web3::new(ws.clone());
         let mut sub = web3.eth_subscribe().subscribe_logs(fb.build()).wait().unwrap();
@@ -59,10 +116,18 @@ impl Relay {
 
         (&mut sub)
             .for_each(|x| {
-                println!("Got: {:?}", x);
-                let Bytes(d) = x.data;
-                let text = H256::from(&d[..32]);
-                println!("Data: {:?}", text);
+                /*
+                 * Unfortunately, actually putting a topic filter on the 
+                 * subscribe_logs does not work.
+                 */
+                if x.topics[0] == event_prototype {
+                    println!("Got: {:?}", x);
+                    let Bytes(d) = x.data;
+                    let amount = H256::from(&d[..32]);
+                    println!("Data: {:?}", amount);
+                    println!("Topic 0: {:?}", x.topics[0]);
+                    println!("Event Prototype: {:?}", event_prototype);
+                }
                 Ok(())
             })
             .wait()

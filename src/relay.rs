@@ -17,18 +17,24 @@ pub struct Relay {
     port: String,
     // contract address to subscribe to
     address: Address,
+    // Relay contract address (Only care about deposits into that addr)
+    to_address: Address,
 }
 
 impl Relay {
-    pub fn new(host: &str, port: &str, address: &str) -> Relay {
+    pub fn new(host: &str, port: &str, address: &str, to_address: &str) -> Relay {
         // Create an H160 address from address
-        let address = Relay::from_hex_to_vec(address).unwrap();
-        let hex_address: Address = H160::from(&address[..20]);
+        let vec_address = Relay::from_hex_to_vec(address).unwrap();
+        let hex_address: Address = H160::from(&vec_address[..20]);
+
+        let vec_to_address = Relay::from_hex_to_vec(to_address).unwrap();
+        let hex_to_address: Address = H160::from(&vec_to_address[..20]);
 
         Relay {
             host: String::from(host),
             port: String::from(port),
             address: hex_address,
+            to_address: hex_to_address,
         }
     }
 
@@ -120,13 +126,21 @@ impl Relay {
                  * Unfortunately, actually putting a topic filter on the 
                  * subscribe_logs does not work.
                  */
-                if x.topics[0] == event_prototype {
-                    println!("Got: {:?}", x);
+                if x.topics[0] == event_prototype 
+                    && x.topics[2] == H256::from(&self.to_address) 
+                {
+                    // Fold the data to an amount
                     let Bytes(d) = x.data;
-                    let amount = H256::from(&d[..32]);
-                    println!("Data: {:?}", amount);
-                    println!("Topic 0: {:?}", x.topics[0]);
-                    println!("Event Prototype: {:?}", event_prototype);
+                    let amount = d.iter().fold(0, |total:usize, &value| {
+                        let t = total << 8;
+                        t | value.clone() as usize
+                    });
+
+                    // Print the transfer event.
+                    println!("Transfer {:?} Nectar from {:?} to {:?} ", 
+                        amount,
+                        H160::from(x.topics[1]),
+                        H160::from(x.topics[2]));
                 }
                 Ok(())
             })

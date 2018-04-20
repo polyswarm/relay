@@ -16,25 +16,25 @@ pub struct Relay {
     // port to listen on
     port: String,
     // contract address to subscribe to
-    address: Address,
+    token_addr: Address,
     // Relay contract address (Only care about deposits into that addr)
-    to_address: Address,
+    relay_addr: Address,
 }
 
 impl Relay {
-    pub fn new(host: &str, port: &str, address: &str, to_address: &str) -> Relay {
+    pub fn new(host: &str, port: &str, token: &str, relay: &str) -> Relay {
         // Create an H160 address from address
-        let vec_address = Relay::from_hex_to_vec(address).unwrap();
-        let hex_address: Address = H160::from(&vec_address[..20]);
+        let token_vec = Relay::from_hex_to_vec(token).unwrap();
+        let token_hex: Address = H160::from(&token_vec[..20]);
 
-        let vec_to_address = Relay::from_hex_to_vec(to_address).unwrap();
-        let hex_to_address: Address = H160::from(&vec_to_address[..20]);
+        let relay_vec = Relay::from_hex_to_vec(relay).unwrap();
+        let relay_hex: Address = H160::from(&relay_vec[..20]);
 
         Relay {
             host: String::from(host),
             port: String::from(port),
-            address: hex_address,
-            to_address: hex_to_address,
+            token_addr: token_hex,
+            relay_addr: relay_hex,
         }
     }
 
@@ -101,7 +101,7 @@ impl Relay {
         let host = self.get_host();
 
         // Filter all logs on the specified address
-        let addresses = vec![self.address];
+        let token = vec![self.token_addr];
 
         // Filter logs on transfer topic
         let event_prototype = Relay::generate_topic_filter();
@@ -110,7 +110,7 @@ impl Relay {
 
         // Create filter on our subscription
         let fb: FilterBuilder = FilterBuilder::default()
-            .address(addresses);
+            .address(token);
 
         // Start listening to events
         // Open Websocket and create RPC conn
@@ -127,7 +127,7 @@ impl Relay {
                  * subscribe_logs does not work.
                  */
                 if x.topics[0] == event_prototype 
-                    && x.topics[2] == H256::from(&self.to_address) 
+                    && x.topics[2] == H256::from(&self.relay_addr)
                 {
                     // Fold the data to an amount
                     let Bytes(d) = x.data;

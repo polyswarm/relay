@@ -172,10 +172,18 @@ pub struct Contracts{
 
 impl Contracts{
     pub fn new(token: &str, relay: &str) -> Contracts{
+        let mut start = match relay.starts_with("0x") {
+            true => 2,
+            false => 0
+        };
         // Create an H160 address from address
-        let token_hex: Address = H160::custom_from(token);
+        let token_hex: Address = token[start..40+start].parse().expect("Invalid token address.");
 
-        let relay_hex: Address = H160::custom_from(relay);
+        start = match token.starts_with("0x") {
+            true => 2,
+            false => 0
+        };
+        let relay_hex: Address = relay[start..40+start].parse().expect("Invalid relay address.");
 
         Contracts{
             token_addr: token_hex,
@@ -219,39 +227,5 @@ impl Contracts{
             anonymous: false,
         };
         transfer_event.signature()
-    }
-}
-
-///
-/// Unfortunately, I can't implement normal From on H160 for two reasons. First,
-/// neither exists in my scope. So I create a new From. But, using fn from 
-/// conflicts with From<&'static str>::from, so I had to change the name a bit.
-///
-trait From<T> {
-     fn custom_from (T) -> Self;
-}
-
-
-impl<'a> From<&'a str> for H160 {
-    ///
-    /// # custom_from
-    ///
-    /// This converts a hex string to an H160, representing the
-    /// hex value.
-    ///
-    fn custom_from(hex: &'a str) -> Self {
-        let mut array: [u8; 20] = [0; 20];
-        let start = match hex.starts_with("0x") {
-            true => 1,
-            false => 0
-        };
-        for x in start..21 {
-            let byte = u8::from_str_radix(&hex[2*x..2*x+2], 16);
-            match byte {
-                Ok(b) => { array[x-1] = b; },
-                Err(_) => { panic!(format!("Failed to convert {}", hex))},
-            }
-        }
-        H160::from(array)
     }
 }

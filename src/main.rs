@@ -37,7 +37,7 @@ fn main() {
     let mut b = bridge.clone();
     thread::spawn(move ||{
         thread::sleep(time::Duration::from_millis(15000));
-        b.stop();
+        // b.stop();
     });
 
     bridge.start();

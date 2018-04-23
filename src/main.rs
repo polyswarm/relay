@@ -4,10 +4,9 @@ extern crate toml;
 extern crate clap;
 extern crate web3;
 extern crate ethabi;
+extern crate ctrlc;
 
 use clap::{App, Arg};
-use std::thread;
-use std::time;
 
 mod relay;
 mod config;
@@ -34,11 +33,14 @@ fn main() {
     let private = relay::Network::new(&main.name, &main.host, &main.token, &main.relay);
     let mut bridge = relay::Bridge::new(private.clone(), private.clone());
 
-    let mut b = bridge.clone();
-    thread::spawn(move ||{
-        thread::sleep(time::Duration::from_millis(15000));
-        // b.stop();
-    });
+    // Spawning a thread didn't make me clone twice, but set_handler does.
+    let b = bridge.clone();
+    ctrlc::set_handler(move || {
+        println!("\rExiting...");
+        let mut a = b.clone();
+        a.stop();
+    }).expect("Unable to setup Ctrl-C handler.");
 
+    // Start relay.
     bridge.start();
 }

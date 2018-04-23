@@ -3,47 +3,64 @@ extern crate ethabi;
 
 use web3::futures::{Future, Stream};
 use web3::types::{FilterBuilder, H160, H256, Bytes, Address};
-use web3::api::{SubscriptionId};
-use web3::Web3;
-use web3::transports::WebSocket;
 use ethabi::{EventParam, Event, ParamType, Hash};
 use std::sync::{mpsc, Arc, Mutex};
 use std::cell;
+use std::thread;
 
-// pub struct Bridge {
-//     main: Network,
-//     side: Network,
-// }
+#[derive(Clone)]
+pub struct Bridge {
+    main: Network,
+    side: Network,
+}
 
-// impl Bridge {
-//     fn new(main: Network, side: Network) -> Bridge {
-//         Bridge {
-//             main,
-//             side,
-//         }
-//     }
+impl Bridge {
+    pub fn new(main: Network, side: Network) -> Bridge {
+        Bridge {
+            main,
+            side,
+        }
+    }
 
-//     fn start() {
-//         (main_tx, main_rx) = sync::mpsc::channel();
+    pub fn start(&mut self) {
+        let (main_tx, main_rx) = mpsc::channel();
+        self.main.set_tx(main_tx);
 
-//         thread.spawn(move || {
-//             let mut iter = rx.iter();
-//             while let Some(message) = iter.next() {
-                
-//             }
+        let mut main_listen = self.main.clone();
+        // main listen
+        let main = thread::spawn(move || {
+            main_listen.listen();
+        });
 
-//         });
-//     }
+        // side listen
 
+        // main mint
 
-// }
+        // side mint
+        let side_mint = self.side.clone();
+        thread::spawn(move || {
+            let mut iter = main_rx.iter();
+            while let Some(message) = iter.next() {
+                side_mint.mint(message);
+            }
+        });
+
+        main.join();
+    }
+
+    pub fn stop(&mut self) {
+        self.main.cancel();
+        self.side.cancel();
+    }
+}
+
 #[derive(Clone)]
 pub struct Network {
     name: String,
     host: String,
     contracts: Contracts,
     run: Arc<Mutex<cell::RefCell<bool>>>,
-    tx: Option<mpsc::Sender<String>>,
+    tx: cell::RefCell<Option<mpsc::Sender<String>>>,
 }
 
 impl Network {
@@ -53,20 +70,21 @@ impl Network {
             host: host.to_string(),
             contracts: Contracts::new(token, relay),
             run: Arc::new(Mutex::new(cell::RefCell::new(false))),
-            tx: None,
+            tx: cell::RefCell::new(None),
         }
     }
 
     pub fn cancel(&mut self) {
         println!("Cancelling...");
         self.run.lock().unwrap().replace(false);
+        // TODO Must drop the tx & such.
     }
 
     pub fn set_tx(&mut self, sender: mpsc::Sender<String>) {
-        self.tx = Some(sender);
+        self.tx.replace(Some(sender));
     }
 
-    pub fn mint(&self, sender: Address) {
+    pub fn mint(&self, sender: String) {
         println!("Sending NCT to {:?}", sender);
     }
 
@@ -120,12 +138,16 @@ impl Network {
                         t | value.clone() as usize
                     });
 
-                    // Print the transfer event.
-                    println!("{}: Transfer {:?} Nectar from {:?} to {:?} ",
-                        &self.name,
-                        amount,
-                        H160::from(x.topics[1]),
-                        H160::from(x.topics[2]));
+                    if let Some(tx) = self.tx.borrow().clone() {
+
+                        // Print the transfer event.
+                        let log = format!("{}: Transfer {:?} Nectar from {:?} to {:?} ",
+                            &self.name,
+                            amount,
+                            H160::from(x.topics[1]),
+                            H160::from(x.topics[2]));
+                        tx.send(log).unwrap();
+                    }
                 }
                 Ok(())
             })

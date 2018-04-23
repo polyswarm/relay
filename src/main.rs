@@ -36,12 +36,12 @@ fn main() {
     let private = relay::Network::new(&main.name, &main.host, &main.token, &main.relay);
     let mut bridge = relay::Bridge::new(private.clone(), private.clone());
 
-    // let mut b = bridge.clone();
-    // thread::spawn(move ||{
-    //     thread::sleep(time::Duration::from_millis(5000));
-    //     b.stop();
-    //     println!("Killed");
-    // });
+    let mut b = bridge.clone();
+    thread::spawn(move ||{
+        thread::sleep(time::Duration::from_millis(15000));
+        b.stop();
+        println!("Killed");
+    });
 
     bridge.start();
 }

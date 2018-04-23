@@ -5,7 +5,6 @@ use web3::futures::{Future, Stream};
 use web3::types::{FilterBuilder, H160, H256, Bytes, Address};
 use ethabi::{EventParam, Event, ParamType, Hash};
 use std::sync::{mpsc, Arc, Mutex};
-use std::cell;
 use std::thread;
 
 #[derive(Clone)]
@@ -45,7 +44,7 @@ impl Bridge {
             }
         });
 
-        main.join();
+        main.join().unwrap();
     }
 
     pub fn stop(&mut self) {
@@ -59,8 +58,8 @@ pub struct Network {
     name: String,
     host: String,
     contracts: Contracts,
-    run: Arc<Mutex<cell::RefCell<bool>>>,
-    tx: cell::RefCell<Option<mpsc::Sender<String>>>,
+    run: Arc<Mutex<bool>>,
+    tx: Arc<Mutex<Option<mpsc::Sender<String>>>>,
 }
 
 impl Network {
@@ -69,19 +68,20 @@ impl Network {
             name: name.to_string(),
             host: host.to_string(),
             contracts: Contracts::new(token, relay),
-            run: Arc::new(Mutex::new(cell::RefCell::new(false))),
-            tx: cell::RefCell::new(None),
+            run: Arc::new(Mutex::new(false)),
+            tx: Arc::new(Mutex::new(None)),
         }
     }
 
     pub fn cancel(&mut self) {
         println!("Cancelling...");
-        self.run.lock().unwrap().replace(false);
+        *self.run.lock().unwrap() = false;
+        *self.tx.lock().unwrap() = None;
         // TODO Must drop the tx & such.
     }
 
     pub fn set_tx(&mut self, sender: mpsc::Sender<String>) {
-        self.tx.replace(Some(sender));
+        *self.tx.lock().unwrap() = Some(sender);
     }
 
     pub fn mint(&self, sender: String) {
@@ -89,9 +89,7 @@ impl Network {
     }
 
     pub fn listen(&mut self) {
-        {
-            self.run.lock().unwrap().replace(true);
-        }
+        *self.run.lock().unwrap() = true;
         let contracts = &self.contracts;
         // Contractsall logs on the specified address
         let token = vec![contracts.token_addr];
@@ -112,6 +110,7 @@ impl Network {
         println!("Got subscription id: {:?}", sub.id());
 
         let arc_run = self.run.clone();
+        let arc_tx = self.tx.clone();
 
         (&mut sub)
         /*
@@ -119,8 +118,7 @@ impl Network {
          * and geth receives an event. 
          */
             .take_while(|_x| {
-                let lock = arc_run.lock().unwrap();
-                let run = lock.borrow().clone();
+                let run = arc_run.lock().unwrap().clone();
                 Ok(run)
             })
             .for_each(|x| {
@@ -137,9 +135,7 @@ impl Network {
                         let t = total << 8;
                         t | value.clone() as usize
                     });
-
-                    if let Some(tx) = self.tx.borrow().clone() {
-
+                    if let Some(tx) = arc_tx.lock().unwrap().clone() {
                         // Print the transfer event.
                         let log = format!("{}: Transfer {:?} Nectar from {:?} to {:?} ",
                             &self.name,

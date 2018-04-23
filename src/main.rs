@@ -14,7 +14,7 @@ mod config;
 fn main() {
     let matches = App::new("Polyswarm Relay Bridge.")
                     .version("0.0.1")
-                    .author("Robert Lathrop <rl@polyswarm.io>")
+                    .author("Polyswarm Developers <info@polyswarm.io>")
                     .about("Bridges between two contracts on different networks.")
                     .arg(Arg::with_name("config")
                         .value_name("TOML configuration file")

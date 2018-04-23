@@ -3,13 +3,47 @@ extern crate ethabi;
 
 use web3::futures::{Future, Stream};
 use web3::types::{FilterBuilder, H160, H256, Bytes, Address};
+use web3::api::{SubscriptionId};
+use web3::Web3;
+use web3::transports::WebSocket;
 use ethabi::{EventParam, Event, ParamType, Hash};
+use std::sync::{mpsc, Arc, Mutex};
+use std::cell;
 
-#[derive(Debug)]
+// pub struct Bridge {
+//     main: Network,
+//     side: Network,
+// }
+
+// impl Bridge {
+//     fn new(main: Network, side: Network) -> Bridge {
+//         Bridge {
+//             main,
+//             side,
+//         }
+//     }
+
+//     fn start() {
+//         (main_tx, main_rx) = sync::mpsc::channel();
+
+//         thread.spawn(move || {
+//             let mut iter = rx.iter();
+//             while let Some(message) = iter.next() {
+                
+//             }
+
+//         });
+//     }
+
+
+// }
+#[derive(Clone)]
 pub struct Network {
     name: String,
     host: String,
     contracts: Contracts,
+    run: Arc<Mutex<cell::RefCell<bool>>>,
+    tx: Option<mpsc::Sender<String>>,
 }
 
 impl Network {
@@ -18,14 +52,28 @@ impl Network {
             name: name.to_string(),
             host: host.to_string(),
             contracts: Contracts::new(token, relay),
+            run: Arc::new(Mutex::new(cell::RefCell::new(false))),
+            tx: None,
         }
     }
 
-    pub fn mint(&self, sender: Address) {
-
+    pub fn cancel(&mut self) {
+        println!("Cancelling...");
+        self.run.lock().unwrap().replace(false);
     }
 
-    pub fn listen(&self) {
+    pub fn set_tx(&mut self, sender: mpsc::Sender<String>) {
+        self.tx = Some(sender);
+    }
+
+    pub fn mint(&self, sender: Address) {
+        println!("Sending NCT to {:?}", sender);
+    }
+
+    pub fn listen(&mut self) {
+        {
+            self.run.lock().unwrap().replace(true);
+        }
         let contracts = &self.contracts;
         // Contractsall logs on the specified address
         let token = vec![contracts.token_addr];
@@ -45,7 +93,18 @@ impl Network {
 
         println!("Got subscription id: {:?}", sub.id());
 
+        let arc_run = self.run.clone();
+
         (&mut sub)
+        /*
+         * Looks like at best, we can kill the subscription after it is cancelled
+         * and geth receives an event. 
+         */
+            .take_while(|_x| {
+                let lock = arc_run.lock().unwrap();
+                let run = lock.borrow().clone();
+                Ok(run)
+            })
             .for_each(|x| {
                 /*
                  * Unfortunately, actually putting a topic filter on the
@@ -72,10 +131,10 @@ impl Network {
             })
             .wait()
             .unwrap();
-
         sub.unsubscribe();
-
         drop(web3);
+
+        println!("Ended it.");
     }
 }
 
@@ -85,7 +144,7 @@ impl Network {
 /// This struct points to the relay & token contracts on the network. Use it
 /// to generate the log filters (eventually)
 ///
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Contracts{
     // contract address to subscribe to
     token_addr: Address,

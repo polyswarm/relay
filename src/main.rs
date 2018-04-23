@@ -6,6 +6,8 @@ extern crate web3;
 extern crate ethabi;
 
 use clap::{App, Arg};
+use std::thread;
+use std::time;
 
 mod relay;
 mod config;
@@ -31,6 +33,14 @@ fn main() {
 
     let main = configuration.bridge.main;
 
-    let private = relay::Network::new(&main.name, &main.host, &main.token, &main.relay);
+    let mut private = relay::Network::new(&main.name, &main.host, &main.token, &main.relay);
+
+    let mut p = private.clone();
+    thread::spawn(move ||{
+        thread::sleep(time::Duration::from_millis(5000));
+        p.cancel();
+        println!("Killed");
+    });
+    
     private.listen();
 }

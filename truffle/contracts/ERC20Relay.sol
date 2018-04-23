@@ -107,7 +107,7 @@ contract ERC20Relay is Ownable {
 
         withdrawal.approvals.push(msg.sender);
 
-        if (withdrawal.approvals.length > requriedVerifiers) {
+        if (withdrawal.approvals.length > requiredVerifiers) {
             require(token.transfer(destination, amount));
         }
     }

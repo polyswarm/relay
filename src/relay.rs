@@ -76,8 +76,11 @@ impl Network {
     pub fn cancel(&mut self) {
         println!("Cancelling...");
         *self.run.lock().unwrap() = false;
-        *self.tx.lock().unwrap() = None;
-        // TODO Must drop the tx & such.
+        let mut lock = self.tx.lock().unwrap();
+        if let Some(tx) = lock.clone() {
+            drop(tx);
+        }
+        *lock = None;
     }
 
     pub fn set_tx(&mut self, sender: mpsc::Sender<String>) {

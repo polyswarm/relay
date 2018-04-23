@@ -74,7 +74,6 @@ impl Network {
     }
 
     pub fn cancel(&mut self) {
-        println!("Cancelling...");
         *self.run.lock().unwrap() = false;
         let mut lock = self.tx.lock().unwrap();
         if let Some(tx) = lock.clone() {
@@ -154,8 +153,6 @@ impl Network {
             .unwrap();
         sub.unsubscribe();
         drop(web3);
-
-        println!("Ended it.");
     }
 }
 

@@ -29,8 +29,6 @@ fn main() {
 
     let configuration = config::read_config(config_file);
 
-    println!("Configuration {:?}", configuration);
-
     let main = configuration.bridge.main;
 
     let private = relay::Network::new(&main.name, &main.host, &main.token, &main.relay);
@@ -40,7 +38,6 @@ fn main() {
     thread::spawn(move ||{
         thread::sleep(time::Duration::from_millis(15000));
         b.stop();
-        println!("Killed");
     });
 
     bridge.start();

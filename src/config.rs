@@ -10,6 +10,8 @@ pub struct Config {
 
 #[derive(Deserialize, Debug)]
 pub struct Bridge {
+    pub wallet: String,
+    pub password: String,
     pub main: Network,
     pub side: Network,
 }

@@ -9,42 +9,71 @@ use std::thread;
 
 #[derive(Clone)]
 pub struct Bridge {
+    account: Address,
+    password: String,
     main: Network,
     side: Network,
 }
 
 impl Bridge {
-    pub fn new(main: Network, side: Network) -> Bridge {
+    pub fn new(account: &str, password: &str, main: Network, side: Network) -> Bridge {
+        let start = match account.starts_with("0x") {
+            true => 2,
+            false => 0
+        };
+        let verifier_account: Address = account[start..40+start].parse().expect("Invalid verifier address.");
         Bridge {
+            account: verifier_account,
+            password: password.to_owned(),
             main,
             side,
         }
     }
 
     pub fn start(&mut self) {
-        let (main_tx, main_rx) = mpsc::channel();
-        self.main.set_tx(main_tx);
+        // Create channels for communicating with main network
+        let (from_main_tx, to_side_rx) = mpsc::channel();
+        self.main.set_tx(from_main_tx);
 
-        let mut main_listen = self.main.clone();
+        // Create channels for communicating with side channel
+        let (from_side_tx, to_main_rx) = mpsc::channel();
+        self.side.set_tx(from_side_tx);
+
         // main listen
+        let mut main_listen = self.main.clone();
         let main = thread::spawn(move || {
             main_listen.listen();
         });
 
-        // side listen
-
         // main mint
+        let main_mint = self.main.clone();
+        let mint_main = thread::spawn(move || {
+            let mut iter = to_main_rx.iter();
+            while let Some(message) = iter.next() {
+                main_mint.mint(message);
+            }
+        });
+
+        // side listen
+        let mut side_listen = self.side.clone();
+        let side = thread::spawn(move || {
+            side_listen.listen();
+        });
 
         // side mint
         let side_mint = self.side.clone();
-        thread::spawn(move || {
-            let mut iter = main_rx.iter();
+        let mint_side = thread::spawn(move || {
+            let mut iter = to_side_rx.iter();
             while let Some(message) = iter.next() {
                 side_mint.mint(message);
             }
         });
 
+        // No worries about a deadlock. None of these depend on one another.
         main.join().unwrap();
+        side.join().unwrap();
+        mint_side.join().unwrap();
+        mint_main.join().unwrap();
     }
 
     pub fn stop(&mut self) {
@@ -87,7 +116,7 @@ impl Network {
     }
 
     pub fn mint(&self, sender: String) {
-        println!("Sending NCT to {:?}", sender);
+        println!("{:?}", sender);
     }
 
     pub fn listen(&mut self) {

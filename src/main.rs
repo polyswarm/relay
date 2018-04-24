@@ -25,15 +25,23 @@ fn main() {
     
     let config_file = matches.value_of("config")
         .expect("You must pass a config file.");
-
     let configuration = config::read_config(config_file);
 
+    let wallet = configuration.bridge.wallet;
+    // I don't plan on having the password in the config for long. Will prompt.
+    let password = configuration.bridge.password;
+
     let main = configuration.bridge.main;
+    let side = configuration.bridge.side;
 
+    // Stand up the networks in the bridge
     let private = relay::Network::new(&main.name, &main.host, &main.token, &main.relay);
-    let mut bridge = relay::Bridge::new(private.clone(), private.clone());
+    let poa = relay::Network::new(&side.name, &side.host, &side.token, &side.relay);
 
-    // Spawning a thread didn't make me clone twice, but set_handler does.
+    // Create the bridge
+    let mut bridge = relay::Bridge::new(&wallet, &password, private.clone(), poa.clone());
+
+    // Kill the bridge & close subscriptions on Ctrl-C
     let b = bridge.clone();
     ctrlc::set_handler(move || {
         println!("\rExiting...");

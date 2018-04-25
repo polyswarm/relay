@@ -3,9 +3,9 @@ require('babel-polyfill');
 
 module.exports = {
   networks: {
-    development: {
+    homechain: {
       host: 'localhost',
-      port: 8545,
+      port: 6545,
       network_id: '*',
     },
     sidechain: {

@@ -1,0 +1,70 @@
+version: '3'
+services:
+    relay:
+        build:
+            context: ../
+            dockerfile: docker/Dockerfile
+        networks:
+            - homechain
+            - sidechain
+    homechain:
+        build:
+            context: ./homechain
+        command: ["--syncmode", "full", "--networkid", "1337", "--nodiscover", "--rpc", "--rpcaddr", "0.0.0.0", "--rpcvhosts", "localhost,homechain", "--rpcapi", "eth,web3,personal,net", "--ws", "--wsaddr", "0.0.0.0", "--wsapi", "eth,web3,personal,net", "--wsorigins", "*", "--etherbase", "0x31c99a06cabed34f97a78742225f4594d1d16677", "--unlock", "0x31c99a06cabed34f97a78742225f4594d1d16677", "--password", "password.txt"]
+        networks:
+            homechain:
+                ipv4_address: 172.20.0.100
+        ports:
+            - 6545:8545
+            - 6546:8546
+    homechain-sealer:
+        build:
+            context: ./homechain
+        command: ["--syncmode", "full", "--networkid", "1337", "--nodekey", "nodekeys/homechain-sealer", "--nodiscover", "--etherbase", "0x58b6cb03655999e2ff76072d8836051ac5ddcad7", "--unlock", "0x58b6cb03655999e2ff76072d8836051ac5ddcad7", "--password", "password.txt", "--mine"]
+        networks:
+            homechain:
+                ipv4_address: 172.20.0.101
+    sidechain:
+        build:
+            context: ./sidechain
+        command: ["--syncmode", "full", "--networkid", "1338", "--gasprice", "0", "--targetgaslimit", "94000000", "--nodiscover", "--rpc", "--rpcaddr", "0.0.0.0", "--rpcvhosts", "localhost,sidechain", "--rpcapi", "eth,web3,personal,net", "--ws", "--wsaddr", "0.0.0.0", "--wsapi", "eth,web3,personal,net", "--wsorigins", "*", "--etherbase", "0xb8a26662fc7fa93e8d525f6e9d8c90fcdb467aa1", "--unlock", "0xb8a26662fc7fa93e8d525f6e9d8c90fcdb467aa1", "--password", "password.txt"]
+        networks:
+            sidechain:
+                ipv4_address: 172.20.1.100
+        ports:
+            - 7545:8545
+            - 7546:8546
+    sidechain-sealer0:
+        build:
+            context: ./sidechain
+        command: ["--syncmode", "full", "--networkid", "1338", "--gasprice", "0", "--targetgaslimit", "94000000", "--nodekey", "nodekeys/sidechain-sealer0", "--nodiscover", "--etherbase", "0x31c99a06cabed34f97a78742225f4594d1d16677", "--unlock", "0x31c99a06cabed34f97a78742225f4594d1d16677", "--password", "password.txt", "--mine"]
+        networks:
+            sidechain:
+                ipv4_address: 172.20.1.101
+    sidechain-sealer1:
+        build:
+            context: ./sidechain
+        command: ["--syncmode", "full", "--networkid", "1338", "--gasprice", "0", "--targetgaslimit", "94000000", "--nodekey", "nodekeys/sidechain-sealer1", "--nodiscover", "--etherbase", "0x6aae54b496479a25cacb63aa9dc1e578412ee68c", "--unlock", "0x6aae54b496479a25cacb63aa9dc1e578412ee68c", "--password", "password.txt", "--mine"]
+        networks:
+            sidechain:
+                ipv4_address: 172.20.1.102
+    sidechain-sealer2:
+        build:
+            context: ./sidechain
+        command: ["--syncmode", "full", "--networkid", "1338", "--gasprice", "0", "--targetgaslimit", "94000000", "--nodekey", "nodekeys/sidechain-sealer2", "--nodiscover", "--etherbase", "0x850a2f35553f8a79da068323cbc7c9e1842585d5", "--unlock", "0x850a2f35553f8a79da068323cbc7c9e1842585d5", "--password", "password.txt", "--mine"]
+        networks:
+            sidechain:
+                ipv4_address: 172.20.1.103
+networks:
+    homechain:
+        driver: bridge
+        ipam:
+            driver: default
+            config:
+                - subnet: 172.20.0.0/24
+    sidechain:
+        driver: bridge
+        ipam:
+            driver: default
+            config:
+                - subnet: 172.20.1.0/24

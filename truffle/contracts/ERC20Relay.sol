@@ -43,7 +43,7 @@ contract ERC20Relay is Ownable {
 
         for (uint256 i = 0; i < verifiers_.length; i++) {
             verifiers.push(verifiers_[i]);
-            verifierAddressToIndex[verifiers[i]] = i.add(1);
+            verifierAddressToIndex[verifiers_[i]] = i.add(1);
         }
 
         requiredVerifiers = calculateRequiredVerifiers();

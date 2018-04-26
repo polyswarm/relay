@@ -4,10 +4,10 @@ version = "0.1.0"
 authors = ["Maxwell Koo <mjkoo90@gmail.com>", "Robert Lathrop <rl@polyswarm.io>"]
 
 [dependencies]
-web3 = { git = "https://github.com/tomusdrw/rust-web3.git" }
-clap = "2.31.2"
-ethabi = "5.1.1"
-toml = "0.4.6"
+clap = "2.31"
+config = "0.8"
+ctrlc = "3.1"
+ethabi = "5.1"
 serde = "1.0"
 serde_derive = "1.0"
-ctrlc = "3.1.0"
+web3 = { git = "https://github.com/tomusdrw/rust-web3.git" }

@@ -8,79 +8,77 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 
 #[derive(Clone)]
-pub struct Bridge {
+pub struct Relay {
     account: Address,
     password: String,
-    main: Network,
-    side: Network,
+    homechain: Network,
+    sidechain: Network,
 }
 
-impl Bridge {
-    pub fn new(account: &str, password: &str, main: Network, side: Network) -> Bridge {
-        let start = match account.starts_with("0x") {
-            true => 2,
-            false => 0,
-        };
+impl Relay {
+    pub fn new(account: &str, password: &str, homechain: Network, sidechain: Network) -> Relay {
+        let start = if account.starts_with("0x") { 2 } else { 0 };
         let verifier_account: Address = account[start..40 + start]
             .parse()
             .expect("Invalid verifier address.");
-        Bridge {
+
+        Relay {
             account: verifier_account,
             password: password.to_owned(),
-            main,
-            side,
+            homechain,
+            sidechain,
         }
     }
 
     pub fn start(&mut self) {
-        // Create channels for communicating with main network
-        let (from_main_tx, to_side_rx) = mpsc::channel();
-        self.main.set_tx(from_main_tx);
+        // Create channels for communicating with homechain network
+        let (from_homechain_tx, to_sidechain_rx) = mpsc::channel();
+        self.homechain.set_tx(from_homechain_tx);
 
-        // Create channels for communicating with side channel
-        let (from_side_tx, to_main_rx) = mpsc::channel();
-        self.side.set_tx(from_side_tx);
+        // Create channels for communicating with sidechain channel
+        let (from_sidechain_tx, to_homechain_rx) = mpsc::channel();
+        self.sidechain.set_tx(from_sidechain_tx);
 
-        // main listen
-        let mut main_listen = self.main.clone();
-        let main = thread::spawn(move || {
-            main_listen.listen();
+        // homechain listen
+        let mut homechain_listen = self.homechain.clone();
+        let homechain = thread::spawn(move || {
+            homechain_listen.listen();
         });
 
-        // main mint
-        let main_mint = self.main.clone();
-        let mint_main = thread::spawn(move || {
-            let mut iter = to_main_rx.iter();
+        // homechain mint
+        let homechain_mint = self.homechain.clone();
+        let mint_homechain = thread::spawn(move || {
+            let mut iter = to_homechain_rx.iter();
             while let Some(message) = iter.next() {
-                main_mint.mint(message);
+                homechain_mint.mint(message);
             }
         });
 
-        // side listen
-        let mut side_listen = self.side.clone();
-        let side = thread::spawn(move || {
-            side_listen.listen();
+        // sidechain listen
+        let mut sidechain_listen = self.sidechain.clone();
+        let sidechain = thread::spawn(move || {
+            sidechain_listen.listen();
         });
 
-        // side mint
-        let side_mint = self.side.clone();
-        let mint_side = thread::spawn(move || {
-            let mut iter = to_side_rx.iter();
+        // sidechain mint
+        let sidechain_mint = self.sidechain.clone();
+        let mint_sidechain = thread::spawn(move || {
+            let mut iter = to_sidechain_rx.iter();
             while let Some(message) = iter.next() {
-                side_mint.mint(message);
+                sidechain_mint.mint(message);
             }
         });
 
         // No worries about a deadlock. None of these depend on one another.
-        main.join().unwrap();
-        side.join().unwrap();
-        mint_side.join().unwrap();
-        mint_main.join().unwrap();
+        homechain.join().unwrap();
+        sidechain.join().unwrap();
+        mint_sidechain.join().unwrap();
+        mint_homechain.join().unwrap();
     }
 
     pub fn stop(&mut self) {
-        self.main.cancel();
-        self.side.cancel();
+        self.homechain.cancel();
+        self.sidechain.cancel();
     }
 }
 

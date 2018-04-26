@@ -1,11 +1,9 @@
-[bridge.main]
-    name = "Main"
-    host = "ws://localhost:8546"
+[relay.homechain]
+    ws-uri = "ws://localhost:8546"
     token = "c22d711a175d256c99645966a95f544036f2f356"
     relay = "5af8bcc6127afde967279dc04661f599a5c0cafa"
 
-[bridge.side]
-    name = "Side"
-    host = "ws://localhost:8546"
+[relay.sidechain]
+    ws-uri = "ws://localhost:8546"
     token = ""
     relay = ""

@@ -1,9 +1,9 @@
-extern crate web3;
 extern crate ethabi;
+extern crate web3;
 
 use web3::futures::{Future, Stream};
-use web3::types::{FilterBuilder, H160, H256, Bytes, Address};
-use ethabi::{EventParam, Event, ParamType, Hash};
+use web3::types::{Address, Bytes, FilterBuilder, H160, H256};
+use ethabi::{Event, EventParam, Hash, ParamType};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 
@@ -19,9 +19,11 @@ impl Bridge {
     pub fn new(account: &str, password: &str, main: Network, side: Network) -> Bridge {
         let start = match account.starts_with("0x") {
             true => 2,
-            false => 0
+            false => 0,
         };
-        let verifier_account: Address = account[start..40+start].parse().expect("Invalid verifier address.");
+        let verifier_account: Address = account[start..40 + start]
+            .parse()
+            .expect("Invalid verifier address.");
         Bridge {
             account: verifier_account,
             password: password.to_owned(),
@@ -129,14 +131,16 @@ impl Network {
         let event_prototype = Contracts::generate_topic_filter();
 
         // Create filter on our subscription
-        let fb: FilterBuilder = FilterBuilder::default()
-            .address(token);
+        let fb: FilterBuilder = FilterBuilder::default().address(token);
 
         // Start listening to events
         // Open Websocket and create RPC conn
         let (_eloop, ws) = web3::transports::WebSocket::new(&self.host).unwrap();
         let web3 = web3::Web3::new(ws.clone());
-        let mut sub = web3.eth_subscribe().subscribe_logs(fb.build()).wait().unwrap();
+        let mut sub = web3.eth_subscribe()
+            .subscribe_logs(fb.build())
+            .wait()
+            .unwrap();
 
         println!("Got subscription id: {:?}", sub.id());
 
@@ -192,40 +196,42 @@ impl Network {
 /// to generate the log filters (eventually)
 ///
 #[derive(Debug, Clone)]
-pub struct Contracts{
+pub struct Contracts {
     // contract address to subscribe to
     token_addr: Address,
     // Relay contract address (Only care about deposits into that addr)
     relay_addr: Address,
 }
 
-impl Contracts{
-    pub fn new(token: &str, relay: &str) -> Contracts{
+impl Contracts {
+    pub fn new(token: &str, relay: &str) -> Contracts {
         let mut start = match relay.starts_with("0x") {
             true => 2,
-            false => 0
+            false => 0,
         };
         // Create an H160 address from address
-        let token_hex: Address = token[start..40+start].parse().expect("Invalid token address.");
+        let token_hex: Address = token[start..40 + start]
+            .parse()
+            .expect("Invalid token address.");
 
         start = match token.starts_with("0x") {
             true => 2,
-            false => 0
+            false => 0,
         };
-        let relay_hex: Address = relay[start..40+start].parse().expect("Invalid relay address.");
+        let relay_hex: Address = relay[start..40 + start]
+            .parse()
+            .expect("Invalid relay address.");
 
-        Contracts{
+        Contracts {
             token_addr: token_hex,
             relay_addr: relay_hex,
         }
     }
 
-
-
     ///
     /// # Generate Topic Filter
     ///
-    /// This generates the topics[0] filter for listening to a Transfer event. 
+    /// This generates the topics[0] filter for listening to a Transfer event.
     /// Once filters work again, this will be a method and generate the whole
     /// (Option<Vec<H256>, Option<Vec<H256>, Option<Vec<H256>, Option<Vec<H256>)
     /// value.

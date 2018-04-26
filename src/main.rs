@@ -1,10 +1,10 @@
+extern crate clap;
+extern crate ctrlc;
+extern crate ethabi;
 #[macro_use]
 extern crate serde_derive;
 extern crate toml;
-extern crate clap;
 extern crate web3;
-extern crate ethabi;
-extern crate ctrlc;
 
 use clap::{App, Arg};
 
@@ -13,17 +13,20 @@ mod config;
 
 fn main() {
     let matches = App::new("Polyswarm Relay Bridge.")
-                    .version("0.0.1")
-                    .author("Polyswarm Developers <info@polyswarm.io>")
-                    .about("Bridges between two contracts on different networks.")
-                    .arg(Arg::with_name("config")
-                        .value_name("TOML configuration file")
-                        .help("Configures the two networks we will bridge")
-                        .required(true)
-                        .takes_value(true))
-                    .get_matches();
-    
-    let config_file = matches.value_of("config")
+        .version("0.0.1")
+        .author("Polyswarm Developers <info@polyswarm.io>")
+        .about("Bridges between two contracts on different networks.")
+        .arg(
+            Arg::with_name("config")
+                .value_name("TOML configuration file")
+                .help("Configures the two networks we will bridge")
+                .required(true)
+                .takes_value(true),
+        )
+        .get_matches();
+
+    let config_file = matches
+        .value_of("config")
         .expect("You must pass a config file.");
     let configuration = config::read_config(config_file);
 

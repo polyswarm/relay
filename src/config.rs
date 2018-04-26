@@ -24,11 +24,13 @@ pub struct Network {
     pub relay: String,
 }
 
-pub fn read_config(filename :&str) -> Config {
+pub fn read_config(filename: &str) -> Config {
     let mut config = File::open(filename).expect(&format!("File not found."));
     let mut contents = String::new();
 
-    config.read_to_string(&mut contents).expect(&format!("Could not read {}", filename));
+    config
+        .read_to_string(&mut contents)
+        .expect(&format!("Could not read {}", filename));
 
     toml::from_str(&contents).expect(&format!("Could not parse config."))
 }

@@ -1,6 +1,4 @@
-extern crate ethabi;
-extern crate web3;
-
+use web3;
 use web3::futures::{Future, Stream};
 use web3::types::{Address, Bytes, FilterBuilder, H160, H256};
 use ethabi::{Event, EventParam, Hash, ParamType};
@@ -20,7 +18,7 @@ impl Relay {
         let start = if account.starts_with("0x") { 2 } else { 0 };
         let verifier_account: Address = account[start..40 + start]
             .parse()
-            .expect("Invalid verifier address.");
+            .expect("invalid verifier address.");
 
         Relay {
             account: verifier_account,
@@ -210,7 +208,7 @@ impl Contracts {
         // Create an H160 address from address
         let token_hex: Address = token[start..40 + start]
             .parse()
-            .expect("Invalid token address.");
+            .expect("invalid token address.");
 
         start = match token.starts_with("0x") {
             true => 2,
@@ -218,7 +216,7 @@ impl Contracts {
         };
         let relay_hex: Address = relay[start..40 + start]
             .parse()
-            .expect("Invalid relay address.");
+            .expect("invalid relay address.");
 
         Contracts {
             token_addr: token_hex,

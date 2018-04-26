@@ -5,10 +5,15 @@ extern crate ethabi;
 extern crate web3;
 
 #[macro_use]
+extern crate ethabi_contract;
+#[macro_use]
+extern crate ethabi_derive;
+#[macro_use]
 extern crate serde_derive;
 
 use clap::{App, Arg};
 
+mod contracts;
 mod relay;
 mod settings;
 
@@ -31,8 +36,8 @@ fn main() {
 
     let config_file = matches
         .value_of("config")
-        .expect("You must pass a config file.");
-    let settings = Settings::new(config_file).expect("Could not parse config file");
+        .expect("you must pass a config file.");
+    let settings = Settings::new(config_file).expect("could not parse config file");
 
     let wallet = settings.relay.wallet;
     // Let's take the password as either in the config or in an environment variable
@@ -64,7 +69,7 @@ fn main() {
         println!("\rExiting...");
         let mut a = b.clone();
         a.stop();
-    }).expect("Unable to setup Ctrl-C handler.");
+    }).expect("unable to setup Ctrl-C handler.");
 
     // Start relay.
     relay.start();

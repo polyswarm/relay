@@ -30,7 +30,7 @@ impl Settings {
         let mut s = Config::new();
 
         let ps = path.as_ref().to_str()
-            .ok_or(ConfigError::Message("Invalid config path".to_owned()))?;
+            .ok_or(ConfigError::Message("invalid config path".to_owned()))?;
         s.merge(File::with_name(ps))?;
 
         s.try_into()

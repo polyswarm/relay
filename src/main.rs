@@ -1,24 +1,54 @@
+#[macro_use]
+extern crate serde_derive;
+extern crate toml;
+extern crate clap;
 extern crate web3;
+extern crate ethabi;
+extern crate ctrlc;
 
-use web3::futures::{Future, Stream};
+use clap::{App, Arg};
+
+mod relay;
+mod config;
 
 fn main() {
-    let (_eloop, ws) = web3::transports::WebSocket::new("ws://localhost:8546").unwrap();
-    let web3 = web3::Web3::new(ws.clone());
-    let mut sub = web3.eth_subscribe().subscribe_new_heads().wait().unwrap();
+    let matches = App::new("Polyswarm Relay Bridge.")
+                    .version("0.0.1")
+                    .author("Polyswarm Developers <info@polyswarm.io>")
+                    .about("Bridges between two contracts on different networks.")
+                    .arg(Arg::with_name("config")
+                        .value_name("TOML configuration file")
+                        .help("Configures the two networks we will bridge")
+                        .required(true)
+                        .takes_value(true))
+                    .get_matches();
+    
+    let config_file = matches.value_of("config")
+        .expect("You must pass a config file.");
+    let configuration = config::read_config(config_file);
 
-    println!("Got subscription id: {:?}", sub.id());
+    let wallet = configuration.bridge.wallet;
+    // I don't plan on having the password in the config for long. Will prompt.
+    let password = configuration.bridge.password;
 
-    (&mut sub)
-        .take(5)
-        .for_each(|x| {
-            println!("Got: {:?}", x);
-            Ok(())
-        })
-        .wait()
-        .unwrap();
+    let main = configuration.bridge.main;
+    let side = configuration.bridge.side;
 
-    sub.unsubscribe();
+    // Stand up the networks in the bridge
+    let private = relay::Network::new(&main.name, &main.host, &main.token, &main.relay);
+    let poa = relay::Network::new(&side.name, &side.host, &side.token, &side.relay);
 
-    drop(web3);
+    // Create the bridge
+    let mut bridge = relay::Bridge::new(&wallet, &password, private.clone(), poa.clone());
+
+    // Kill the bridge & close subscriptions on Ctrl-C
+    let b = bridge.clone();
+    ctrlc::set_handler(move || {
+        println!("\rExiting...");
+        let mut a = b.clone();
+        a.stop();
+    }).expect("Unable to setup Ctrl-C handler.");
+
+    // Start relay.
+    bridge.start();
 }

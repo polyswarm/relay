@@ -37,21 +37,21 @@ impl<T: DuplexTransport + 'static> Relay<T> {
     }
 
     fn transfer_future(
-        chain0: Arc<Network<T>>,
-        chain1: Arc<Network<T>>,
+        chainA: Arc<Network<T>>,
+        chainB: Arc<Network<T>>,
         handle: &reactor::Handle,
     ) -> Task {
         Box::new({
-            chain0
+            chainA
                 .transfer_stream(&handle)
                 .for_each(move |transfer| {
-                    chain1.process_withdrawal(&transfer);
+                    chainB.process_withdrawal(&transfer);
                     Ok(())
                 })
                 .map_err(move |e| {
                     error!(
                         "error processing withdrawal from {:?}: {:?}",
-                        chain0.network_type(),
+                        chainA.network_type(),
                         e
                     )
                 })
@@ -183,6 +183,11 @@ impl<T: DuplexTransport + 'static> Network<T> {
                             return Ok(());
                         }
 
+                        if log.transaction_hash.is_none() {
+                            warn!("no transaction hash in transfer");
+                            return Ok(());
+                        }
+
                         let tx_hash = log.transaction_hash.unwrap();
                         let destination: Address = log.topics[2].into();
                         let amount: U256 = log.data.0[..32].into();
@@ -222,14 +227,25 @@ impl<T: DuplexTransport + 'static> Network<T> {
                 .subscribe_new_heads()
                 .and_then(move |sub| {
                     sub.for_each(move |head| {
-                        let block_number: U256 = head.number.unwrap_or(0.into()).into();
-                        let block_hash: H256 = head.hash.unwrap_or(0.into());
+                        if head.number.is_none() {
+                            warn!("no block number in anchor");
+                            return Ok(());
+                        }
+
+                        if head.hash.is_none() {
+                            warn!("no block hash in anchor");
+                            return Ok(());
+                        }
+
+                        let block_number: U256 = head.number.unwrap();
+                        let block_hash: H256 = head.hash.unwrap();
 
                         let anchor = Anchor {
                             block_number,
                             block_hash,
                         };
 
+                        trace!("{:?}", &transfer);
                         tx.unbounded_send(anchor).unwrap();
 
                         Ok(())

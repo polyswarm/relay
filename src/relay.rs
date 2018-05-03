@@ -1,262 +1,261 @@
-use web3;
+use std::sync::Arc;
+use tokio_core::reactor;
+use web3::{DuplexTransport, Web3};
 use web3::futures::{Future, Stream};
-use web3::types::{Address, Bytes, FilterBuilder, H160, H256};
-use ethabi::{Event, EventParam, Hash, ParamType};
-use std::sync::{mpsc, Arc, Mutex};
-use std::thread;
+use web3::futures::sync::mpsc;
+use web3::types::{Address, FilterBuilder, H256, U256};
 
-#[derive(Clone)]
-pub struct Relay {
-    account: Address,
-    password: String,
-    homechain: Network,
-    sidechain: Network,
-}
+use super::errors::*;
 
-impl Relay {
-    pub fn new(account: &str, password: &str, homechain: Network, sidechain: Network) -> Relay {
-        let start = if account.starts_with("0x") { 2 } else { 0 };
-        let verifier_account: Address = account[start..40 + start]
-            .parse()
-            .expect("invalid verifier address.");
+// sha3("Transfer(address,address,uint256)")
+const TRANSFER_EVENT_SIGNATURE: &str =
+    "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 
-        Relay {
-            account: verifier_account,
-            password: password.to_owned(),
-            homechain,
-            sidechain,
-        }
-    }
+type Task = Box<Future<Item = (), Error = ()>>;
 
-    pub fn start(&mut self) {
-        // Create channels for communicating with homechain network
-        let (from_homechain_tx, to_sidechain_rx) = mpsc::channel();
-        self.homechain.set_tx(from_homechain_tx);
-
-        // Create channels for communicating with sidechain channel
-        let (from_sidechain_tx, to_homechain_rx) = mpsc::channel();
-        self.sidechain.set_tx(from_sidechain_tx);
-
-        // homechain listen
-        let mut homechain_listen = self.homechain.clone();
-        let homechain = thread::spawn(move || {
-            homechain_listen.listen();
-        });
-
-        // homechain mint
-        let homechain_mint = self.homechain.clone();
-        let mint_homechain = thread::spawn(move || {
-            let mut iter = to_homechain_rx.iter();
-            while let Some(message) = iter.next() {
-                homechain_mint.mint(message);
-            }
-        });
-
-        // sidechain listen
-        let mut sidechain_listen = self.sidechain.clone();
-        let sidechain = thread::spawn(move || {
-            sidechain_listen.listen();
-        });
-
-        // sidechain mint
-        let sidechain_mint = self.sidechain.clone();
-        let mint_sidechain = thread::spawn(move || {
-            let mut iter = to_sidechain_rx.iter();
-            while let Some(message) = iter.next() {
-                sidechain_mint.mint(message);
-            }
-        });
-
-        // No worries about a deadlock. None of these depend on one another.
-        homechain.join().unwrap();
-        sidechain.join().unwrap();
-        mint_sidechain.join().unwrap();
-        mint_homechain.join().unwrap();
-    }
-
-    pub fn stop(&mut self) {
-        self.homechain.cancel();
-        self.sidechain.cancel();
+// From ethereum_types but not reexported by web3
+fn clean_0x(s: &str) -> &str {
+    if s.starts_with("0x") {
+        &s[2..]
+    } else {
+        s
     }
 }
 
-#[derive(Clone)]
-pub struct Network {
-    name: String,
-    host: String,
-    contracts: Contracts,
-    run: Arc<Mutex<bool>>,
-    tx: Arc<Mutex<Option<mpsc::Sender<String>>>>,
-}
-
-impl Network {
-    pub fn new(name: &str, host: &str, token: &str, relay: &str) -> Network {
-        Network {
-            name: name.to_string(),
-            host: host.to_string(),
-            contracts: Contracts::new(token, relay),
-            run: Arc::new(Mutex::new(false)),
-            tx: Arc::new(Mutex::new(None)),
-        }
-    }
-
-    pub fn cancel(&mut self) {
-        *self.run.lock().unwrap() = false;
-        let mut lock = self.tx.lock().unwrap();
-        if let Some(tx) = lock.clone() {
-            drop(tx);
-        }
-        *lock = None;
-    }
-
-    pub fn set_tx(&mut self, sender: mpsc::Sender<String>) {
-        *self.tx.lock().unwrap() = Some(sender);
-    }
-
-    pub fn mint(&self, sender: String) {
-        println!("{:?}", sender);
-    }
-
-    pub fn listen(&mut self) {
-        *self.run.lock().unwrap() = true;
-        let contracts = &self.contracts;
-        // Contractsall logs on the specified address
-        let token = vec![contracts.token_addr];
-
-        // Contractslogs on transfer topic
-        let event_prototype = Contracts::generate_topic_filter();
-
-        // Create filter on our subscription
-        let fb: FilterBuilder = FilterBuilder::default().address(token);
-
-        // Start listening to events
-        // Open Websocket and create RPC conn
-        let (_eloop, ws) = web3::transports::WebSocket::new(&self.host).unwrap();
-        let web3 = web3::Web3::new(ws.clone());
-        let mut sub = web3.eth_subscribe()
-            .subscribe_logs(fb.build())
-            .wait()
-            .unwrap();
-
-        println!("Got subscription id: {:?}", sub.id());
-
-        let arc_run = self.run.clone();
-        let arc_tx = self.tx.clone();
-
-        (&mut sub)
-        /*
-         * Looks like at best, we can kill the subscription after it is cancelled
-         * and geth receives an event. 
-         */
-            .take_while(|_x| {
-                let run = arc_run.lock().unwrap().clone();
-                Ok(run)
-            })
-            .for_each(|x| {
-                /*
-                 * Unfortunately, actually putting a topic filter on the
-                 * subscribe_logs does not work.
-                 */
-                if x.topics[0] == event_prototype
-                    && x.topics[2] == H256::from(&contracts.relay_addr)
-                {
-                    // Fold the data to an amount
-                    let Bytes(d) = x.data;
-                    let amount = d.iter().fold(0, |total:usize, &value| {
-                        let t = total << 8;
-                        t | value.clone() as usize
-                    });
-                    if let Some(tx) = arc_tx.lock().unwrap().clone() {
-                        // Print the transfer event.
-                        let log = format!("{}: Transfer {:?} Nectar from {:?} to {:?} ",
-                            &self.name,
-                            amount,
-                            H160::from(x.topics[1]),
-                            H160::from(x.topics[2]));
-                        tx.send(log).unwrap();
-                    }
-                }
-                Ok(())
-            })
-            .wait()
-            .unwrap();
-        sub.unsubscribe();
-        drop(web3);
-    }
-}
-
-///
-/// # Contracts
-///
-/// This struct points to the relay & token contracts on the network. Use it
-/// to generate the log filters (eventually)
-///
 #[derive(Debug, Clone)]
-pub struct Contracts {
-    // contract address to subscribe to
-    token_addr: Address,
-    // Relay contract address (Only care about deposits into that addr)
-    relay_addr: Address,
+pub struct Relay<T: DuplexTransport> {
+    homechain: Arc<Network<T>>,
+    sidechain: Arc<Network<T>>,
 }
 
-impl Contracts {
-    pub fn new(token: &str, relay: &str) -> Contracts {
-        let mut start = match relay.starts_with("0x") {
-            true => 2,
-            false => 0,
-        };
-        // Create an H160 address from address
-        let token_hex: Address = token[start..40 + start]
-            .parse()
-            .expect("invalid token address.");
-
-        start = match token.starts_with("0x") {
-            true => 2,
-            false => 0,
-        };
-        let relay_hex: Address = relay[start..40 + start]
-            .parse()
-            .expect("invalid relay address.");
-
-        Contracts {
-            token_addr: token_hex,
-            relay_addr: relay_hex,
+impl<T: DuplexTransport + 'static> Relay<T> {
+    pub fn new(homechain: Network<T>, sidechain: Network<T>) -> Self {
+        Self {
+            homechain: Arc::new(homechain),
+            sidechain: Arc::new(sidechain),
         }
     }
 
-    ///
-    /// # Generate Topic Filter
-    ///
-    /// This generates the topics[0] filter for listening to a Transfer event.
-    /// Once filters work again, this will be a method and generate the whole
-    /// (Option<Vec<H256>, Option<Vec<H256>, Option<Vec<H256>, Option<Vec<H256>)
-    /// value.
-    ///
-    fn generate_topic_filter() -> Hash {
-        // event Transfer(address indexed from, address indexed to, uint256 value)
-        let from = EventParam {
-            name: "from".to_string(),
-            kind: ParamType::Address,
-            indexed: true,
+    fn transfer_future(
+        chain0: Arc<Network<T>>,
+        chain1: Arc<Network<T>>,
+        handle: &reactor::Handle,
+    ) -> Task {
+        Box::new({
+            chain0
+                .transfer_stream(&handle)
+                .for_each(move |transfer| {
+                    chain1.process_withdrawal(&transfer);
+                    Ok(())
+                })
+                .map_err(move |e| {
+                    error!(
+                        "error processing withdrawal from {:?}: {:?}",
+                        chain0.network_type(),
+                        e
+                    )
+                })
+        })
+    }
+
+    fn anchor_future(
+        homechain: Arc<Network<T>>,
+        sidechain: Arc<Network<T>>,
+        handle: &reactor::Handle,
+    ) -> Task {
+        Box::new({
+            sidechain
+                .anchor_stream(&handle)
+                .for_each(move |anchor| {
+                    homechain.anchor(&anchor);
+                    Ok(())
+                })
+                .map_err(move |e| {
+                    error!(
+                        "error anchoring from {:?}: {:?}",
+                        sidechain.network_type(),
+                        e
+                    )
+                })
+        })
+    }
+
+    pub fn listen(&self, handle: &reactor::Handle) -> Task {
+        Box::new(
+            Self::anchor_future(self.homechain.clone(), self.sidechain.clone(), handle)
+                .join(
+                    Self::transfer_future(self.homechain.clone(), self.sidechain.clone(), handle)
+                        .join(Self::transfer_future(
+                            self.sidechain.clone(),
+                            self.homechain.clone(),
+                            handle,
+                        )),
+                )
+                .and_then(|_| Ok(())),
+        )
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct Transfer {
+    tx_hash: H256,
+    destination: Address,
+    amount: U256,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct Anchor {
+    block_number: U256,
+    block_hash: H256,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum NetworkType {
+    Home,
+    Side,
+}
+
+#[derive(Debug, Clone)]
+pub struct Network<T: DuplexTransport> {
+    network_type: NetworkType,
+    web3: Web3<T>,
+    token_address: Address,
+    relay_address: Address,
+}
+
+impl<T: DuplexTransport + 'static> Network<T> {
+    pub fn new(network_type: NetworkType, transport: T, token: &str, relay: &str) -> Result<Self> {
+        let web3 = Web3::new(transport);
+        let token_address: Address = clean_0x(token)
+            .parse()
+            .chain_err(|| ErrorKind::InvalidAddress(token.to_owned()))?;
+        let relay_address: Address = clean_0x(relay)
+            .parse()
+            .chain_err(|| ErrorKind::InvalidAddress(relay.to_owned()))?;
+
+        Ok(Self {
+            network_type,
+            web3,
+            token_address,
+            relay_address,
+        })
+    }
+
+    pub fn homechain(transport: T, token: &str, relay: &str) -> Result<Self> {
+        Self::new(NetworkType::Home, transport, token, relay)
+    }
+
+    pub fn sidechain(transport: T, token: &str, relay: &str) -> Result<Self> {
+        Self::new(NetworkType::Side, transport, token, relay)
+    }
+
+    pub fn network_type(&self) -> NetworkType {
+        self.network_type
+    }
+
+    pub fn transfer_stream(
+        &self,
+        handle: &reactor::Handle,
+    ) -> Box<Stream<Item = Transfer, Error = ()>> {
+        let (tx, rx) = mpsc::unbounded();
+        let filter = FilterBuilder::default()
+            .address(vec![self.token_address])
+            .topics(
+                Some(vec![TRANSFER_EVENT_SIGNATURE.into()]),
+                None,
+                Some(vec![self.relay_address.into()]),
+                None,
+            )
+            .build();
+
+        let future = {
+            let network_type = self.network_type;
+            let tx = tx.clone();
+            //let handle = handle.clone();
+
+            self.web3
+                .eth_subscribe()
+                .subscribe_logs(filter)
+                .and_then(move |sub| {
+                    sub.for_each(move |log| {
+                        if Some(true) == log.removed {
+                            warn!("received removed log, revoke votes");
+                            return Ok(());
+                        }
+
+                        let tx_hash = log.transaction_hash.unwrap();
+                        let destination: Address = log.topics[2].into();
+                        let amount: U256 = log.data.0[..32].into();
+
+                        let transfer = Transfer {
+                            tx_hash,
+                            destination,
+                            amount,
+                        };
+
+                        trace!("{:?}", &transfer);
+                        tx.unbounded_send(transfer).unwrap();
+
+                        Ok(())
+                    })
+                })
+                .map_err(move |e| error!("error in {:?} transfer stream: {:?}", network_type, e))
         };
 
-        let to = EventParam {
-            name: "to".to_string(),
-            kind: ParamType::Address,
-            indexed: true,
+        handle.spawn(future);
+
+        Box::new(rx)
+    }
+
+    pub fn anchor_stream(
+        &self,
+        handle: &reactor::Handle,
+    ) -> Box<Stream<Item = Anchor, Error = ()>> {
+        let (tx, rx) = mpsc::unbounded();
+
+        let future = {
+            let network_type = self.network_type;
+            let tx = tx.clone();
+
+            self.web3
+                .eth_subscribe()
+                .subscribe_new_heads()
+                .and_then(move |sub| {
+                    sub.for_each(move |head| {
+                        let block_number: U256 = head.number.unwrap_or(0.into()).into();
+                        let block_hash: H256 = head.hash.unwrap_or(0.into());
+
+                        let anchor = Anchor {
+                            block_number,
+                            block_hash,
+                        };
+
+                        tx.unbounded_send(anchor).unwrap();
+
+                        Ok(())
+                    })
+                })
+                .map_err(move |e| error!("error in {:?} anchor stream: {:?}", network_type, e))
         };
 
-        let value = EventParam {
-            name: "value".to_string(),
-            kind: ParamType::Uint(256),
-            indexed: false,
-        };
+        handle.spawn(future);
 
-        let transfer_event = Event {
-            name: "Transfer".to_string(),
-            inputs: vec![from, to, value],
-            anonymous: false,
-        };
-        transfer_event.signature()
+        Box::new(rx)
+    }
+
+    pub fn process_withdrawal(&self, transfer: &Transfer) -> Box<Future<Item = (), Error = Error>> {
+        println!("{:?}", transfer);
+        Box::new(::web3::futures::future::err("not implemented".into()))
+    }
+
+    pub fn anchor(&self, anchor: &Anchor) -> Box<Future<Item = (), Error = Error>> {
+        println!("{:?}", anchor);
+        Box::new(::web3::futures::future::err("not implemented".into()))
+    }
+}
+
+impl<T: DuplexTransport> Drop for Network<T> {
+    fn drop(&mut self) {
+        println!("DROPPING");
     }
 }

@@ -1,0 +1,9 @@
+[relay.homechain]
+    ws-uri = "ws://localhost:8546"
+    token = "0x7b45280355263ffb4a0abb9d8432b269f4f0ff9a"
+    relay = "0xaf8302a3786a35abeddf19758067adc9a23597e5"
+
+[relay.sidechain]
+    ws-uri = "ws://localhost:8546"
+    token = "0x7b45280355263ffb4a0abb9d8432b269f4f0ff9a"
+    relay = "0xaf8302a3786a35abeddf19758067adc9a23597e5"

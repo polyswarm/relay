@@ -1,29 +1,48 @@
 extern crate clap;
 extern crate config;
 extern crate ctrlc;
-extern crate ethabi;
+extern crate env_logger;
+extern crate tokio_core;
 extern crate web3;
 
 #[macro_use]
-extern crate ethabi_contract;
+extern crate error_chain;
 #[macro_use]
-extern crate ethabi_derive;
+extern crate log;
 #[macro_use]
 extern crate serde_derive;
 
 use clap::{App, Arg};
 
-mod contracts;
+mod errors;
 mod relay;
 mod settings;
 
+use errors::*;
 use relay::{Network, Relay};
 use settings::Settings;
 
-fn main() {
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
+
+fn run() -> Result<()> {
+    // Set up ctrl-c handler
+    let running = Arc::new(AtomicBool::new(true));
+
+    let running_ = running.clone();
+    ctrlc::set_handler(move || {
+        info!("ctrl-c caught, exiting...");
+        running_.store(false, Ordering::SeqCst);
+    })?;
+
+    // Set up logger
+    env_logger::init();
+
+    // Parse options
     let matches = App::new("Polyswarm Relay")
         .version("0.1.0")
-        .author("Polyswarm Developers <info@polyswarm.io>")
+        .author("PolySwarm Developers <info@polyswarm.io>")
         .about("Relays ERC20 tokens between two different networks.")
         .arg(
             Arg::with_name("config")
@@ -33,44 +52,53 @@ fn main() {
                 .takes_value(true),
         )
         .get_matches();
+    let settings = Settings::new(matches.value_of("config"))?;
 
-    let config_file = matches
-        .value_of("config")
-        .expect("you must pass a config file.");
-    let settings = Settings::new(config_file).expect("could not parse config file");
+    // Set up our two websocket connections on the same event loop
+    let mut eloop = tokio_core::reactor::Core::new()?;
+    let home_ws = web3::transports::WebSocket::with_event_loop(
+        &settings.relay.homechain.ws_uri,
+        &eloop.handle(),
+    )?;
+    let side_ws = web3::transports::WebSocket::with_event_loop(
+        &settings.relay.sidechain.ws_uri,
+        &eloop.handle(),
+    )?;
 
-    let wallet = settings.relay.wallet;
-    // Let's take the password as either in the config or in an environment variable
-    let password = settings.relay.password;
-
-    let homechain_cfg = settings.relay.homechain;
-    let sidechain_cfg = settings.relay.sidechain;
-
-    // Stand up the networks in the relay
-    let homechain = Network::new(
-        "homechain",
-        &homechain_cfg.ws_uri,
-        &homechain_cfg.token,
-        &homechain_cfg.relay,
+    let relay = Relay::new(
+        Network::homechain(
+            home_ws.clone(),
+            &settings.relay.homechain.token,
+            &settings.relay.homechain.relay,
+        )?,
+        Network::sidechain(
+            side_ws.clone(),
+            &settings.relay.sidechain.token,
+            &settings.relay.sidechain.relay,
+        )?,
     );
-    let sidechain = Network::new(
-        "sidechain",
-        &sidechain_cfg.ws_uri,
-        &sidechain_cfg.token,
-        &sidechain_cfg.relay,
-    );
 
-    // Create the relay
-    let mut relay = Relay::new(&wallet, &password, homechain, sidechain);
+    eloop.handle().spawn(relay.listen(&eloop.handle()));
 
-    // Kill the relay & close subscriptions on Ctrl-C
-    let b = relay.clone();
-    ctrlc::set_handler(move || {
-        println!("\rExiting...");
-        let mut a = b.clone();
-        a.stop();
-    }).expect("unable to setup Ctrl-C handler.");
+    while running.load(Ordering::SeqCst) {
+        eloop.turn(Some(Duration::from_secs(1)));
+    }
 
-    // Start relay.
-    relay.start();
+    Ok(())
+}
+
+fn main() {
+    if let Err(ref e) = run() {
+        error!("error: {}", e);
+
+        for e in e.iter().skip(1) {
+            error!("caused by: {}", e);
+        }
+
+        if let Some(backtrace) = e.backtrace() {
+            error!("backtrace: {:?}", backtrace);
+        }
+
+        std::process::exit(1);
+    }
 }

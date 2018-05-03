@@ -1,5 +1,7 @@
 use std::path::Path;
-use config::{Config, ConfigError, File};
+use config::{Config, Environment, File};
+
+use super::errors::*;
 
 #[derive(Deserialize, Debug)]
 pub struct Settings {
@@ -8,7 +10,7 @@ pub struct Settings {
 
 #[derive(Deserialize, Debug)]
 pub struct Relay {
-    pub wallet: String,
+    pub account: String,
     pub password: String,
     pub homechain: Network,
     pub sidechain: Network,
@@ -23,16 +25,21 @@ pub struct Network {
 }
 
 impl Settings {
-    pub fn new<P>(path: P) -> Result<Self, ConfigError>
+    pub fn new<P>(path: Option<P>) -> Result<Self>
     where
         P: AsRef<Path>,
     {
         let mut s = Config::new();
 
-        let ps = path.as_ref().to_str()
-            .ok_or(ConfigError::Message("invalid config path".to_owned()))?;
-        s.merge(File::with_name(ps))?;
+        if let Some(p) = path {
+            let ps = p.as_ref()
+                .to_str()
+                .chain_err(|| "invalid config file path")?;
+            s.merge(File::with_name(ps))?;
+        }
 
-        s.try_into()
+        s.merge(Environment::new())?;
+
+        s.try_into().map_err(|e| e.into())
     }
 }

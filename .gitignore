@@ -1,3 +1,7 @@
 *.swp
 /target/
+
+/target
 **/*.rs.bk
+
+/abi/

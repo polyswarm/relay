@@ -26,6 +26,7 @@ contract ERC20Relay is Ownable {
 
     /* Sidechain anchoring */
     struct Anchor {
+        uint256 blockNumber;
         bytes32 blockHash;
         address[] approvals;
     }
@@ -130,11 +131,11 @@ contract ERC20Relay is Ownable {
         }
     }
 
-    function anchor(bytes32 blockHash) external onlyVerifier {
+    function anchor(uint256 blockNumber, bytes32 blockHash) external onlyVerifier {
         if (anchors[anchors.length.sub(1)].blockHash != blockHash) {
             // TODO: Check required number of sigs on last block? What to do if
             // it doesn't validate?
-            anchors.push(Anchor(blockHash, new address[](0)));
+            anchors.push(Anchor(blockNumber, blockHash, new address[](0)));
         }
 
         anchors[anchors.length.sub(1)].approvals.push(msg.sender);

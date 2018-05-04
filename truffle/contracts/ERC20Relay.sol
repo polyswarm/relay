@@ -35,7 +35,7 @@ contract ERC20Relay is Ownable {
 
     ERC20 private token;
 
-    function ERC20Relay(address token_, address[] verifiers_) public {
+    constructor(address token_, address[] verifiers_) public {
         require(token_ != address(0));
         require(verifiers_.length >= MINIMUM_VERIFIERS);
 
@@ -111,7 +111,7 @@ contract ERC20Relay is Ownable {
         _;
     }
 
-    function processWithdrawal(bytes32 txHash, address destination, uint256 amount) external onlyVerifier {
+    function approveWithdrawal(bytes32 txHash, address destination, uint256 amount) external onlyVerifier {
         if (withdrawals[txHash].destination == address(0)) {
             withdrawals[txHash] = Withdrawal(destination, amount, new address[](0));
         }
@@ -129,6 +129,10 @@ contract ERC20Relay is Ownable {
         if (withdrawal.approvals.length >= requiredVerifiers) {
             token.safeTransfer(destination, amount);
         }
+    }
+
+    function unapproveWithdrawal(bytes32 txHash) external onlyVerifier {
+        revert();
     }
 
     function anchor(uint256 blockNumber, bytes32 blockHash) external onlyVerifier {

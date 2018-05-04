@@ -14,5 +14,10 @@ error_chain!{
             description("invalid address"),
             display("invalid address: '{}'", addr),
         }
+
+        InvalidContractAbi {
+            description("invalid contract abi"),
+            display("invalid contract abi"),
+        }
     }
 }

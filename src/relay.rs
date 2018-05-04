@@ -1,15 +1,13 @@
-use std::sync::Arc;
+use std::rc::Rc;
 use tokio_core::reactor;
 use web3::{DuplexTransport, Web3};
+use web3::contract::Contract;
 use web3::futures::{Future, Stream};
 use web3::futures::sync::mpsc;
 use web3::types::{Address, FilterBuilder, H256, U256};
 
+use super::contracts::{ERC20_ABI, ERC20_RELAY_ABI, TRANSFER_EVENT_SIGNATURE};
 use super::errors::*;
-
-// sha3("Transfer(address,address,uint256)")
-const TRANSFER_EVENT_SIGNATURE: &str =
-    "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 
 type Task = Box<Future<Item = (), Error = ()>>;
 
@@ -24,26 +22,26 @@ fn clean_0x(s: &str) -> &str {
 
 #[derive(Debug, Clone)]
 pub struct Relay<T: DuplexTransport> {
-    homechain: Arc<Network<T>>,
-    sidechain: Arc<Network<T>>,
+    homechain: Rc<Network<T>>,
+    sidechain: Rc<Network<T>>,
 }
 
 impl<T: DuplexTransport + 'static> Relay<T> {
     pub fn new(homechain: Network<T>, sidechain: Network<T>) -> Self {
         Self {
-            homechain: Arc::new(homechain),
-            sidechain: Arc::new(sidechain),
+            homechain: Rc::new(homechain),
+            sidechain: Rc::new(sidechain),
         }
     }
 
     fn transfer_future(
-        chain_a: Arc<Network<T>>,
-        chain_b: Arc<Network<T>>,
+        chain_a: Rc<Network<T>>,
+        chain_b: Rc<Network<T>>,
         handle: &reactor::Handle,
     ) -> Task {
         Box::new({
             chain_a
-                .transfer_stream(&handle)
+                .transfer_stream(handle)
                 .for_each(move |transfer| {
                     chain_b.process_withdrawal(&transfer);
                     Ok(())
@@ -59,13 +57,13 @@ impl<T: DuplexTransport + 'static> Relay<T> {
     }
 
     fn anchor_future(
-        homechain: Arc<Network<T>>,
-        sidechain: Arc<Network<T>>,
+        homechain: Rc<Network<T>>,
+        sidechain: Rc<Network<T>>,
         handle: &reactor::Handle,
     ) -> Task {
         Box::new({
             sidechain
-                .anchor_stream(&handle)
+                .anchor_stream(handle)
                 .for_each(move |anchor| {
                     homechain.anchor(&anchor);
                     Ok(())
@@ -115,12 +113,12 @@ pub enum NetworkType {
     Side,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Network<T: DuplexTransport> {
     network_type: NetworkType,
     web3: Web3<T>,
-    token_address: Address,
-    relay_address: Address,
+    token: Contract<T>,
+    relay: Contract<T>,
 }
 
 impl<T: DuplexTransport + 'static> Network<T> {
@@ -133,11 +131,16 @@ impl<T: DuplexTransport + 'static> Network<T> {
             .parse()
             .chain_err(|| ErrorKind::InvalidAddress(relay.to_owned()))?;
 
+        let token = Contract::from_json(web3.eth(), token_address, ERC20_ABI.as_bytes())
+            .chain_err(|| ErrorKind::InvalidContractAbi)?;
+        let relay = Contract::from_json(web3.eth(), relay_address, ERC20_RELAY_ABI.as_bytes())
+            .chain_err(|| ErrorKind::InvalidContractAbi)?;
+
         Ok(Self {
             network_type,
             web3,
-            token_address,
-            relay_address,
+            token,
+            relay,
         })
     }
 
@@ -159,11 +162,11 @@ impl<T: DuplexTransport + 'static> Network<T> {
     ) -> Box<Stream<Item = Transfer, Error = ()>> {
         let (tx, rx) = mpsc::unbounded();
         let filter = FilterBuilder::default()
-            .address(vec![self.token_address])
+            .address(vec![self.token.address()])
             .topics(
                 Some(vec![TRANSFER_EVENT_SIGNATURE.into()]),
                 None,
-                Some(vec![self.relay_address.into()]),
+                Some(vec![self.relay.address().into()]),
                 None,
             )
             .build();

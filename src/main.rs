@@ -56,13 +56,14 @@ fn run() -> Result<()> {
 
     // Set up our two websocket connections on the same event loop
     let mut eloop = tokio_core::reactor::Core::new()?;
+    let handle = eloop.handle();
     let home_ws = web3::transports::WebSocket::with_event_loop(
         &settings.relay.homechain.ws_uri,
-        &eloop.handle(),
+        &handle,
     )?;
     let side_ws = web3::transports::WebSocket::with_event_loop(
         &settings.relay.sidechain.ws_uri,
-        &eloop.handle(),
+        &handle,
     )?;
 
     let relay = Relay::new(
@@ -78,7 +79,7 @@ fn run() -> Result<()> {
         )?,
     );
 
-    eloop.handle().spawn(relay.listen(&eloop.handle()));
+    handle.spawn(relay.listen(&handle));
 
     while running.load(Ordering::SeqCst) {
         eloop.turn(Some(Duration::from_secs(1)));

@@ -37,21 +37,21 @@ impl<T: DuplexTransport + 'static> Relay<T> {
     }
 
     fn transfer_future(
-        chainA: Arc<Network<T>>,
-        chainB: Arc<Network<T>>,
+        chain_a: Arc<Network<T>>,
+        chain_b: Arc<Network<T>>,
         handle: &reactor::Handle,
     ) -> Task {
         Box::new({
-            chainA
+            chain_a
                 .transfer_stream(&handle)
                 .for_each(move |transfer| {
-                    chainB.process_withdrawal(&transfer);
+                    chain_b.process_withdrawal(&transfer);
                     Ok(())
                 })
                 .map_err(move |e| {
                     error!(
                         "error processing withdrawal from {:?}: {:?}",
-                        chainA.network_type(),
+                        chain_a.network_type(),
                         e
                     )
                 })
@@ -237,7 +237,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
                             return Ok(());
                         }
 
-                        let block_number: U256 = head.number.unwrap();
+                        let block_number: U256 = head.number.unwrap().into();
                         let block_hash: H256 = head.hash.unwrap();
 
                         let anchor = Anchor {
@@ -245,7 +245,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
                             block_hash,
                         };
 
-                        trace!("{:?}", &transfer);
+                        trace!("{:?}", &anchor);
                         tx.unbounded_send(anchor).unwrap();
 
                         Ok(())

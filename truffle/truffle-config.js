@@ -3,6 +3,12 @@ require('babel-polyfill');
 
 module.exports = {
   networks: {
+    development: {
+      host: 'localhost',
+      port: 8545,
+      network_id: '*',
+      gas: 4700000,
+    },
     homechain: {
       host: 'localhost',
       port: 6545,
@@ -15,12 +21,6 @@ module.exports = {
       port: 7545,
       network_id: '1338',
       from: '0xb8a26662fc7fa93e8d525f6e9d8c90fcdb467aa1',
-      gas: 4700000,
-    },
-    development: {
-      host: 'localhost',
-      port: 8545,
-      network_id: '*',
       gas: 4700000,
     },
   },

@@ -13,6 +13,7 @@ extern crate log;
 extern crate serde_derive;
 extern crate jsonrpc_core as rpc;
 extern crate parking_lot;
+extern crate serde_json;
 
 use clap::{App, Arg};
 

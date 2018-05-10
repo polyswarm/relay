@@ -281,9 +281,12 @@ impl<T: DuplexTransport> Drop for Network<T> {
 
 
 mod tests {
-    use super::*;
+    use parking_lot::Mutex;
+    use rpc;
+    use serde_json;
     use std::sync::{Arc, atomic};
     use std::collections::BTreeMap;
+    use super::*;
     use tokio_core;
     use web3::helpers;
     use web3::api::SubscriptionId;
@@ -291,8 +294,7 @@ mod tests {
     use web3::futures::sync::{mpsc};
     use web3::transports::Result;
     use web3::{BatchTransport, DuplexTransport, Error, ErrorKind, RequestId, Transport};
-    use parking_lot::Mutex;
-    use rpc;
+    use web3::types::{Log, BlockHeader};
 
     #[test]
     fn should_build_network_with_mock() {
@@ -333,7 +335,6 @@ mod tests {
         let mut eloop = tokio_core::reactor::Core::new().unwrap();
         let mut mock = MockTransport::new();
         mock.clear_rpc();
-        let response = rpc::Value::String("asdf".into());
 
         let finished = eloop.run(mock.execute("eth_accounts", vec![rpc::Value::String("1".into())]));
 
@@ -366,7 +367,6 @@ mod tests {
         let mut eloop = tokio_core::reactor::Core::new().unwrap();
         let mut mock = MockTransport::new();
         mock.clear_rpc();
-        let response = rpc::Value::String("asdf".into());
 
         let requests = vec![
             mock.prepare("eth_accounts", vec![rpc::Value::String("1".into())]),
@@ -396,6 +396,42 @@ mod tests {
         assert!(finished.get(2).unwrap().is_err());
     }
 
+    #[test]
+    fn should_receive_logs_when_emited() {
+        let log = Log {
+            address: "5af8bcc6127afde967279dc04661f599a5c0cafa".parse().unwrap(),
+            topics: Vec::new(),
+            data: Default::default(),
+            block_hash: None,
+            block_number: None,
+            transaction_hash: None,
+            transaction_index: None,
+            log_index: None,
+            transaction_log_index: None,
+            log_type: None,
+            removed: None,   
+        };
+        // Turn Log into an rpc::Value representation
+        let value: rpc::Value = serde_json::to_string(&log).unwrap().into();
+
+        // Create event loop & mock
+        let mut eloop = tokio_core::reactor::Core::new().unwrap();
+        let mock = MockTransport::new();
+
+        // Create future to subscribe and return vec of logs 
+        let subscription_id = SubscriptionId::from("a".to_owned());
+        let stream = mock.subscribe(&subscription_id)
+            .collect();
+
+        // Send log to subscribers
+        mock.emit_log(log);
+        mock.unsubscribe(&subscription_id);
+
+        // Run stream and get back a vector of logs
+        let logs = eloop.run(stream).unwrap();
+        assert_eq!(value, *logs.get(0).unwrap());
+    }
+
     pub type MockTask<T> = Box<Future<Item = T, Error = Error>>;
 
     type Subscription = mpsc::UnboundedSender<rpc::Value>;
@@ -419,9 +455,10 @@ mod tests {
             }
         }
 
-        fn emit_log(&self, log: rpc::Value) {
+        fn emit_log(&self, log: Log) {
+            let value: rpc::Value = serde_json::to_string(&log).unwrap().into();
             for (_id, tx) in self.subscriptions.lock().iter() {
-                tx.unbounded_send(log.clone()).unwrap();
+                tx.unbounded_send(value.clone()).unwrap();
             }
         }
 
@@ -486,7 +523,7 @@ mod tests {
                 for value in responses.remove(0) {
                     batch.push(Ok(value));
                 }
-                for i in batch.len()..requests.len() {
+                for _i in batch.len()..requests.len() {
                     batch.push(Err(ErrorKind::Transport("No data available".into()).into()));
                 }
                 Box::new(future::ok(batch))

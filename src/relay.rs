@@ -303,12 +303,25 @@ mod tests {
     }
 
     #[test]
-    fn should_response_with_add_single_response() {
+    fn should_respond_with_add_single_response() {
         let mut eloop = tokio_core::reactor::Core::new().unwrap();
         let mut mock = MockTransport::new();
         mock.clear_rpc();
         let response = rpc::Value::String("asdf".into());
         mock.add_rpc_response(response.clone());
+
+        let finished = eloop.run(mock.execute("eth_accounts", vec![rpc::Value::String("1".into())])).unwrap();
+
+        assert_eq!(finished, response);
+    }
+
+        #[test]
+    fn should_respond_normally_even_with_extra_data() {
+        let mut eloop = tokio_core::reactor::Core::new().unwrap();
+        let mut mock = MockTransport::new();
+        mock.clear_rpc();
+        let response = rpc::Value::String("asdf".into());
+        mock.add_batch_rpc_response(vec![response.clone(), response.clone(), response.clone()]);
 
         let finished = eloop.run(mock.execute("eth_accounts", vec![rpc::Value::String("1".into())])).unwrap();
 

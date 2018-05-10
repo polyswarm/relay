@@ -278,3 +278,135 @@ impl<T: DuplexTransport> Drop for Network<T> {
         println!("DROPPING");
     }
 }
+
+
+mod tests {
+    use super::*;
+    use std::sync::{Arc, atomic};
+    use std::collections::BTreeMap;
+    use web3::helpers;
+    use web3::api::SubscriptionId;
+    use web3::futures::{Future, Stream, future};
+    use web3::futures::sync::{mpsc};
+    use web3::transports::Result;
+    use web3::{BatchTransport, DuplexTransport, Error, ErrorKind, RequestId, Transport};
+    use parking_lot::Mutex;
+    use rpc;
+
+    #[test]
+    fn asdf() {
+        assert!(true);
+    }
+
+    pub type MockTask<T> = Box<Future<Item = T, Error = Error>>;
+
+    type Subscription = mpsc::UnboundedSender<rpc::Value>;
+
+    #[derive(Debug, Clone)]
+    struct MockTransport {
+        id: Arc<atomic::AtomicUsize>,
+        responses: Arc<Mutex<Vec<Vec<rpc::Value>>>>,
+        subscriptions: Arc<Mutex<BTreeMap<SubscriptionId, Subscription>>>
+    }
+
+    impl MockTransport {
+        fn new() -> Self {
+            let id = Arc::new(atomic::AtomicUsize::new(1));
+            let responses: Arc<Mutex<Vec<Vec<rpc::Value>>>> = Default::default();
+            let subscriptions: Arc<Mutex<BTreeMap<SubscriptionId, Subscription>>> = Default::default();
+            MockTransport {
+                id,
+                responses,
+                subscriptions,
+            }
+        }
+
+        fn emit_log(&self, log: rpc::Value) {
+            for (_id, tx) in self.subscriptions.lock().iter() {
+                tx.unbounded_send(log.clone()).unwrap();
+            }
+        }
+
+        fn emit_head(&self, head: rpc::Value) {
+            for (_id, tx) in self.subscriptions.lock().iter() {
+                tx.unbounded_send(head.clone()).unwrap();
+            }
+        }
+
+        fn add_rpc_response(&mut self, response: rpc::Value) {
+            self.add_batch_rpc_response(vec![response]);
+        }
+
+        fn add_batch_rpc_response(&mut self, responses: Vec<rpc::Value>) {
+            self.responses.lock().push(responses);
+        }
+
+        fn clear_rpc(&mut self) {
+            let mut vec = self.responses.lock();
+            *vec = Vec::new();
+        }
+    }
+
+    impl Transport for MockTransport {
+        type Out = MockTask<rpc::Value>;
+
+        fn prepare(&self, method: &str, params: Vec<rpc::Value>) -> (RequestId, rpc::Call) {
+            let id = self.id.fetch_add(1, atomic::Ordering::AcqRel);
+            let call = helpers::build_request(id, method, params);
+            (id, call)
+        }
+
+        fn send(&self, _id: RequestId, _request: rpc::Call) -> Self::Out {
+            let mut responses = self.responses.lock();
+            if responses.len() > 0 {
+                let response = responses.remove(0);
+                match response.into_iter().next() {
+                    Some(value) => {
+                        Box::new(future::ok(value))
+                    },
+                    None => {
+                        Box::new(future::err(ErrorKind::Transport("No data available".into()).into()))
+                    }
+                }
+            } else {
+                Box::new(future::err(ErrorKind::Transport("No data available".into()).into()))
+            }
+        }
+    }
+
+    impl BatchTransport for MockTransport {
+        type Batch = MockTask<Vec<Result<rpc::Value>>>;
+
+        fn send_batch<T>(&self, _requests: T) -> Self::Batch
+        where
+            T: IntoIterator<Item = (RequestId, rpc::Call)>
+        {
+            let mut responses = self.responses.lock();
+            if responses.len() > 0 {
+                let mut batch = Vec::new();
+                for value in responses.remove(0) {
+                    batch.push(Ok(value));
+                }
+                Box::new(future::ok(batch))
+            } else {
+                Box::new(future::err(ErrorKind::Transport("No data available".into()).into()))
+            }
+        }
+    }
+
+    impl DuplexTransport for MockTransport {
+        type NotificationStream = Box<Stream<Item = rpc::Value, Error = Error> + Send + 'static>;
+
+        fn subscribe(&self, id: &SubscriptionId) -> Self::NotificationStream {
+            let (tx, rx) = mpsc::unbounded();
+            if self.subscriptions.lock().insert(id.clone(), tx).is_some() {
+                warn!("Replacing subscription with id {:?}", id);
+            }
+            Box::new(rx.map_err(|()| ErrorKind::Transport("No data available".into()).into()))
+        }
+
+        fn unsubscribe(&self, id: &SubscriptionId) {
+            self.subscriptions.lock().remove(id);
+        }
+    }
+}

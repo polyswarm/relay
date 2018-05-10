@@ -11,6 +11,8 @@ extern crate error_chain;
 extern crate log;
 #[macro_use]
 extern crate serde_derive;
+extern crate jsonrpc_core as rpc;
+extern crate parking_lot;
 
 use clap::{App, Arg};
 

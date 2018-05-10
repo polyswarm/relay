@@ -14,8 +14,9 @@ ctrlc = "3.1"
 env_logger = "0.5"
 error-chain = "0.11"
 log = "0.4"
+jsonrpc-core = "8.0.1"
+parking_lot = "0.5"
 serde = "1.0"
 serde_derive = "1.0"
 tokio-core = "0.1"
-web3 = { path = "../rust-web3" }
-#web3 = { git = "https://github.com/polyswarm/rust-web3.git", branch = "relay" }
+web3 = { git = "https://github.com/polyswarm/rust-web3.git", branch = "relay" }

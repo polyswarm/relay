@@ -294,7 +294,7 @@ mod tests {
     use web3::futures::sync::{mpsc};
     use web3::transports::Result;
     use web3::{BatchTransport, DuplexTransport, Error, ErrorKind, RequestId, Transport};
-    use web3::types::{Log, BlockHeader};
+    use web3::types::{Log, BlockHeader, H2048, U256, H160, H256};
 
     #[test]
     fn should_build_network_with_mock() {
@@ -432,6 +432,45 @@ mod tests {
         assert_eq!(value, *logs.get(0).unwrap());
     }
 
+    #[test]
+    fn should_receive_header_when_emited() {
+        let header = BlockHeader {
+            hash: None,
+            parent_hash: H256::new(),
+            uncles_hash: H256::new(),
+            author: H160::new(),
+            state_root: H256::new(),
+            transactions_root: H256::new(),
+            receipts_root: H256::new(),
+            number: None,
+            gas_used: U256::from(1),
+            gas_limit: U256::from(1),
+            extra_data: Default::default(),
+            logs_bloom: H2048::new(),
+            timestamp: U256::from(1),
+            difficulty: U256::from(1),
+        };
+        // Turn Log into an rpc::Value representation
+        let value: rpc::Value = serde_json::to_string(&header).unwrap().into();
+
+        // Create event loop & mock
+        let mut eloop = tokio_core::reactor::Core::new().unwrap();
+        let mock = MockTransport::new();
+
+        // Create future to subscribe and return vec of logs 
+        let subscription_id = SubscriptionId::from("a".to_owned());
+        let stream = mock.subscribe(&subscription_id)
+            .collect();
+
+        // Send log to subscribers
+        mock.emit_head(header);
+        mock.unsubscribe(&subscription_id);
+
+        // Run stream and get back a vector of logs
+        let headers = eloop.run(stream).unwrap();
+        assert_eq!(value, *headers.get(0).unwrap());
+    }
+
     pub type MockTask<T> = Box<Future<Item = T, Error = Error>>;
 
     type Subscription = mpsc::UnboundedSender<rpc::Value>;
@@ -462,9 +501,10 @@ mod tests {
             }
         }
 
-        fn emit_head(&self, head: rpc::Value) {
+        fn emit_head(&self, head: BlockHeader) {
+            let value: rpc::Value = serde_json::to_string(&head).unwrap().into();
             for (_id, tx) in self.subscriptions.lock().iter() {
-                tx.unbounded_send(head.clone()).unwrap();
+                tx.unbounded_send(value.clone()).unwrap();
             }
         }
 

@@ -21,6 +21,7 @@ mod contracts;
 mod errors;
 mod relay;
 mod settings;
+mod mock;
 
 use errors::*;
 use relay::{Network, Relay};

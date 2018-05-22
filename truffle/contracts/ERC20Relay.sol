@@ -20,18 +20,33 @@ contract ERC20Relay is Ownable {
         address destination;
         uint256 amount;
         address[] approvals;
+        bool processed;
     }
 
     mapping (bytes32 => Withdrawal) public withdrawals;
 
+    event WithdrawalProcessed(
+        address indexed destination,
+        uint256 amount,
+        bytes32 txHash,
+        bytes32 blockHash,
+        uint256 blockNumber
+    );
+
     /* Sidechain anchoring */
     struct Anchor {
-        uint256 blockNumber;
         bytes32 blockHash;
+        uint256 blockNumber;
         address[] approvals;
+        bool processed;
     }
 
     Anchor[] public anchors;
+
+    event AnchoredBlock(
+        bytes32 indexed blockHash,
+        uint256 indexed blockNumber
+    );
 
     ERC20 private token;
 
@@ -58,24 +73,26 @@ contract ERC20Relay is Ownable {
 
     // TODO: Allow existing verifiers to vote on adding/removing others
     function addVerifier(address addr) external onlyOwner {
+        require(addr != address(0));
         require(verifierAddressToIndex[addr] == 0);
 
         uint256 index = verifiers.push(addr);
-        verifierAddressToIndex[addr] = index;
+        verifierAddressToIndex[addr] = index.sub(1);
 
         requiredVerifiers = calculateRequiredVerifiers();
     }
 
     // TODO: Allow existing verifiers to vote on adding/removing others
     function removeVerifier(address addr) external onlyOwner {
+        require(addr != address(0));
         require(verifierAddressToIndex[addr] != 0);
-        require(verifiers.length.sub(1) >= MINIMUM_VERIFIERS);
+        require(verifiers.length.sub(1) > MINIMUM_VERIFIERS);
 
         uint256 index = verifierAddressToIndex[addr];
         require(verifiers[index] == addr);
         verifiers[index] = verifiers[verifiers.length.sub(1)];
-        delete verifiers[verifiers.length.sub(1)];
         delete verifierAddressToIndex[addr];
+        verifiers.length--;
 
         requiredVerifiers = calculateRequiredVerifiers();
     }
@@ -111,37 +128,103 @@ contract ERC20Relay is Ownable {
         _;
     }
 
-    function approveWithdrawal(bytes32 txHash, address destination, uint256 amount) external onlyVerifier {
-        if (withdrawals[txHash].destination == address(0)) {
-            withdrawals[txHash] = Withdrawal(destination, amount, new address[](0));
+    function approveWithdrawal(
+        address destination,
+        uint256 amount,
+        bytes32 txHash,
+        bytes32 blockHash,
+        uint256 blockNumber
+    )
+        external
+        onlyVerifier
+    {
+        bytes32 hash = keccak256(txHash, blockHash, blockNumber);
+
+        if (withdrawals[hash].destination == address(0)) {
+            withdrawals[hash] = Withdrawal(destination, amount, new address[](0), false);
         }
 
-        Withdrawal storage withdrawal = withdrawals[txHash];
-        require(withdrawal.destination == destination);
-        require(withdrawal.amount == amount);
+        Withdrawal storage w = withdrawals[hash];
+        require(w.destination == destination);
+        require(w.amount == amount);
 
-        for (uint256 i = 0; i < withdrawal.approvals.length; i++) {
-            require(withdrawal.approvals[i] != msg.sender);
+        for (uint256 i = 0; i < w.approvals.length; i++) {
+            require(w.approvals[i] != msg.sender);
         }
 
-        withdrawal.approvals.push(msg.sender);
+        w.approvals.push(msg.sender);
 
-        if (withdrawal.approvals.length >= requiredVerifiers) {
+        if (w.approvals.length >= requiredVerifiers && !w.processed) {
             token.safeTransfer(destination, amount);
+            w.processed = true;
+            emit WithdrawalProcessed(destination, amount, txHash, blockHash, blockNumber);
         }
     }
 
-    function unapproveWithdrawal(bytes32 txHash) external onlyVerifier {
-        revert();
+    // Allow verifiers to retract their withdrawals in the case of a chain
+    // reorganization. This shouldn't happen but is possible.
+    function unapproveWithdrawal(
+        bytes32 txHash,
+        bytes32 blockHash,
+        uint256 blockNumber
+    )
+        external
+        onlyVerifier
+    {
+        bytes32 hash = keccak256(txHash, blockHash, blockNumber);
+        require(withdrawals[hash].destination != address(0));
+
+        Withdrawal storage w = withdrawals[hash];
+        require(!w.processed);
+
+        uint256 length = w.approvals.length;
+        for (uint256 i = 0; i < length; i++) {
+            if (w.approvals[i] == msg.sender) {
+                w.approvals[i] = w.approvals[length.sub(1)];
+                delete w.approvals[i];
+                w.approvals.length--;
+                break;
+            }
+        }
     }
 
-    function anchor(uint256 blockNumber, bytes32 blockHash) external onlyVerifier {
-        if (anchors[anchors.length.sub(1)].blockHash != blockHash) {
+    function anchor(bytes32 blockHash, uint256 blockNumber) external onlyVerifier {
+        if (anchors.length == 0 ||
+            anchors[anchors.length.sub(1)].blockHash != blockHash ||
+            anchors[anchors.length.sub(1)].blockNumber != blockNumber) {
+
             // TODO: Check required number of sigs on last block? What to do if
             // it doesn't validate?
-            anchors.push(Anchor(blockNumber, blockHash, new address[](0)));
+            anchors.push(Anchor(blockHash, blockNumber, new address[](0), false));
         }
 
-        anchors[anchors.length.sub(1)].approvals.push(msg.sender);
+        Anchor storage a = anchors[anchors.length.sub(1)];
+        require(a.blockHash == blockHash);
+        require(a.blockNumber == blockNumber);
+
+        for (uint256 i = 0; i < a.approvals.length; i++) {
+            require(a.approvals[i] != msg.sender);
+        }
+
+        a.approvals.push(msg.sender);
+        if (a.approvals.length >= requiredVerifiers && !a.processed) {
+            a.processed = true;
+            emit AnchoredBlock(blockHash, blockNumber);
+        }
+    }
+
+    function unanchor() external onlyVerifier {
+        Anchor storage a = anchors[anchors.length.sub(1)];
+        require(!a.processed);
+
+        uint256 length = a.approvals.length;
+        for (uint256 i = 0; i < length; i++) {
+            if (a.approvals[i] == msg.sender) {
+                a.approvals[i] = a.approvals[length.sub(1)];
+                delete a.approvals[i];
+                a.approvals.length--;
+                break;
+            }
+        }
     }
 }

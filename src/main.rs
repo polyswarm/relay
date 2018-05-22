@@ -21,6 +21,8 @@ mod contracts;
 mod errors;
 mod relay;
 mod settings;
+
+#[cfg(test)]
 mod mock;
 
 use errors::*;

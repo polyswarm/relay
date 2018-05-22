@@ -272,9 +272,3 @@ impl<T: DuplexTransport + 'static> Network<T> {
         Box::new(::web3::futures::future::err("not implemented".into()))
     }
 }
-
-impl<T: DuplexTransport> Drop for Network<T> {
-    fn drop(&mut self) {
-        println!("DROPPING");
-    }
-}

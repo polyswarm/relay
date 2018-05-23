@@ -9,10 +9,10 @@ extern crate web3;
 extern crate error_chain;
 #[macro_use]
 extern crate log;
-#[macro_use]
-extern crate serde_derive;
 extern crate jsonrpc_core as rpc;
 extern crate parking_lot;
+#[macro_use]
+extern crate serde_derive;
 extern crate serde_json;
 
 use clap::{App, Arg};
@@ -29,8 +29,8 @@ use errors::*;
 use relay::{Network, Relay};
 use settings::Settings;
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 fn run() -> Result<()> {
@@ -74,11 +74,15 @@ fn run() -> Result<()> {
             home_ws.clone(),
             &settings.relay.homechain.token,
             &settings.relay.homechain.relay,
+            settings.relay.confirmations,
+            settings.relay.anchor_frequency,
         )?,
         Network::sidechain(
             side_ws.clone(),
             &settings.relay.sidechain.token,
             &settings.relay.sidechain.relay,
+            settings.relay.confirmations,
+            settings.relay.anchor_frequency,
         )?,
     );
 

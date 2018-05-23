@@ -1,10 +1,10 @@
 extern crate glob;
 extern crate serde_json;
 
+use glob::glob;
 use std::fs::File;
 use std::path::PathBuf;
 use std::process::Command;
-use glob::glob;
 
 fn main() {
     for entry in glob("truffle/contracts/*.sol").unwrap() {

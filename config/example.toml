@@ -1,9 +1,12 @@
+[relay]
+confirmations = 2000
+
 [relay.homechain]
     ws-uri = "ws://localhost:8546"
-    token = "0xd143ed6591c0f11c3b9e279bc4a5932958caac08"
-    relay = "0x34e583cf9c1789c3141538eec77d9f0b8f7e89f2"
+    token = "0x273f0a1f19478605e8ee50fa309a933f2a04584b"
+    relay = "0x11c60f7c6a3b5d01fb051a81cdcbb144280da8e4"
 
 [relay.sidechain]
     ws-uri = "ws://localhost:8546"
-    token = "0xd143ed6591c0f11c3b9e279bc4a5932958caac08"
-    relay = "0x34e583cf9c1789c3141538eec77d9f0b8f7e89f2"
+    token = "0x273f0a1f19478605e8ee50fa309a933f2a04584b"
+    relay = "0x11c60f7c6a3b5d01fb051a81cdcbb144280da8e4"

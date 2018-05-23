@@ -1,10 +1,12 @@
 use std::rc::Rc;
+use std::time;
 use tokio_core::reactor;
-use web3::{DuplexTransport, Web3};
+use web3::confirm::wait_for_transaction_confirmation;
 use web3::contract::Contract;
-use web3::futures::{Future, Stream};
 use web3::futures::sync::mpsc;
+use web3::futures::{Future, Stream};
 use web3::types::{Address, FilterBuilder, H256, U256};
+use web3::{DuplexTransport, Web3};
 
 use super::contracts::{ERC20_ABI, ERC20_RELAY_ABI, TRANSFER_EVENT_SIGNATURE};
 use super::errors::*;
@@ -96,15 +98,17 @@ impl<T: DuplexTransport + 'static> Relay<T> {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Transfer {
-    tx_hash: H256,
     destination: Address,
     amount: U256,
+    tx_hash: H256,
+    block_hash: H256,
+    block_number: U256,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Anchor {
-    block_number: U256,
     block_hash: H256,
+    block_number: U256,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -119,10 +123,19 @@ pub struct Network<T: DuplexTransport> {
     web3: Web3<T>,
     token: Contract<T>,
     relay: Contract<T>,
+    confirmations: u32,
+    anchor_frequency: u32,
 }
 
 impl<T: DuplexTransport + 'static> Network<T> {
-    pub fn new(network_type: NetworkType, transport: T, token: &str, relay: &str) -> Result<Self> {
+    pub fn new(
+        network_type: NetworkType,
+        transport: T,
+        token: &str,
+        relay: &str,
+        confirmations: u32,
+        anchor_frequency: u32,
+    ) -> Result<Self> {
         let web3 = Web3::new(transport);
         let token_address: Address = clean_0x(token)
             .parse()
@@ -141,15 +154,43 @@ impl<T: DuplexTransport + 'static> Network<T> {
             web3,
             token,
             relay,
+            confirmations,
+            anchor_frequency,
         })
     }
 
-    pub fn homechain(transport: T, token: &str, relay: &str) -> Result<Self> {
-        Self::new(NetworkType::Home, transport, token, relay)
+    pub fn homechain(
+        transport: T,
+        token: &str,
+        relay: &str,
+        confirmations: u32,
+        anchor_frequency: u32,
+    ) -> Result<Self> {
+        Self::new(
+            NetworkType::Home,
+            transport,
+            token,
+            relay,
+            confirmations,
+            anchor_frequency,
+        )
     }
 
-    pub fn sidechain(transport: T, token: &str, relay: &str) -> Result<Self> {
-        Self::new(NetworkType::Side, transport, token, relay)
+    pub fn sidechain(
+        transport: T,
+        token: &str,
+        relay: &str,
+        confirmations: u32,
+        anchor_frequency: u32,
+    ) -> Result<Self> {
+        Self::new(
+            NetworkType::Side,
+            transport,
+            token,
+            relay,
+            confirmations,
+            anchor_frequency,
+        )
     }
 
     pub fn network_type(&self) -> NetworkType {
@@ -173,8 +214,9 @@ impl<T: DuplexTransport + 'static> Network<T> {
 
         let future = {
             let network_type = self.network_type;
-            let tx = tx.clone();
-            //let handle = handle.clone();
+            let confirmations = self.confirmations as usize;
+            let handle = handle.clone();
+            let transport = self.web3.transport().clone();
 
             self.web3
                 .eth_subscribe()
@@ -186,25 +228,46 @@ impl<T: DuplexTransport + 'static> Network<T> {
                             return Ok(());
                         }
 
-                        if log.transaction_hash.is_none() {
-                            warn!("no transaction hash in transfer");
-                            return Ok(());
-                        }
+                        log.transaction_hash.map_or_else(
+                            || {
+                                warn!("log missing transaction hash");
+                                Ok(())
+                            },
+                            |tx_hash| {
+                                let tx = tx.clone();
+                                let destination: Address = log.topics[2].into();
+                                let amount: U256 = log.data.0[..32].into();
 
-                        let tx_hash = log.transaction_hash.unwrap();
-                        let destination: Address = log.topics[2].into();
-                        let amount: U256 = log.data.0[..32].into();
+                                trace!("received transfer event in tx hash {:?}, waiting for confirmations", &tx_hash);
 
-                        let transfer = Transfer {
-                            tx_hash,
-                            destination,
-                            amount,
-                        };
+                                &handle.spawn(
+                                    wait_for_transaction_confirmation(
+                                        transport.clone(),
+                                        tx_hash,
+                                        time::Duration::from_secs(1),
+                                        confirmations,
+                                    ).and_then(move |receipt| {
+                                        let block_hash = receipt.block_hash;
+                                        let block_number = receipt.block_number;
 
-                        trace!("{:?}", &transfer);
-                        tx.unbounded_send(transfer).unwrap();
+                                        let transfer = Transfer {
+                                            destination,
+                                            amount,
+                                            tx_hash,
+                                            block_hash,
+                                            block_number,
+                                        };
 
-                        Ok(())
+                                        trace!("{:?}", &transfer);
+                                        tx.unbounded_send(transfer).unwrap();
+                                        Ok(())
+                                    })
+                                        .map_err(|_| ()),
+                                );
+
+                                Ok(())
+                            },
+                        )
                     })
                 })
                 .map_err(move |e| error!("error in {:?} transfer stream: {:?}", network_type, e))
@@ -244,8 +307,8 @@ impl<T: DuplexTransport + 'static> Network<T> {
                         let block_hash: H256 = head.hash.unwrap();
 
                         let anchor = Anchor {
-                            block_number,
                             block_hash,
+                            block_number,
                         };
 
                         trace!("{:?}", &anchor);
@@ -263,12 +326,12 @@ impl<T: DuplexTransport + 'static> Network<T> {
     }
 
     pub fn process_withdrawal(&self, transfer: &Transfer) -> Box<Future<Item = (), Error = Error>> {
-        println!("{:?}", transfer);
+        trace!("processing withdrawal {:?}", transfer);
         Box::new(::web3::futures::future::err("not implemented".into()))
     }
 
     pub fn anchor(&self, anchor: &Anchor) -> Box<Future<Item = (), Error = Error>> {
-        println!("{:?}", anchor);
+        trace!("anchoring block {:?}", anchor);
         Box::new(::web3::futures::future::err("not implemented".into()))
     }
 }

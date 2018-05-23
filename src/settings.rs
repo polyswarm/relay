@@ -3,20 +3,22 @@ use config::{Config, Environment, File};
 
 use super::errors::*;
 
-#[derive(Deserialize, Debug)]
+#[derive(Debug, Deserialize)]
 pub struct Settings {
     pub relay: Relay,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Debug, Deserialize)]
 pub struct Relay {
     pub account: String,
     pub password: String,
+    pub confirmations: u32,
+    pub anchor_frequency: u32,
     pub homechain: Network,
     pub sidechain: Network,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Network {
     pub ws_uri: String,
@@ -30,6 +32,9 @@ impl Settings {
         P: AsRef<Path>,
     {
         let mut s = Config::new();
+
+        s.set_default("relay.confirmations", 12)?;
+        s.set_default("relay.anchor_frequency", 100)?;
 
         if let Some(p) = path {
             let ps = p.as_ref()

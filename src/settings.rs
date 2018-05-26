@@ -37,9 +37,7 @@ impl Settings {
         c.set_default("relay.anchor_frequency", 100)?;
 
         if let Some(p) = path {
-            let ps = p.as_ref()
-                .to_str()
-                .chain_err(|| ErrorKind::InvalidConfigFilePath)?;
+            let ps = p.as_ref().to_str().chain_err(|| ErrorKind::InvalidConfigFilePath)?;
             c.merge(File::with_name(ps))?;
         }
 

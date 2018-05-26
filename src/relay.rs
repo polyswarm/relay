@@ -1,3 +1,4 @@
+use std::fmt;
 use std::rc::Rc;
 use std::time;
 use tokio_core::reactor;
@@ -39,19 +40,12 @@ impl<T: DuplexTransport + 'static> Relay<T> {
         chain_b: Rc<Network<T>>,
         handle: &reactor::Handle,
     ) -> impl Future<Item = (), Error = ()> {
-        chain_a
-            .transfer_stream(handle)
-            .for_each(move |transfer| {
-                chain_b.process_withdrawal(&transfer);
+        chain_a.transfer_stream(handle).for_each(move |transfer| {
+            chain_b.approve_withdrawal(&transfer).or_else(|e| {
+                error!("error approving withdrawal: {}", e);
                 Ok(())
             })
-            .map_err(move |e| {
-                error!(
-                    "error processing withdrawal from {:?}: {:?}",
-                    chain_a.network_type(),
-                    e
-                )
-            })
+        })
     }
 
     fn anchor_future(
@@ -59,19 +53,12 @@ impl<T: DuplexTransport + 'static> Relay<T> {
         sidechain: Rc<Network<T>>,
         handle: &reactor::Handle,
     ) -> impl Future<Item = (), Error = ()> {
-        sidechain
-            .anchor_stream(handle)
-            .for_each(move |anchor| {
-                homechain.anchor(&anchor);
+        sidechain.anchor_stream(handle).for_each(move |anchor| {
+            homechain.anchor(&anchor).or_else(|e| {
+                error!("error anchoring block: {}", e);
                 Ok(())
             })
-            .map_err(move |e| {
-                error!(
-                    "error anchoring from {:?}: {:?}",
-                    sidechain.network_type(),
-                    e
-                )
-            })
+        })
     }
 
     pub fn listen(&self, handle: &reactor::Handle) -> impl Future<Item = (), Error = ()> {
@@ -94,10 +81,26 @@ pub struct Transfer {
     block_number: U256,
 }
 
+impl fmt::Display for Transfer {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "({} -> {:?}, hash: {:?})",
+            self.amount, self.destination, self.tx_hash
+        )
+    }
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Anchor {
     block_hash: H256,
     block_number: U256,
+}
+
+impl fmt::Display for Anchor {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "(#{}, hash: {:?})", self.block_number, self.block_hash)
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -182,14 +185,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
         )
     }
 
-    pub fn network_type(&self) -> NetworkType {
-        self.network_type
-    }
-
-    pub fn transfer_stream(
-        &self,
-        handle: &reactor::Handle,
-    ) -> impl Stream<Item = Transfer, Error = ()> {
+    pub fn transfer_stream(&self, handle: &reactor::Handle) -> impl Stream<Item = Transfer, Error = ()> {
         let (tx, rx) = mpsc::unbounded();
         let filter = FilterBuilder::default()
             .address(vec![self.token.address()])
@@ -227,7 +223,10 @@ impl<T: DuplexTransport + 'static> Network<T> {
                                 let destination: Address = log.topics[2].into();
                                 let amount: U256 = log.data.0[..32].into();
 
-                                trace!("received transfer event in tx hash {:?}, waiting for confirmations", &tx_hash);
+                                info!(
+                                    "received transfer event in tx hash {:?}, waiting for confirmations",
+                                    &tx_hash
+                                );
 
                                 &handle.spawn(
                                     wait_for_transaction_confirmation(
@@ -247,18 +246,13 @@ impl<T: DuplexTransport + 'static> Network<T> {
                                             block_number,
                                         };
 
-                                        trace!(
-                                            "transfer event confirmed, approving {:?}",
-                                            &transfer
-                                        );
+                                        info!("transfer event confirmed, approving {}", &transfer);
                                         tx.unbounded_send(transfer).unwrap();
                                         Ok(())
                                     })
-                                        .map_err(|e| {
-                                            error!(
-                                                "error waiting for transfer confirmations: {:?}",
-                                                e
-                                            )
+                                        .or_else(|e| {
+                                            error!("error waiting for transfer confirmations: {}", e);
+                                            Ok(())
                                         }),
                                 );
 
@@ -267,17 +261,17 @@ impl<T: DuplexTransport + 'static> Network<T> {
                         )
                     })
                 })
-                .map_err(move |e| error!("error in {:?} transfer stream: {:?}", network_type, e))
+                .or_else(move |e| {
+                    error!("error in {:?} transfer stream: {}", network_type, e);
+                    Ok(())
+                })
         };
 
         handle.spawn(future);
         rx
     }
 
-    pub fn anchor_stream(
-        &self,
-        handle: &reactor::Handle,
-    ) -> impl Stream<Item = Anchor, Error = ()> {
+    pub fn anchor_stream(&self, handle: &reactor::Handle) -> impl Stream<Item = Anchor, Error = ()> {
         let (tx, rx) = mpsc::unbounded();
 
         let future = {
@@ -300,10 +294,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
                             |block_number| {
                                 let tx = tx.clone();
 
-                                match block_number
-                                    .checked_rem(anchor_frequency.into())
-                                    .map(|u| u.low_u64())
-                                {
+                                match block_number.checked_rem(anchor_frequency.into()).map(|u| u.low_u64()) {
                                     Some(c) if c == confirmations => {
                                         let block_id = BlockId::Number(BlockNumber::Number(
                                             block_number.low_u64() - confirmations,
@@ -331,15 +322,14 @@ impl<T: DuplexTransport + 'static> Network<T> {
                                                         block_number,
                                                     };
 
-                                                    trace!(
-                                                        "anchor block confirmed, anchoring: {:?}",
-                                                        &anchor
-                                                    );
+                                                    trace!("anchor block confirmed, anchoring: {}", &anchor);
+
                                                     tx.unbounded_send(anchor).unwrap();
                                                     Ok(())
                                                 })
-                                                .map_err(|e| {
-                                                    error!("error waiting for anchor confirmations: {:?}", e)
+                                                .or_else(|e| {
+                                                    error!("error waiting for anchor confirmations: {}", e);
+                                                    Ok(())
                                                 }),
                                         );
                                     }
@@ -351,20 +341,23 @@ impl<T: DuplexTransport + 'static> Network<T> {
                         )
                     })
                 })
-                .map_err(move |e| error!("error in {:?} anchor stream: {:?}", network_type, e))
+                .or_else(move |e| {
+                    error!("error in {:?} anchor stream: {}", network_type, e);
+                    Ok(())
+                })
         };
 
         handle.spawn(future);
         rx
     }
 
-    pub fn process_withdrawal(&self, transfer: &Transfer) -> impl Future<Item = (), Error = Error> {
-        trace!("processing withdrawal {:?}", transfer);
+    pub fn approve_withdrawal(&self, transfer: &Transfer) -> impl Future<Item = (), Error = Error> {
+        trace!("approving withdrawal {}", transfer);
         ::web3::futures::future::err("not implemented".into())
     }
 
     pub fn anchor(&self, anchor: &Anchor) -> impl Future<Item = (), Error = Error> {
-        trace!("anchoring block {:?}", anchor);
+        trace!("anchoring block {}", anchor);
         ::web3::futures::future::err("not implemented".into())
     }
 }

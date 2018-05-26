@@ -1,3 +1,7 @@
+[relay]
+    anchor_frequency = 4
+    confirmations = 2
+
 [relay.homechain]
     ws-uri = "ws://localhost:8546"
     token = "0x273f0a1f19478605e8ee50fa309a933f2a04584b"

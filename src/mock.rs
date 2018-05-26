@@ -79,14 +79,10 @@ impl Transport for MockTransport {
             let response = responses.remove(0);
             match response.into_iter().next() {
                 Some(value) => Box::new(future::ok(value)),
-                None => Box::new(future::err(
-                    ErrorKind::Transport("No data available".into()).into(),
-                )),
+                None => Box::new(future::err(ErrorKind::Transport("No data available".into()).into())),
             }
         } else {
-            Box::new(future::err(
-                ErrorKind::Transport("No data available".into()).into(),
-            ))
+            Box::new(future::err(ErrorKind::Transport("No data available".into()).into()))
         }
     }
 }
@@ -110,9 +106,7 @@ impl BatchTransport for MockTransport {
             }
             Box::new(future::ok(batch))
         } else {
-            Box::new(future::err(
-                ErrorKind::Transport("No data available".into()).into(),
-            ))
+            Box::new(future::err(ErrorKind::Transport("No data available".into()).into()))
         }
     }
 }
@@ -178,8 +172,7 @@ mod tests {
         let mut eloop = tokio_core::reactor::Core::new().unwrap();
         let mut mock = MockTransport::new();
         mock.clear_rpc();
-        let finished =
-            eloop.run(mock.execute("eth_accounts", vec![rpc::Value::String("1".into())]));
+        let finished = eloop.run(mock.execute("eth_accounts", vec![rpc::Value::String("1".into())]));
         assert!(finished.is_err());
     }
 

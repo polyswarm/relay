@@ -14,11 +14,7 @@ fn main() {
         }
     }
 
-    match Command::new("truffle")
-        .current_dir("truffle")
-        .arg("compile")
-        .status()
-    {
+    match Command::new("truffle").current_dir("truffle").arg("compile").status() {
         Ok(status) => {
             if !status.success() {
                 if let Some(code) = status.code() {
@@ -42,24 +38,19 @@ fn main() {
     for entry in glob("truffle/build/contracts/*.json").unwrap() {
         match entry {
             Ok(path) => {
-                let file = File::open(&path)
-                    .expect(&format!("unable to open compiled json file: {:?}", &path));
-                let json: serde_json::Value = serde_json::from_reader(file)
-                    .expect(&format!("unable to parse compiled json file: {:?}", &path));
+                let file = File::open(&path).expect(&format!("unable to open compiled json file: {:?}", &path));
+                let json: serde_json::Value =
+                    serde_json::from_reader(file).expect(&format!("unable to parse compiled json file: {:?}", &path));
 
                 let mut out_path = PathBuf::from("./abi");
                 out_path.push(&path.file_name().expect("no file name component to path"));
                 out_path.set_extension("abi");
 
-                let mut out_file = File::create(&out_path).expect(&format!(
-                    "could not create output abi file: {:?}",
-                    &out_path
-                ));
+                let mut out_file =
+                    File::create(&out_path).expect(&format!("could not create output abi file: {:?}", &out_path));
 
-                serde_json::to_writer_pretty(out_file, &json["abi"]).expect(&format!(
-                    "could not write abi to output file: {:?}",
-                    &out_path
-                ));
+                serde_json::to_writer_pretty(out_file, &json["abi"])
+                    .expect(&format!("could not write abi to output file: {:?}", &out_path));
             }
             Err(e) => eprintln!("{:?}", e),
         }

@@ -70,6 +70,7 @@ fn main() -> Result<()> {
     let relay = Relay::new(
         Network::homechain(
             home_ws.clone(),
+            &settings.relay.account,
             &settings.relay.homechain.token,
             &settings.relay.homechain.relay,
             settings.relay.confirmations,
@@ -77,6 +78,7 @@ fn main() -> Result<()> {
         )?,
         Network::sidechain(
             side_ws.clone(),
+            &settings.relay.account,
             &settings.relay.sidechain.token,
             &settings.relay.sidechain.relay,
             settings.relay.confirmations,

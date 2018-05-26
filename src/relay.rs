@@ -3,7 +3,7 @@ use std::rc::Rc;
 use std::time;
 use tokio_core::reactor;
 use web3::confirm::wait_for_transaction_confirmation;
-use web3::contract::Contract;
+use web3::contract::{Contract, Options};
 use web3::futures::sync::mpsc;
 use web3::futures::{Future, Stream};
 use web3::types::{Address, BlockId, BlockNumber, FilterBuilder, H256, U256};
@@ -113,6 +113,7 @@ pub enum NetworkType {
 pub struct Network<T: DuplexTransport> {
     network_type: NetworkType,
     web3: Web3<T>,
+    account: Address,
     token: Contract<T>,
     relay: Contract<T>,
     confirmations: u64,
@@ -123,12 +124,16 @@ impl<T: DuplexTransport + 'static> Network<T> {
     pub fn new(
         network_type: NetworkType,
         transport: T,
+        account: &str,
         token: &str,
         relay: &str,
         confirmations: u64,
         anchor_frequency: u64,
     ) -> Result<Self> {
         let web3 = Web3::new(transport);
+        let account = clean_0x(account)
+            .parse()
+            .chain_err(|| ErrorKind::InvalidAddress(account.to_owned()))?;
         let token_address: Address = clean_0x(token)
             .parse()
             .chain_err(|| ErrorKind::InvalidAddress(token.to_owned()))?;
@@ -144,6 +149,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
         Ok(Self {
             network_type,
             web3,
+            account,
             token,
             relay,
             confirmations,
@@ -153,6 +159,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
 
     pub fn homechain(
         transport: T,
+        account: &str,
         token: &str,
         relay: &str,
         confirmations: u64,
@@ -161,6 +168,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
         Self::new(
             NetworkType::Home,
             transport,
+            account,
             token,
             relay,
             confirmations,
@@ -170,6 +178,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
 
     pub fn sidechain(
         transport: T,
+        account: &str,
         token: &str,
         relay: &str,
         confirmations: u64,
@@ -178,6 +187,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
         Self::new(
             NetworkType::Side,
             transport,
+            account,
             token,
             relay,
             confirmations,
@@ -353,11 +363,44 @@ impl<T: DuplexTransport + 'static> Network<T> {
 
     pub fn approve_withdrawal(&self, transfer: &Transfer) -> impl Future<Item = (), Error = Error> {
         trace!("approving withdrawal {}", transfer);
-        ::web3::futures::future::err("not implemented".into())
+        self.relay.call_with_confirmations(
+            "approveWithdrawal",
+            (
+                transfer.destination,
+                transfer.amount,
+                transfer.tx_hash,
+                transfer.block_hash,
+                transfer.block_number,
+            ),
+            self.account,
+            Options::default(),
+            self.confirmations as usize,
+        ).and_then(|receipt| {
+            info!("withdrawal approved: {:?}", receipt);
+            Ok(())
+        }).or_else(|e| {
+            error!("error approving withdrawal: {}", e);
+            Ok(())
+        })
     }
 
     pub fn anchor(&self, anchor: &Anchor) -> impl Future<Item = (), Error = Error> {
         trace!("anchoring block {}", anchor);
-        ::web3::futures::future::err("not implemented".into())
+        self.relay.call_with_confirmations(
+            "anchor",
+            (
+                anchor.block_hash,
+                anchor.block_number,
+            ),
+            self.account,
+            Options::default(),
+            self.confirmations as usize,
+        ).and_then(|receipt| {
+            info!("anchor processed: {:?}", receipt);
+            Ok(())
+        }).or_else(|e| {
+            error!("error anchoring block: {}", e);
+            Ok(())
+        })
     }
 }

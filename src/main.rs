@@ -33,7 +33,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-fn run() -> Result<()> {
+fn main() -> Result<()> {
     // Set up ctrl-c handler
     let running = Arc::new(AtomicBool::new(true));
 
@@ -93,20 +93,4 @@ fn run() -> Result<()> {
     }
 
     Ok(())
-}
-
-fn main() {
-    if let Err(ref e) = run() {
-        error!("error: {}", e);
-
-        for e in e.iter().skip(1) {
-            error!("caused by: {}", e);
-        }
-
-        if let Some(backtrace) = e.backtrace() {
-            error!("backtrace: {:?}", backtrace);
-        }
-
-        std::process::exit(1);
-    }
 }

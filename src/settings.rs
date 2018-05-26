@@ -1,5 +1,5 @@
-use std::path::Path;
 use config::{Config, Environment, File};
+use std::path::Path;
 
 use super::errors::*;
 
@@ -12,8 +12,8 @@ pub struct Settings {
 pub struct Relay {
     pub account: String,
     pub password: String,
-    pub confirmations: u32,
-    pub anchor_frequency: u32,
+    pub confirmations: u64,
+    pub anchor_frequency: u64,
     pub homechain: Network,
     pub sidechain: Network,
 }
@@ -31,20 +31,29 @@ impl Settings {
     where
         P: AsRef<Path>,
     {
-        let mut s = Config::new();
+        let mut c = Config::new();
 
-        s.set_default("relay.confirmations", 12)?;
-        s.set_default("relay.anchor_frequency", 100)?;
+        c.set_default("relay.confirmations", 12)?;
+        c.set_default("relay.anchor_frequency", 100)?;
 
         if let Some(p) = path {
             let ps = p.as_ref()
                 .to_str()
-                .chain_err(|| "invalid config file path")?;
-            s.merge(File::with_name(ps))?;
+                .chain_err(|| ErrorKind::InvalidConfigFilePath)?;
+            c.merge(File::with_name(ps))?;
         }
 
-        s.merge(Environment::new())?;
+        c.merge(Environment::new())?;
+        c.try_into().map_err(|e| e.into()).and_then(|s: Self| s.validated())
+    }
 
-        s.try_into().map_err(|e| e.into())
+    fn validated(self) -> Result<Self> {
+        if self.relay.anchor_frequency == 0 {
+            Err(ErrorKind::InvalidAnchorFrequency.into())
+        } else if self.relay.confirmations >= self.relay.anchor_frequency {
+            Err(ErrorKind::InvalidConfirmations.into())
+        } else {
+            Ok(self)
+        }
     }
 }

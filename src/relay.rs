@@ -5,13 +5,11 @@ use web3::confirm::wait_for_transaction_confirmation;
 use web3::contract::Contract;
 use web3::futures::sync::mpsc;
 use web3::futures::{Future, Stream};
-use web3::types::{Address, FilterBuilder, H256, U256};
+use web3::types::{Address, BlockId, BlockNumber, FilterBuilder, H256, U256};
 use web3::{DuplexTransport, Web3};
 
 use super::contracts::{ERC20_ABI, ERC20_RELAY_ABI, TRANSFER_EVENT_SIGNATURE};
 use super::errors::*;
-
-type Task = Box<Future<Item = (), Error = ()>>;
 
 // From ethereum_types but not reexported by web3
 fn clean_0x(s: &str) -> &str {
@@ -40,59 +38,50 @@ impl<T: DuplexTransport + 'static> Relay<T> {
         chain_a: Rc<Network<T>>,
         chain_b: Rc<Network<T>>,
         handle: &reactor::Handle,
-    ) -> Task {
-        Box::new({
-            chain_a
-                .transfer_stream(handle)
-                .for_each(move |transfer| {
-                    chain_b.process_withdrawal(&transfer);
-                    Ok(())
-                })
-                .map_err(move |e| {
-                    error!(
-                        "error processing withdrawal from {:?}: {:?}",
-                        chain_a.network_type(),
-                        e
-                    )
-                })
-        })
+    ) -> impl Future<Item = (), Error = ()> {
+        chain_a
+            .transfer_stream(handle)
+            .for_each(move |transfer| {
+                chain_b.process_withdrawal(&transfer);
+                Ok(())
+            })
+            .map_err(move |e| {
+                error!(
+                    "error processing withdrawal from {:?}: {:?}",
+                    chain_a.network_type(),
+                    e
+                )
+            })
     }
 
     fn anchor_future(
         homechain: Rc<Network<T>>,
         sidechain: Rc<Network<T>>,
         handle: &reactor::Handle,
-    ) -> Task {
-        Box::new({
-            sidechain
-                .anchor_stream(handle)
-                .for_each(move |anchor| {
-                    homechain.anchor(&anchor);
-                    Ok(())
-                })
-                .map_err(move |e| {
-                    error!(
-                        "error anchoring from {:?}: {:?}",
-                        sidechain.network_type(),
-                        e
-                    )
-                })
-        })
+    ) -> impl Future<Item = (), Error = ()> {
+        sidechain
+            .anchor_stream(handle)
+            .for_each(move |anchor| {
+                homechain.anchor(&anchor);
+                Ok(())
+            })
+            .map_err(move |e| {
+                error!(
+                    "error anchoring from {:?}: {:?}",
+                    sidechain.network_type(),
+                    e
+                )
+            })
     }
 
-    pub fn listen(&self, handle: &reactor::Handle) -> Task {
-        Box::new(
-            Self::anchor_future(self.homechain.clone(), self.sidechain.clone(), handle)
-                .join(
-                    Self::transfer_future(self.homechain.clone(), self.sidechain.clone(), handle)
-                        .join(Self::transfer_future(
-                            self.sidechain.clone(),
-                            self.homechain.clone(),
-                            handle,
-                        )),
-                )
-                .and_then(|_| Ok(())),
-        )
+    pub fn listen(&self, handle: &reactor::Handle) -> impl Future<Item = (), Error = ()> {
+        Self::anchor_future(self.homechain.clone(), self.sidechain.clone(), handle)
+            .join(
+                Self::transfer_future(self.homechain.clone(), self.sidechain.clone(), handle).join(
+                    Self::transfer_future(self.sidechain.clone(), self.homechain.clone(), handle),
+                ),
+            )
+            .and_then(|_| Ok(()))
     }
 }
 
@@ -123,8 +112,8 @@ pub struct Network<T: DuplexTransport> {
     web3: Web3<T>,
     token: Contract<T>,
     relay: Contract<T>,
-    confirmations: u32,
-    anchor_frequency: u32,
+    confirmations: u64,
+    anchor_frequency: u64,
 }
 
 impl<T: DuplexTransport + 'static> Network<T> {
@@ -133,8 +122,8 @@ impl<T: DuplexTransport + 'static> Network<T> {
         transport: T,
         token: &str,
         relay: &str,
-        confirmations: u32,
-        anchor_frequency: u32,
+        confirmations: u64,
+        anchor_frequency: u64,
     ) -> Result<Self> {
         let web3 = Web3::new(transport);
         let token_address: Address = clean_0x(token)
@@ -163,8 +152,8 @@ impl<T: DuplexTransport + 'static> Network<T> {
         transport: T,
         token: &str,
         relay: &str,
-        confirmations: u32,
-        anchor_frequency: u32,
+        confirmations: u64,
+        anchor_frequency: u64,
     ) -> Result<Self> {
         Self::new(
             NetworkType::Home,
@@ -180,8 +169,8 @@ impl<T: DuplexTransport + 'static> Network<T> {
         transport: T,
         token: &str,
         relay: &str,
-        confirmations: u32,
-        anchor_frequency: u32,
+        confirmations: u64,
+        anchor_frequency: u64,
     ) -> Result<Self> {
         Self::new(
             NetworkType::Side,
@@ -200,7 +189,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
     pub fn transfer_stream(
         &self,
         handle: &reactor::Handle,
-    ) -> Box<Stream<Item = Transfer, Error = ()>> {
+    ) -> impl Stream<Item = Transfer, Error = ()> {
         let (tx, rx) = mpsc::unbounded();
         let filter = FilterBuilder::default()
             .address(vec![self.token.address()])
@@ -258,11 +247,19 @@ impl<T: DuplexTransport + 'static> Network<T> {
                                             block_number,
                                         };
 
-                                        trace!("{:?}", &transfer);
+                                        trace!(
+                                            "transfer event confirmed, approving {:?}",
+                                            &transfer
+                                        );
                                         tx.unbounded_send(transfer).unwrap();
                                         Ok(())
                                     })
-                                        .map_err(|_| ()),
+                                        .map_err(|e| {
+                                            error!(
+                                                "error waiting for transfer confirmations: {:?}",
+                                                e
+                                            )
+                                        }),
                                 );
 
                                 Ok(())
@@ -274,64 +271,100 @@ impl<T: DuplexTransport + 'static> Network<T> {
         };
 
         handle.spawn(future);
-
-        Box::new(rx)
+        rx
     }
 
     pub fn anchor_stream(
         &self,
         handle: &reactor::Handle,
-    ) -> Box<Stream<Item = Anchor, Error = ()>> {
+    ) -> impl Stream<Item = Anchor, Error = ()> {
         let (tx, rx) = mpsc::unbounded();
 
         let future = {
             let network_type = self.network_type;
-            let tx = tx.clone();
+            let anchor_frequency = self.anchor_frequency;
+            let confirmations = self.confirmations;
+            let handle = handle.clone();
+            let web3 = self.web3.clone();
 
             self.web3
                 .eth_subscribe()
                 .subscribe_new_heads()
                 .and_then(move |sub| {
                     sub.for_each(move |head| {
-                        if head.number.is_none() {
-                            warn!("no block number in anchor");
-                            return Ok(());
-                        }
+                        head.number.map_or_else(
+                            || {
+                                warn!("no block number in block head event");
+                                Ok(())
+                            },
+                            |block_number| {
+                                let tx = tx.clone();
 
-                        if head.hash.is_none() {
-                            warn!("no block hash in anchor");
-                            return Ok(());
-                        }
+                                match block_number
+                                    .checked_rem(anchor_frequency.into())
+                                    .map(|u| u.low_u64())
+                                {
+                                    Some(c) if c == confirmations => {
+                                        let block_id = BlockId::Number(BlockNumber::Number(
+                                            block_number.low_u64() - confirmations,
+                                        ));
 
-                        let block_number: U256 = head.number.unwrap().into();
-                        let block_hash: H256 = head.hash.unwrap();
+                                        handle.spawn(
+                                            web3.eth()
+                                                .block(block_id)
+                                                .and_then(move |block| {
+                                                    if block.number.is_none() {
+                                                        warn!("no block number in anchor block");
+                                                        return Ok(());
+                                                    }
 
-                        let anchor = Anchor {
-                            block_hash,
-                            block_number,
-                        };
+                                                    if block.hash.is_none() {
+                                                        warn!("no block hash in anchor block");
+                                                        return Ok(());
+                                                    }
 
-                        trace!("{:?}", &anchor);
-                        tx.unbounded_send(anchor).unwrap();
+                                                    let block_hash: H256 = block.hash.unwrap();
+                                                    let block_number: U256 = block.number.unwrap().into();
 
-                        Ok(())
+                                                    let anchor = Anchor {
+                                                        block_hash,
+                                                        block_number,
+                                                    };
+
+                                                    trace!(
+                                                        "anchor block confirmed, anchoring: {:?}",
+                                                        &anchor
+                                                    );
+                                                    tx.unbounded_send(anchor).unwrap();
+                                                    Ok(())
+                                                })
+                                                .map_err(|e| {
+                                                    error!("error waiting for anchor confirmations: {:?}", e)
+                                                }),
+                                        );
+                                    }
+                                    _ => (),
+                                };
+
+                                Ok(())
+                            },
+                        )
                     })
                 })
                 .map_err(move |e| error!("error in {:?} anchor stream: {:?}", network_type, e))
         };
 
         handle.spawn(future);
-
-        Box::new(rx)
+        rx
     }
 
-    pub fn process_withdrawal(&self, transfer: &Transfer) -> Box<Future<Item = (), Error = Error>> {
+    pub fn process_withdrawal(&self, transfer: &Transfer) -> impl Future<Item = (), Error = Error> {
         trace!("processing withdrawal {:?}", transfer);
-        Box::new(::web3::futures::future::err("not implemented".into()))
+        ::web3::futures::future::err("not implemented".into())
     }
 
-    pub fn anchor(&self, anchor: &Anchor) -> Box<Future<Item = (), Error = Error>> {
+    pub fn anchor(&self, anchor: &Anchor) -> impl Future<Item = (), Error = Error> {
         trace!("anchoring block {:?}", anchor);
-        Box::new(::web3::futures::future::err("not implemented".into()))
+        ::web3::futures::future::err("not implemented".into())
     }
 }

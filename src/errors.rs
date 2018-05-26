@@ -10,6 +10,21 @@ error_chain!{
     }
 
     errors {
+        InvalidConfigFilePath {
+            description("invalid config file path"),
+            display("invalid config file path"),
+        }
+
+        InvalidAnchorFrequency {
+            description("invalid anchor frequency, must be non-zero"),
+            display("invalid anchor frequency, must be non-zero"),
+        }
+
+        InvalidConfirmations {
+            description("invalid confirmations, must be less than anchor frequency"),
+            display("invalid confirmations, must be less than anchor frequency"),
+        }
+
         InvalidAddress(addr: String) {
             description("invalid address"),
             display("invalid address: '{}'", addr),

@@ -10,6 +10,11 @@ error_chain!{
     }
 
     errors {
+        CouldNotUnlockAccount(account: ::web3::types::Address) {
+            description("could not unlock account, check password"),
+            display("could not unlock account '{}', check password", account),
+        }
+
         InvalidConfigFilePath {
             description("invalid config file path"),
             display("invalid config file path"),

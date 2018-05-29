@@ -1,6 +1,6 @@
 [relay]
-    anchor_frequency = 4
-    confirmations = 2
+    anchor_frequency = 100
+    confirmations = 20
 
 [relay.homechain]
     ws-uri = "ws://localhost:8546"

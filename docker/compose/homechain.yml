@@ -1,0 +1,21 @@
+version: '3'
+services:
+    homechain:
+        build:
+            context: ../homechain
+        command: ["--syncmode", "full", "--networkid", "1337", "--targetgaslimit", "94000000", "--nodiscover", "--rpc", "--rpcaddr", "0.0.0.0", "--rpcvhosts", "localhost,homechain", "--rpcapi", "eth,web3,personal,net", "--ws", "--wsaddr", "0.0.0.0", "--wsapi", "eth,web3,personal,net", "--wsorigins", "*", "--etherbase", "0x32fe67b633d8880f6356ccb688d11718f490a135", "--unlock", "0x32fe67b633d8880f6356ccb688d11718f490a135", "--password", "password.txt"]
+        depends_on:
+            - homechain-sealer
+        networks:
+            homechain:
+                ipv4_address: 172.20.0.100
+        ports:
+            - 6545:8545
+            - 6546:8546
+    homechain-sealer:
+        build:
+            context: ../homechain
+        command: ["--syncmode", "full", "--networkid", "1337", "--targetgaslimit", "94000000", "--nodekey", "nodekeys/homechain-sealer", "--nodiscover", "--etherbase", "0x58b6cb03655999e2ff76072d8836051ac5ddcad7", "--unlock", "0x58b6cb03655999e2ff76072d8836051ac5ddcad7", "--password", "password.txt", "--mine"]
+        networks:
+            homechain:
+                ipv4_address: 172.20.0.101

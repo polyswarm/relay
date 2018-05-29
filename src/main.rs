@@ -17,10 +17,10 @@ extern crate serde_json;
 
 use clap::{App, Arg};
 
-mod contracts;
-mod errors;
-mod relay;
-mod settings;
+pub mod contracts;
+pub mod errors;
+pub mod relay;
+pub mod settings;
 
 #[cfg(test)]
 mod mock;
@@ -74,7 +74,6 @@ fn main() -> Result<()> {
             &settings.relay.homechain.token,
             &settings.relay.homechain.relay,
             settings.relay.confirmations,
-            settings.relay.anchor_frequency,
         )?,
         Network::sidechain(
             side_ws.clone(),
@@ -86,8 +85,11 @@ fn main() -> Result<()> {
         )?,
     );
 
-    handle.spawn(relay.listen(&handle));
+    // Unlock accounts now
+    eloop.run(relay.unlock(&settings.relay.password))?;
 
+    // Run the relay
+    handle.spawn(relay.run(&handle));
     while running.load(Ordering::SeqCst) {
         eloop.turn(Some(Duration::from_secs(1)));
     }

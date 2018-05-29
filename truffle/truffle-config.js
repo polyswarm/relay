@@ -13,7 +13,7 @@ module.exports = {
       host: 'localhost',
       port: 6545,
       network_id: '1337',
-      from: '0x31c99a06cabed34f97a78742225f4594d1d16677',
+      from: '0x32fe67b633d8880f6356ccb688d11718f490a135',
       gas: 4700000,
     },
     sidechain: {

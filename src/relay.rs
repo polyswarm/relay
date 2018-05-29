@@ -12,6 +12,9 @@ use web3::{DuplexTransport, Web3};
 use super::contracts::{ERC20_ABI, ERC20_RELAY_ABI, TRANSFER_EVENT_SIGNATURE};
 use super::errors::*;
 
+const GAS_LIMIT: u64 = 200000;
+const GAS_PRICE: u64 = 20000000000;
+
 // From ethereum_types but not reexported by web3
 fn clean_0x(s: &str) -> &str {
     if s.starts_with("0x") {
@@ -21,6 +24,7 @@ fn clean_0x(s: &str) -> &str {
     }
 }
 
+/// Token relay between two Ethereum networks
 #[derive(Debug, Clone)]
 pub struct Relay<T: DuplexTransport> {
     homechain: Rc<Network<T>>,
@@ -28,6 +32,12 @@ pub struct Relay<T: DuplexTransport> {
 }
 
 impl<T: DuplexTransport + 'static> Relay<T> {
+    /// Constructs a token relay given two Ethereum networks
+    ///
+    /// # Arguments
+    ///
+    /// * `homechain` - Network to be used as the home chain
+    /// * `sidechain` - Network to be used as the side chain
     pub fn new(homechain: Network<T>, sidechain: Network<T>) -> Self {
         Self {
             homechain: Rc::new(homechain),
@@ -61,7 +71,20 @@ impl<T: DuplexTransport + 'static> Relay<T> {
         })
     }
 
-    pub fn listen(&self, handle: &reactor::Handle) -> impl Future<Item = (), Error = ()> {
+    pub fn unlock(&self, password: &str) -> impl Future<Item = (), Error = Error> {
+        self.homechain
+            .unlock(password)
+            .join(self.sidechain.unlock(password))
+            .and_then(|_| Ok(()))
+    }
+
+    /// Returns a Future representing the operation of the token relay, including forwarding
+    /// Transfer events and anchoring sidechain blocks onto the homechain
+    ///
+    /// # Arguments
+    ///
+    /// * `handle` - Handle to the event loop to spawn additional futures
+    pub fn run(&self, handle: &reactor::Handle) -> impl Future<Item = (), Error = ()> {
         Self::anchor_future(self.homechain.clone(), self.sidechain.clone(), handle)
             .join(
                 Self::transfer_future(self.homechain.clone(), self.sidechain.clone(), handle).join(
@@ -72,6 +95,7 @@ impl<T: DuplexTransport + 'static> Relay<T> {
     }
 }
 
+/// Represents a token transfer between two networks
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Transfer {
     destination: Address,
@@ -91,6 +115,7 @@ impl fmt::Display for Transfer {
     }
 }
 
+/// Represents a block on the sidechain to be anchored to the homechain
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Anchor {
     block_hash: H256,
@@ -103,12 +128,17 @@ impl fmt::Display for Anchor {
     }
 }
 
+/// Networks are considered either the homechain or the sidechain for the purposes of relaying
+/// token transfers
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum NetworkType {
+    /// The homechain
     Home,
+    /// The sidechain
     Side,
 }
 
+/// Represents an Ethereum network with a deployed ERC20Relay contract
 #[derive(Debug)]
 pub struct Network<T: DuplexTransport> {
     network_type: NetworkType,
@@ -121,6 +151,16 @@ pub struct Network<T: DuplexTransport> {
 }
 
 impl<T: DuplexTransport + 'static> Network<T> {
+    /// Constructs a new network
+    ///
+    /// # Arguments
+    ///
+    /// * `network_type` - The type of the network (homechain or sidechain)
+    /// * `transport` - The transport to use for interacting with the network
+    /// * `token` - Address of the ERC20 token contract to use
+    /// * `relay` - Address of the ERC20Relay contract to use
+    /// * `confirmations` - Number of blocks to wait for confirmation
+    /// * `anchor_frequency` - Frequency of sidechain anchor blocks
     pub fn new(
         network_type: NetworkType,
         transport: T,
@@ -157,25 +197,27 @@ impl<T: DuplexTransport + 'static> Network<T> {
         })
     }
 
-    pub fn homechain(
-        transport: T,
-        account: &str,
-        token: &str,
-        relay: &str,
-        confirmations: u64,
-        anchor_frequency: u64,
-    ) -> Result<Self> {
-        Self::new(
-            NetworkType::Home,
-            transport,
-            account,
-            token,
-            relay,
-            confirmations,
-            anchor_frequency,
-        )
+    /// Constructs a new home network
+    ///
+    /// # Arguments
+    ///
+    /// * `transport` - The transport to use for interacting with the network
+    /// * `token` - Address of the ERC20 token contract to use
+    /// * `relay` - Address of the ERC20Relay contract to use
+    /// * `confirmations` - Number of blocks to wait for confirmation
+    pub fn homechain(transport: T, account: &str, token: &str, relay: &str, confirmations: u64) -> Result<Self> {
+        Self::new(NetworkType::Home, transport, account, token, relay, confirmations, 0)
     }
 
+    /// Constructs a new side network
+    ///
+    /// # Arguments
+    ///
+    /// * `transport` - The transport to use for interacting with the network
+    /// * `token` - Address of the ERC20 token contract to use
+    /// * `relay` - Address of the ERC20Relay contract to use
+    /// * `confirmations` - Number of blocks to wait for confirmation
+    /// * `anchor_frequency` - Frequency of sidechain anchor blocks
     pub fn sidechain(
         transport: T,
         account: &str,
@@ -195,6 +237,30 @@ impl<T: DuplexTransport + 'static> Network<T> {
         )
     }
 
+    /// Unlock an account with a password
+    ///
+    /// # Arguments
+    ///
+    /// * `password` - Password for the account's keystore
+    pub fn unlock(&self, password: &str) -> impl Future<Item = (), Error = Error> {
+        let account = self.account;
+        self.web3
+            .personal()
+            .unlock_account(account, password, Some(0))
+            .map_err(|e| e.into())
+            .and_then(move |success| {
+                if !success {
+                    return Err(ErrorKind::CouldNotUnlockAccount(account).into());
+                }
+                Ok(())
+            })
+    }
+
+    /// Returns a Stream of Transfer events from this network to the relay contract
+    ///
+    /// # Arguments
+    ///
+    /// * `handle` - Handle to the event loop to spawn additional futures
     pub fn transfer_stream(&self, handle: &reactor::Handle) -> impl Stream<Item = Transfer, Error = ()> {
         let (tx, rx) = mpsc::unbounded();
         let filter = FilterBuilder::default()
@@ -230,7 +296,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
                             },
                             |tx_hash| {
                                 let tx = tx.clone();
-                                let destination: Address = log.topics[2].into();
+                                let destination: Address = log.topics[1].into();
                                 let amount: U256 = log.data.0[..32].into();
 
                                 info!(
@@ -281,6 +347,11 @@ impl<T: DuplexTransport + 'static> Network<T> {
         rx
     }
 
+    /// Returns a Stream of anchor blocks from this network
+    ///
+    /// # Arguments
+    ///
+    /// * `handle` - Handle to the event loop to spawn additional futures
     pub fn anchor_stream(&self, handle: &reactor::Handle) -> impl Stream<Item = Anchor, Error = ()> {
         let (tx, rx) = mpsc::unbounded();
 
@@ -361,46 +432,66 @@ impl<T: DuplexTransport + 'static> Network<T> {
         rx
     }
 
+    /// Approve a withdrawal request and return a future which resolves when the transaction
+    /// completes
+    ///
+    /// # Arguments
+    ///
+    /// * `transfer` - The transfer to approve
     pub fn approve_withdrawal(&self, transfer: &Transfer) -> impl Future<Item = (), Error = Error> {
         trace!("approving withdrawal {}", transfer);
-        self.relay.call_with_confirmations(
-            "approveWithdrawal",
-            (
-                transfer.destination,
-                transfer.amount,
-                transfer.tx_hash,
-                transfer.block_hash,
-                transfer.block_number,
-            ),
-            self.account,
-            Options::default(),
-            self.confirmations as usize,
-        ).and_then(|receipt| {
-            info!("withdrawal approved: {:?}", receipt);
-            Ok(())
-        }).or_else(|e| {
-            error!("error approving withdrawal: {}", e);
-            Ok(())
-        })
+        self.relay
+            .call_with_confirmations(
+                "approveWithdrawal",
+                (
+                    transfer.destination,
+                    transfer.amount,
+                    transfer.tx_hash,
+                    transfer.block_hash,
+                    transfer.block_number,
+                ),
+                self.account,
+                Options::with(|options| {
+                    options.gas = Some(GAS_LIMIT.into());
+                    options.gas_price = Some(GAS_PRICE.into());
+                }),
+                self.confirmations as usize,
+            )
+            .and_then(|receipt| {
+                info!("withdrawal approved: {:?}", receipt);
+                Ok(())
+            })
+            .or_else(|e| {
+                error!("error approving withdrawal: {}", e);
+                Ok(())
+            })
     }
 
+    /// Anchor a sidechain block and return a future which resolves when the transaction completes
+    ///
+    /// # Arguments
+    ///
+    /// * `anchor` - The block to anchor
     pub fn anchor(&self, anchor: &Anchor) -> impl Future<Item = (), Error = Error> {
         trace!("anchoring block {}", anchor);
-        self.relay.call_with_confirmations(
-            "anchor",
-            (
-                anchor.block_hash,
-                anchor.block_number,
-            ),
-            self.account,
-            Options::default(),
-            self.confirmations as usize,
-        ).and_then(|receipt| {
-            info!("anchor processed: {:?}", receipt);
-            Ok(())
-        }).or_else(|e| {
-            error!("error anchoring block: {}", e);
-            Ok(())
-        })
+        self.relay
+            .call_with_confirmations(
+                "anchor",
+                (anchor.block_hash, anchor.block_number),
+                self.account,
+                Options::with(|options| {
+                    options.gas = Some(GAS_LIMIT.into());
+                    options.gas_price = Some(GAS_PRICE.into());
+                }),
+                self.confirmations as usize,
+            )
+            .and_then(|receipt| {
+                info!("anchor processed: {:?}", receipt);
+                Ok(())
+            })
+            .or_else(|e| {
+                error!("error anchoring block: {}", e);
+                Ok(())
+            })
     }
 }

@@ -13,10 +13,13 @@ require('chai')
 const NectarToken = artifacts.require('NectarToken');
 const ERC20Relay = artifacts.require('ERC20Relay');
 
-contract('ERC20Relay', function ([owner, verifier0, verifier1, verifier2, user0, user1]) {
+// From coinmarketcap on 5/28/18
+const NctEthExchangeRate = 80972;
+
+contract('ERC20Relay', function ([owner, feeWallet, verifier0, verifier1, verifier2, user0, user1]) {
   beforeEach(async function () {
     this.token = await NectarToken.new();
-    this.relay = await ERC20Relay.new(this.token.address, [verifier0, verifier1, verifier2]);
+    this.relay = await ERC20Relay.new(this.token.address, NctEthExchangeRate, feeWallet, [verifier0, verifier1, verifier2]);
 
     await this.token.mint(user0, ether(1000000000));
     await this.token.mint(user1, ether(1000000000));
@@ -25,11 +28,13 @@ contract('ERC20Relay', function ([owner, verifier0, verifier1, verifier2, user0,
 
   describe('constructor', function() {
     it('should require a valid token address', async function () {
-      await ERC20Relay.new('0x0000000000000000000000000000000000000000', [verifier0, verifier1, verifier2], { from: owner }).should.be.rejectedWith(EVMRevert);
+      await ERC20Relay.new('0x0000000000000000000000000000000000000000', NctEthExchangeRate, feeWallet,
+        [verifier0, verifier1, verifier2], { from: owner }).should.be.rejectedWith(EVMRevert);
     });
 
     it('should require at least MINIMUM_VERIFIERS', async function () {
-      await ERC20Relay.new(this.token.address, [verifier0], { from: owner }).should.be.rejectedWith(EVMRevert);
+      await ERC20Relay.new(this.token.address, NctEthExchangeRate, feeWallet,
+        [verifier0], { from: owner }).should.be.rejectedWith(EVMRevert);
     });
 
     it('should have two required verifiers', async function () {
@@ -134,7 +139,7 @@ contract('ERC20Relay', function ([owner, verifier0, verifier1, verifier2, user0,
     });
 
     it('should allow verifiers to approve withdrawals', async function () {
-      let amount = ether(1);
+      let amount = ether(1000);
       let tx = await this.token.transfer(this.relay.address, amount, { from: user0 });
       let txHash = tx['tx'];
       let blockHash = tx['receipt']['blockHash'];
@@ -149,15 +154,15 @@ contract('ERC20Relay', function ([owner, verifier0, verifier1, verifier2, user0,
     });
 
     it('should not allow verifiers to approve different transactions with the same hash', async function () {
-      await this.relay.approveWithdrawal(user0, '1', '0', '0', '0', { from: verifier0 }).should.be.fulfilled;
-      await this.relay.approveWithdrawal(user0, '2', '0', '0', '0', { from: verifier1 }).should.be.rejectedWith(EVMRevert);
+      await this.relay.approveWithdrawal(user0, ether(1000), '0', '0', '0', { from: verifier0 }).should.be.fulfilled;
+      await this.relay.approveWithdrawal(user0, ether(2000), '0', '0', '0', { from: verifier1 }).should.be.rejectedWith(EVMRevert);
     
-      await this.relay.approveWithdrawal(user1, '1', '0', '0', '1', { from: verifier0 }).should.be.fulfilled;
-      await this.relay.approveWithdrawal(user1, '1', '0', '0', '1', { from: verifier1 }).should.be.rejectedWith(EVMRevert);
+      await this.relay.approveWithdrawal(user1, ether(1000), '0', '0', '1', { from: verifier0 }).should.be.fulfilled;
+      await this.relay.approveWithdrawal(user1, ether(1000), '0', '0', '1', { from: verifier1 }).should.be.rejectedWith(EVMRevert);
     });
 
     it('should not allow verifiers to approve multiple times', async function () {
-      let amount = ether(1);
+      let amount = ether(1000);
       let tx = await this.token.transfer(this.relay.address, amount, { from: user0 });
       let txHash = tx['tx'];
       let blockHash = tx['receipt']['blockHash'];
@@ -168,7 +173,7 @@ contract('ERC20Relay', function ([owner, verifier0, verifier1, verifier2, user0,
     });
     
     it('should only allow verifiers to unapprove withdrawals', async function () {
-      let amount = ether(1);
+      let amount = ether(1000);
       let tx = await this.token.transfer(this.relay.address, amount, { from: user0 });
       let txHash = tx['tx'];
       let blockHash = tx['receipt']['blockHash'];
@@ -178,7 +183,7 @@ contract('ERC20Relay', function ([owner, verifier0, verifier1, verifier2, user0,
     });
 
     it('should allow verifiers to unapprove withdrawals', async function () {
-      let amount = ether(1);
+      let amount = ether(1000);
       let tx = await this.token.transfer(this.relay.address, amount, { from: user0 });
       let txHash = tx['tx'];
       let blockHash = tx['receipt']['blockHash'];
@@ -193,7 +198,7 @@ contract('ERC20Relay', function ([owner, verifier0, verifier1, verifier2, user0,
     });
 
     it('should not allow verifiers to unapprove processed withdrawals', async function () {
-      let amount = ether(1);
+      let amount = ether(1000);
       let tx = await this.token.transfer(this.relay.address, amount, { from: user0 });
       let txHash = tx['tx'];
       let blockHash = tx['receipt']['blockHash'];

@@ -16,6 +16,13 @@ contract ERC20Relay is Ownable {
     mapping (address => uint256) private verifierAddressToIndex;
 
     /* Withdrawals */
+    uint256 constant GAS_PRICE = 20 * 10 ** 9;
+    uint256 constant ESTIMATED_GAS_PER_VERIFIER = 54301;
+    uint256 constant ESTIMATED_GAS_PER_WITHDRAWAL= 73458;
+    uint256 public nctEthExchangeRate;
+    uint256 public fees;
+    address public feeWallet;
+
     struct Withdrawal {
         address destination;
         uint256 amount;
@@ -31,6 +38,10 @@ contract ERC20Relay is Ownable {
         bytes32 txHash,
         bytes32 blockHash,
         uint256 blockNumber
+    );
+
+    event FeesChanged(
+        uint256 newFees
     );
 
     /* Sidechain anchoring */
@@ -50,20 +61,25 @@ contract ERC20Relay is Ownable {
 
     ERC20 private token;
 
-    constructor(address token_, address[] verifiers_) public {
-        require(token_ != address(0));
-        require(verifiers_.length >= MINIMUM_VERIFIERS);
+    constructor(address _token, uint256 _nctEthExchangeRate, address _feeWallet, address[] _verifiers) public {
+        require(_token != address(0));
+        require(_verifiers.length >= MINIMUM_VERIFIERS);
 
         // Dummy verifier at index 0
         verifiers.push(address(0));
 
-        for (uint256 i = 0; i < verifiers_.length; i++) {
-            verifiers.push(verifiers_[i]);
-            verifierAddressToIndex[verifiers_[i]] = i.add(1);
+        for (uint256 i = 0; i < _verifiers.length; i++) {
+            verifiers.push(_verifiers[i]);
+            verifierAddressToIndex[_verifiers[i]] = i.add(1);
         }
 
         requiredVerifiers = calculateRequiredVerifiers();
-        token = ERC20(token_);
+
+        nctEthExchangeRate= _nctEthExchangeRate;
+        fees = calculateFees();
+
+        token = ERC20(_token);
+        feeWallet = _feeWallet;
     }
 
     /** Disable usage of the fallback function */
@@ -80,6 +96,7 @@ contract ERC20Relay is Ownable {
         verifierAddressToIndex[addr] = index.sub(1);
 
         requiredVerifiers = calculateRequiredVerifiers();
+        fees = calculateFees();
     }
 
     // TODO: Allow existing verifiers to vote on adding/removing others
@@ -95,6 +112,7 @@ contract ERC20Relay is Ownable {
         verifiers.length--;
 
         requiredVerifiers = calculateRequiredVerifiers();
+        fees = calculateFees();
     }
 
     function activeVerifiers() public view returns (address[]) {
@@ -128,6 +146,19 @@ contract ERC20Relay is Ownable {
         _;
     }
 
+    function setNctEthExchangeRate(uint256 _nctEthExchangeRate) external onlyOwner {
+        nctEthExchangeRate = _nctEthExchangeRate;
+        fees = calculateFees();
+
+        emit FeesChanged(fees);
+    }
+
+    function calculateFees() internal view returns (uint256) {
+        uint256 estimatedGas = ESTIMATED_GAS_PER_VERIFIER.mul(numberOfVerifiers())
+            .add(ESTIMATED_GAS_PER_WITHDRAWAL);
+        return estimatedGas.mul(GAS_PRICE).mul(nctEthExchangeRate);
+    }
+
     function approveWithdrawal(
         address destination,
         uint256 amount,
@@ -138,15 +169,16 @@ contract ERC20Relay is Ownable {
         external
         onlyVerifier
     {
-        bytes32 hash = keccak256(txHash, blockHash, blockNumber);
+        bytes32 hash = keccak256(abi.encodePacked(txHash, blockHash, blockNumber));
+        uint256 net = amount.sub(fees);
 
         if (withdrawals[hash].destination == address(0)) {
-            withdrawals[hash] = Withdrawal(destination, amount, new address[](0), false);
+            withdrawals[hash] = Withdrawal(destination, net, new address[](0), false);
         }
 
         Withdrawal storage w = withdrawals[hash];
         require(w.destination == destination);
-        require(w.amount == amount);
+        require(w.amount == net);
 
         for (uint256 i = 0; i < w.approvals.length; i++) {
             require(w.approvals[i] != msg.sender);
@@ -155,9 +187,14 @@ contract ERC20Relay is Ownable {
         w.approvals.push(msg.sender);
 
         if (w.approvals.length >= requiredVerifiers && !w.processed) {
-            token.safeTransfer(destination, amount);
+            if (fees != 0 && feeWallet != address(0)) {
+                token.safeTransfer(feeWallet, fees);
+            }
+
+            token.safeTransfer(destination, net);
+
             w.processed = true;
-            emit WithdrawalProcessed(destination, amount, txHash, blockHash, blockNumber);
+            emit WithdrawalProcessed(destination, net, txHash, blockHash, blockNumber);
         }
     }
 
@@ -171,7 +208,7 @@ contract ERC20Relay is Ownable {
         external
         onlyVerifier
     {
-        bytes32 hash = keccak256(txHash, blockHash, blockNumber);
+        bytes32 hash = keccak256(abi.encodePacked(txHash, blockHash, blockNumber));
         require(withdrawals[hash].destination != address(0));
 
         Withdrawal storage w = withdrawals[hash];

@@ -30,6 +30,13 @@ RUN set -x && \
 
 WORKDIR /usr/src/polyswarm-relay
 COPY . .
+
+# Install npm Packages
+RUN set -x && \
+    apt-get update && apt-get install -y git
+RUN cd truffle && npm i
+
+# Install
 RUN cargo install
 
 CMD ["polyswarm-relay", "docker/config.toml"]

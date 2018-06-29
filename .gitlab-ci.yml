@@ -1,19 +1,7 @@
-# TOOD:
-# Docker Hub broken on login:
-# Error: Cannot perform an interactive login from a non TTY device
-#- docker login -u "$CI_CUSTOM_DOCKER_HUB_USERNAME" -p "$CI_CUSTOM_DOCKER_HUB_PASSWORD" $DOCKER_HUB_REGISTRY
-#- docker push polyswarm/$CI_PROJECT_NAME:$CI_COMMIT_REF_NAME
-
 image: docker:stable
 
 services:
   - docker:dind
-
-before_script:
-  - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" $CI_REGISTRY
-  
-variables:
-  DOCKER_HUB_REGISTRY: "https://index.docker.io/v1/"
 
 build-master:
     only: 
@@ -22,17 +10,9 @@ build-master:
         - docker
     stage: build
     script:
-        # relay
         - docker build -t $CI_REGISTRY_IMAGE/relay:latest -f docker/Dockerfile .
-        - docker push $CI_REGISTRY_IMAGE/relay:latest
-        
-        # homechain
         - docker build -t $CI_REGISTRY_IMAGE/homechain:latest -f docker/homechain/Dockerfile docker/homechain
-        - docker push $CI_REGISTRY_IMAGE/homechain:latest 
-        
-        # sidechain
         - docker build -t $CI_REGISTRY_IMAGE/sidechain:latest -f docker/sidechain/Dockerfile docker/sidechain
-        - docker push $CI_REGISTRY_IMAGE/sidechain:latest 
 
 build-non-master:
     except: 
@@ -41,14 +21,6 @@ build-non-master:
         - docker
     stage: build
     script:
-        # relay
         - docker build -t $CI_REGISTRY_IMAGE/relay:$CI_COMMIT_REF_NAME -f docker/Dockerfile .
-        - docker push $CI_REGISTRY_IMAGE/relay:$CI_COMMIT_REF_NAME
-        
-        # homechain
         - docker build -t $CI_REGISTRY_IMAGE/homechain:$CI_COMMIT_REF_NAME -f docker/homechain/Dockerfile docker/homechain
-        - docker push $CI_REGISTRY_IMAGE/homechain:$CI_COMMIT_REF_NAME 
-        
-        # sidechain
         - docker build -t $CI_REGISTRY_IMAGE/sidechain:$CI_COMMIT_REF_NAME -f docker/sidechain/Dockerfile docker/sidechain
-        - docker push $CI_REGISTRY_IMAGE/sidechain:$CI_COMMIT_REF_NAME 

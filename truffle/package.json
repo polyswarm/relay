@@ -41,5 +41,8 @@
   "dependencies": {
     "ethjs-abi": "^0.2.1",
     "zeppelin-solidity": "^1.7.0"
+  },
+  "resolutions": {
+    "solidity-coverage/**/growl": "1.10.3"
   }
 }

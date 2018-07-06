@@ -3,24 +3,23 @@ image: docker:stable
 services:
   - docker:dind
 
-build-master:
+before_script:
+  - apk --no-cache add curl
+
+build-docker:
+    tags:
+        - docker
+    stage: test
+    script: 
+        - docker build -t $CI_REGISTRY_IMAGE/relay -f docker/Dockerfile .
+        - docker build -t $CI_REGISTRY_IMAGE/homechain -f docker/homechain/Dockerfile docker/homechain
+        - docker build -t $CI_REGISTRY_IMAGE/sidechain -f docker/sidechain/Dockerfile docker/sidechain
+        
+kick-e2e:
     only: 
         - master
     tags:
         - docker
-    stage: build
+    stage: deploy
     script:
-        - docker build -t $CI_REGISTRY_IMAGE/relay:latest -f docker/Dockerfile .
-        - docker build -t $CI_REGISTRY_IMAGE/homechain:latest -f docker/homechain/Dockerfile docker/homechain
-        - docker build -t $CI_REGISTRY_IMAGE/sidechain:latest -f docker/sidechain/Dockerfile docker/sidechain
-
-build-non-master:
-    except: 
-        - master
-    tags:
-        - docker
-    stage: build
-    script:
-        - docker build -t $CI_REGISTRY_IMAGE/relay:$CI_COMMIT_REF_NAME -f docker/Dockerfile .
-        - docker build -t $CI_REGISTRY_IMAGE/homechain:$CI_COMMIT_REF_NAME -f docker/homechain/Dockerfile docker/homechain
-        - docker build -t $CI_REGISTRY_IMAGE/sidechain:$CI_COMMIT_REF_NAME -f docker/sidechain/Dockerfile docker/sidechain
+       - curl --request POST --form "token=$CI_JOB_TOKEN" --form ref=master https://gitlab.polyswarm.io/api/v4/projects/${CI_CUSTOM_PROJECT_ID_META}/trigger/pipeline

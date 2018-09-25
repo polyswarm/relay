@@ -1,42 +1,24 @@
-FROM ubuntu:xenial
+FROM rust
 LABEL maintainer="PolySwarm Developers <info@polyswarm.io>"
 
-# Install rust
-RUN set -x && \
-    apt-get update && apt-get install -y \
-        build-essential \
-        curl \
-        libssl-dev \
-        pkg-config && \
-    curl https://sh.rustup.rs -sSf | sh -s -- --default-toolchain stable -y && \
-    rm -rf /var/lib/apt/lists/*
-ENV PATH=/root/.cargo/bin:$PATH
+# # create a new empty shell project
+RUN USER=root cargo new --bin relay
+WORKDIR /relay
 
-# Install solc
-RUN set -x && \
-    apt-get update && apt-get install -y software-properties-common && \
-    add-apt-repository ppa:ethereum/ethereum && \
-    apt-get update && apt-get install -y \
-        solc && \
-    rm -rf /var/lib/apt/lists/*
+# copy over your manifests
+COPY ./Cargo.lock ./Cargo.lock
+COPY ./Cargo.toml ./Cargo.toml
 
-# Install truffle
-RUN set -x && \
-    curl -sSf https://deb.nodesource.com/setup_9.x | bash - && \
-    apt-get install -y \
-        nodejs && \
-    rm -rf /var/lib/apt/lists/* && \
-    npm i -g truffle
+# this build step will cache your dependencies
+RUN cargo build --release
+RUN rm src/*.rs
 
-WORKDIR /usr/src/polyswarm-relay
-COPY . .
+# copy your source tree
+COPY ./src ./src
 
-# Install npm Packages
-RUN set -x && \
-    apt-get update && apt-get install -y git
-RUN cd truffle && npm i
+# build for release
+RUN cargo build --release
 
-# Install
 RUN cargo install
 
 CMD ["polyswarm-relay", "docker/config.toml"]

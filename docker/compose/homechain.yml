@@ -10,8 +10,8 @@ services:
             homechain:
                 ipv4_address: 172.20.0.100
         ports:
-            - 6545:8545
-            - 6546:8546
+            - 8545:6545
+            - 8546:6546
     homechain-sealer:
         build:
             context: ../homechain

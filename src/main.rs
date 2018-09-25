@@ -4,6 +4,8 @@ extern crate ctrlc;
 extern crate env_logger;
 extern crate tokio_core;
 extern crate web3;
+extern crate consul;
+extern crate base64;
 
 #[macro_use]
 extern crate error_chain;
@@ -21,6 +23,7 @@ pub mod contracts;
 pub mod errors;
 pub mod relay;
 pub mod settings;
+pub mod consul_config;
 
 #[cfg(test)]
 mod mock;
@@ -71,15 +74,15 @@ fn main() -> Result<()> {
         Network::homechain(
             home_ws.clone(),
             &settings.relay.account,
-            &settings.relay.homechain.token,
-            &settings.relay.homechain.relay,
+            &*consul_config::wait_or_get("homechain".to_string(), "nectar_token_address".to_string()),
+            &*consul_config::wait_or_get("homechain".to_string(), "erc20_relay_address".to_string()),
             settings.relay.confirmations,
         )?,
         Network::sidechain(
             side_ws.clone(),
             &settings.relay.account,
-            &settings.relay.sidechain.token,
-            &settings.relay.sidechain.relay,
+            &*consul_config::wait_or_get("sidechain".to_string(), "nectar_token_address".to_string()),
+            &*consul_config::wait_or_get("sidechain".to_string(), "erc20_relay_address".to_string()),
             settings.relay.confirmations,
             settings.relay.anchor_frequency,
         )?,

@@ -2,8 +2,6 @@ version: '3'
 services:
     consul:
         image: "consul"
-        logging:
-            driver: none
         ports:
             - "8500:8500"
     contracts:
@@ -19,3 +17,7 @@ services:
             - IPFS=http://ipfs:5001
             - OPTIONS=/config/users.yml
             - POLY_SIDECHAIN_NAME=gamma
+        command: ["./scripts/migrate_and_create_config.sh"]
+        networks:
+            - homechain
+            - sidechain

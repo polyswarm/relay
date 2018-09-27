@@ -1,9 +1,7 @@
 version: '3'
 services:
     relay0:
-        build:
-            context: ../../
-            dockerfile: docker/Dockerfile
+        image: "polyswarm/relay"
         depends_on:
             - homechain
             - sidechain
@@ -18,10 +16,9 @@ services:
         networks:
             - homechain
             - sidechain
+            - consul
     relay1:
-        build:
-            context: ../../
-            dockerfile: docker/Dockerfile
+        image: "polyswarm/relay"
         depends_on:
             - homechain
             - sidechain
@@ -36,10 +33,9 @@ services:
         networks:
             - homechain
             - sidechain
+            - consul
     relay2:
-        build:
-            context: ../../
-            dockerfile: docker/Dockerfile
+        image: "polyswarm/relay"
         depends_on:
             - homechain
             - sidechain 
@@ -54,4 +50,5 @@ services:
         networks:
             - homechain
             - sidechain
+            - consul
 

@@ -10,8 +10,8 @@ use web3::types::{Address, BlockId, BlockNumber, FilterBuilder, H256, U256};
 use web3::{DuplexTransport, Web3};
 
 use super::contracts::{TRANSFER_EVENT_SIGNATURE};
+use super::consul_configs::{get_contract_abi};
 use super::errors::*;
-use super::consul_config::{get_contract_abi};
 
 const GAS_LIMIT: u64 = 200000;
 const GAS_PRICE: u64 = 20000000000;
@@ -181,10 +181,10 @@ impl<T: DuplexTransport + 'static> Network<T> {
         let relay_address: Address = clean_0x(relay)
             .parse()
             .chain_err(|| ErrorKind::InvalidAddress(relay.to_owned()))?;
-        let token = Contract::from_json(web3.eth(), token_address, get_contract_abi("ERC20Relay".to_string())
+        let token = Contract::from_json(web3.eth(), token_address, get_contract_abi("NectarToken")
 .as_bytes())
             .chain_err(|| ErrorKind::InvalidContractAbi)?;
-        let relay = Contract::from_json(web3.eth(), relay_address, get_contract_abi("NectarToken".to_string())
+        let relay = Contract::from_json(web3.eth(), relay_address, get_contract_abi("ERC20Relay")
 .as_bytes())
             .chain_err(|| ErrorKind::InvalidContractAbi)?;
 

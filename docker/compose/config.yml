@@ -4,6 +4,8 @@ services:
         image: "consul"
         ports:
             - "8500:8500"
+        networks:
+            consul:
     contracts:
         depends_on:
             - homechain
@@ -15,9 +17,12 @@ services:
             - SIDE_CHAIN=http://sidechain:8545
             - CONSUL=http://consul:8500
             - IPFS=http://ipfs:5001
-            - OPTIONS=/config/users.yml
+            - OPTIONS=/config/config.yml
             - POLY_SIDECHAIN_NAME=gamma
         command: ["./scripts/migrate_and_create_config.sh"]
+        volumes:
+            - "../contracts:/config"
         networks:
             - homechain
             - sidechain
+            - consul

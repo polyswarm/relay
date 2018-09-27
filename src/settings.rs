@@ -33,10 +33,6 @@ pub struct Relay {
 pub struct Network {
     /// URI for the Websocket RPC endpoint for an Ethereum client
     pub ws_uri: String,
-    /// Address of the ERC20 token contract to use
-    pub token: String,
-    /// Address of the ERC20Relay contract to use
-    pub relay: String,
 }
 
 impl Settings {

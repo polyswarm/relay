@@ -23,7 +23,7 @@ pub mod contracts;
 pub mod errors;
 pub mod relay;
 pub mod settings;
-pub mod consul_config;
+pub mod consul_configs;
 
 #[cfg(test)]
 mod mock;
@@ -74,15 +74,15 @@ fn main() -> Result<()> {
         Network::homechain(
             home_ws.clone(),
             &settings.relay.account,
-            &*consul_config::wait_or_get("homechain".to_string(), "nectar_token_address".to_string()),
-            &*consul_config::wait_or_get("homechain".to_string(), "erc20_relay_address".to_string()),
+            &*consul_configs::wait_or_get("homechain", "nectar_token_address"),
+            &*consul_configs::wait_or_get("homechain", "erc20_relay_address"),
             settings.relay.confirmations,
         )?,
         Network::sidechain(
             side_ws.clone(),
             &settings.relay.account,
-            &*consul_config::wait_or_get("sidechain".to_string(), "nectar_token_address".to_string()),
-            &*consul_config::wait_or_get("sidechain".to_string(), "erc20_relay_address".to_string()),
+            &*consul_configs::wait_or_get("sidechain", "nectar_token_address"),
+            &*consul_configs::wait_or_get("sidechain", "erc20_relay_address"),
             settings.relay.confirmations,
             settings.relay.anchor_frequency,
         )?,

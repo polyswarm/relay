@@ -12,3 +12,5 @@ networks:
             driver: default
             config:
                 - subnet: 172.20.1.0/24
+    consul:
+        driver: bridge

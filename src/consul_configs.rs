@@ -20,27 +20,24 @@ pub fn wait_or_get(chain :&str, key :&str) -> String {
             Ok(result) => {
                 done = true;
                 let result_string = result.unwrap();
-                let config = &decode(&result_string).unwrap();
-                let new_config = String::from_utf8_lossy(config);
-                let json: serde_json::Value = serde_json::from_str(&new_config).unwrap();
-
-                ret = json[&key].as_str().expect(&format!("Key {} doesn't exist in consul", &key)).to_string();;
+                let config = decode(&result_string).unwrap();
+                let new_config = String::from_utf8(config).unwrap();
+                let json: serde_json::Value = serde_json::from_str(new_config.as_str()).unwrap();
+                ret = json[&key].as_str().expect(&format!("Key {} doesn't exist in consul", &key)).to_string();
             },
             Err(_) => {
-                eprintln!("{:?} config not availible in consul yet", chain);
+                eprintln!("Chain for {:?} config not availible in consol yet", chain);
                 thread::sleep(one_sec);
                 continue;
             },
-            
         };
-
-
     }
-    
+
     return ret;
 }
 
-pub fn get_contract_abi(contract_name :&str) -> String {
+
+pub fn create_contract_abi(contract_name :&str) -> String {
     let consul_uri = env::var("CONSUL").expect("CONSUL env variable is not defined!");
     let client = Client::new(consul_uri);
     let keystore = client.keystore;
@@ -56,14 +53,15 @@ pub fn get_contract_abi(contract_name :&str) -> String {
             Ok(result) => {
                 done = true;
                 let result_string = result.unwrap();
-                let config = &decode(&result_string).unwrap();
-                let new_config = String::from_utf8_lossy(config);
-                let json: serde_json::Value = serde_json::from_str(&new_config).unwrap();
+                let config = decode(&result_string).unwrap();
+                let new_config = String::from_utf8(config).unwrap();
+                let json: serde_json::Value = serde_json::from_str(&new_config.as_str()).unwrap();
 
                 ret = serde_json::ser::to_string(&json["abi"]).unwrap();
+
             },
             Err(_) => {
-                eprintln!("ABI json for {:?} not availible in consul yet", contract_name);
+                eprintln!("ABI json for {:?} not availible in consol yet", contract_name);
                 thread::sleep(one_sec);
                 continue;
             },

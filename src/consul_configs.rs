@@ -12,12 +12,14 @@ pub fn wait_or_get(chain :&str, key :&str) -> String {
     let one_sec = time::Duration::from_secs(1);
     let mut done = false;
     let mut ret = "".to_string();
+    let mut first = true;
 
-    while !done {  
-        let result = keystore.get_key(format!("{}/{}", &sidechain_name, &chain));
+    while !done {
+        let result = keystore.get_key(format!("chain/{}/{}", &sidechain_name, &chain));
 
         match result {
             Ok(result) => {
+                info!("Chain for {:?} config availible in consol now", chain);
                 done = true;
                 let result_string = result.unwrap();
                 let config = decode(&result_string).unwrap();
@@ -26,7 +28,10 @@ pub fn wait_or_get(chain :&str, key :&str) -> String {
                 ret = json[&key].as_str().expect(&format!("Key {} doesn't exist in consul", &key)).to_string();
             },
             Err(_) => {
-                eprintln!("Chain for {:?} config not availible in consol yet", chain);
+                if first {
+                    eprintln!("Chain for {:?} config not availible in consol yet", chain);
+                    first = false;
+                }
                 thread::sleep(one_sec);
                 continue;
             },
@@ -46,8 +51,8 @@ pub fn create_contract_abi(contract_name :&str) -> String {
     let mut done = false;
     let mut ret = "".to_string();
 
-    while !done {    
-        let result = keystore.get_key(format!("{}/{}", &sidechain_name, &contract_name));
+    while !done {
+        let result = keystore.get_key(format!("chain/{}/{}", &sidechain_name, &contract_name));
 
         match result {
             Ok(result) => {

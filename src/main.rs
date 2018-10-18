@@ -8,7 +8,9 @@ extern crate consul;
 extern crate base64;
 
 #[macro_use]
-extern crate error_chain;
+extern crate failure;
+#[macro_use]
+extern crate failure_derive;
 #[macro_use]
 extern crate log;
 extern crate jsonrpc_core as rpc;
@@ -28,7 +30,7 @@ pub mod consul_configs;
 #[cfg(test)]
 mod mock;
 
-use errors::*;
+use failure::{Error, SyncFailure};
 use relay::{Network, Relay};
 use settings::Settings;
 
@@ -36,7 +38,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-fn main() -> Result<()> {
+fn main() -> Result<(), Error> {
     // Set up ctrl-c handler
     let running = Arc::new(AtomicBool::new(true));
 
@@ -61,14 +63,23 @@ fn main() -> Result<()> {
                 .required(true)
                 .takes_value(true),
         )
+        .arg(
+            Arg::with_name("logging")
+                .value_name("Logging output format")
+                .help("Specify the logging output format")
+                .takes_value(true)
+        )
         .get_matches();
+
     let settings = Settings::new(matches.value_of("config"))?;
 
     // Set up our two websocket connections on the same event loop
     let mut eloop = tokio_core::reactor::Core::new()?;
     let handle = eloop.handle();
-    let home_ws = web3::transports::WebSocket::with_event_loop(&settings.relay.homechain.ws_uri, &handle)?;
-    let side_ws = web3::transports::WebSocket::with_event_loop(&settings.relay.sidechain.ws_uri, &handle)?;
+    let home_ws = web3::transports::WebSocket::with_event_loop(&settings.relay.homechain.ws_uri, &handle)
+        .map_err(SyncFailure::new)?;
+    let side_ws = web3::transports::WebSocket::with_event_loop(&settings.relay.sidechain.ws_uri, &handle)
+        .map_err(SyncFailure::new)?;
 
     let relay = Relay::new(
         Network::homechain(

@@ -9,9 +9,11 @@ use web3::futures::{Future, Stream};
 use web3::types::{Address, BlockId, BlockNumber, FilterBuilder, H256, U256};
 use web3::{DuplexTransport, Web3};
 
+use failure::{Error, SyncFailure};
+
 use super::contracts::{TRANSFER_EVENT_SIGNATURE};
 use super::consul_configs::{create_contract_abi};
-use super::errors::*;
+use super::errors::{OperationError};
 
 const GAS_LIMIT: u64 = 200000;
 const GAS_PRICE: u64 = 20000000000;
@@ -170,23 +172,29 @@ impl<T: DuplexTransport + 'static> Network<T> {
         relay: &str,
         confirmations: u64,
         anchor_frequency: u64,
-    ) -> Result<Self> {
+    ) -> Result<Self, OperationError> {
         let web3 = Web3::new(transport);
+        // let account = clean_0x(account)
+        //     .parse()
+        //     .chain_err(|| OperationError::InvalidAddress(account.to_owned()))?;
         let account = clean_0x(account)
             .parse()
-            .chain_err(|| ErrorKind::InvalidAddress(account.to_owned()))?;
+            .or(Err(OperationError::InvalidAddress(account.into())))?;
+
         let token_address: Address = clean_0x(token)
             .parse()
-            .chain_err(|| ErrorKind::InvalidAddress(token.to_owned()))?;
+            .or(Err(OperationError::InvalidAddress(token.into())))?;
+
         let relay_address: Address = clean_0x(relay)
             .parse()
-            .chain_err(|| ErrorKind::InvalidAddress(relay.to_owned()))?;
+            .or(Err(OperationError::InvalidAddress(relay.into())))?;
+
         let token = Contract::from_json(web3.eth(), token_address, create_contract_abi("NectarToken")
 .as_bytes())
-            .chain_err(|| ErrorKind::InvalidContractAbi)?;
+            .or(Err(OperationError::InvalidContractAbi))?;
         let relay = Contract::from_json(web3.eth(), relay_address, create_contract_abi("ERC20Relay")
 .as_bytes())
-            .chain_err(|| ErrorKind::InvalidContractAbi)?;
+            .or(Err(OperationError::InvalidContractAbi))?;
 
         Ok(Self {
             network_type,
@@ -207,7 +215,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
     /// * `token` - Address of the ERC20 token contract to use
     /// * `relay` - Address of the ERC20Relay contract to use
     /// * `confirmations` - Number of blocks to wait for confirmation
-    pub fn homechain(transport: T, account: &str, token: &str, relay: &str, confirmations: u64) -> Result<Self> {
+    pub fn homechain(transport: T, account: &str, token: &str, relay: &str, confirmations: u64) -> Result<Self, OperationError> {
         Self::new(NetworkType::Home, transport, account, token, relay, confirmations, 0)
     }
 
@@ -227,7 +235,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
         relay: &str,
         confirmations: u64,
         anchor_frequency: u64,
-    ) -> Result<Self> {
+    ) -> Result<Self, OperationError> {
         Self::new(
             NetworkType::Side,
             transport,
@@ -249,10 +257,11 @@ impl<T: DuplexTransport + 'static> Network<T> {
         self.web3
             .personal()
             .unlock_account(account, password, Some(0))
+            .map_err(SyncFailure::new)
             .map_err(|e| e.into())
             .and_then(move |success| {
                 if !success {
-                    return Err(ErrorKind::CouldNotUnlockAccount(account).into());
+                    return Err(OperationError::CouldNotUnlockAccount(account.into()))?;
                 }
                 Ok(())
             })

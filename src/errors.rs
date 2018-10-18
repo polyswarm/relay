@@ -1,43 +1,32 @@
-error_chain!{
-    links {
-        Web3(::web3::error::Error, ::web3::error::ErrorKind);
-    }
+/// # Rationale
+/// Relay defines multiple failure types to have an easy way to delineate
+/// between errors we may want to emit during verbose logging or to allow the
+/// user to filter errors on which "unit" an error arises from.
 
-    foreign_links {
-        Io(::std::io::Error);
-        Config(::config::ConfigError);
-        Ctrlc(::ctrlc::Error);
-    }
+/// OperationError defines errors resulting from interaction from, between or
+/// with the chains.
+#[derive(Fail, Debug, Clone, PartialEq)]
+pub enum OperationError {
+    #[fail(display = "invalid contract abi")]
+    InvalidContractAbi,
 
-    errors {
-        CouldNotUnlockAccount(account: ::web3::types::Address) {
-            description("could not unlock account, check password"),
-            display("could not unlock account '{}', check password", account),
-        }
+    #[fail(display = "invalid address: '{}'", _0)]
+    InvalidAddress(String),
 
-        InvalidConfigFilePath {
-            description("invalid config file path"),
-            display("invalid config file path"),
-        }
+    #[fail(display = "could not unlock account '{}', check password", _0)]
+    CouldNotUnlockAccount(::web3::types::Address),
+}
 
-        InvalidAnchorFrequency {
-            description("invalid anchor frequency, must be non-zero"),
-            display("invalid anchor frequency, must be non-zero"),
-        }
+/// ConfigError defines errors arising from an application misconfiguration,
+/// they should *only* be triggered at startup.
+#[derive(Fail, Debug, PartialEq, Clone)]
+pub enum ConfigError {
+    #[fail(display = "invalid config file path")]
+    InvalidConfigFilePath,
 
-        InvalidConfirmations {
-            description("invalid confirmations, must be less than anchor frequency"),
-            display("invalid confirmations, must be less than anchor frequency"),
-        }
+    #[fail(display = "invalid confirmations, must be less than anchor frequency")]
+    InvalidConfirmations,
 
-        InvalidAddress(addr: String) {
-            description("invalid address"),
-            display("invalid address: '{}'", addr),
-        }
-
-        InvalidContractAbi {
-            description("invalid contract abi"),
-            display("invalid contract abi"),
-        }
-    }
+    #[fail(display = "invalid anchor frequency, must be non-zero")]
+    InvalidAnchorFrequency
 }

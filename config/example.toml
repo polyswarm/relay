@@ -1,3 +1,7 @@
+[logging]
+    # Supports "json" or "raw"
+    format = "json"
+
 [relay]
     anchor_frequency = 100
     confirmations = 20

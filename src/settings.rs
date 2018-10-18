@@ -1,14 +1,42 @@
 use config::{Config, Environment, File};
 use std::path::Path;
+use failure::{Error};
 
-use super::errors::*;
+use super::errors::{ConfigError};
 
 /// Settings for the application
 #[derive(Debug, Deserialize)]
 pub struct Settings {
     /// Relay settings
     pub relay: Relay,
+    pub logging: LogFmt,
 }
+
+
+/// Relay settings
+#[derive(Debug, Deserialize)]
+pub enum LogFmt {
+    Raw,
+    JSON,
+}
+
+impl LogFmt {
+    pub fn from_str(s: &str) -> Option<LogFmt> {
+        match s {
+            "raw" => Some(LogFmt::Raw),
+            "json" => Some(LogFmt::JSON),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            LogFmt::Raw => "raw",
+            LogFmt::JSON => "json",
+        }
+    }
+}
+
 
 /// Relay settings
 #[derive(Debug, Deserialize)]

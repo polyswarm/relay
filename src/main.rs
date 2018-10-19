@@ -7,7 +7,6 @@ extern crate web3;
 extern crate consul;
 extern crate base64;
 
-#[macro_use]
 extern crate failure;
 #[macro_use]
 extern crate failure_derive;
@@ -29,14 +28,18 @@ pub mod consul_configs;
 
 #[cfg(test)]
 mod mock;
+use std::io::Write;
 
 use failure::{Error, SyncFailure};
 use relay::{Network, Relay};
-use settings::Settings;
+use settings::{LogFmt, Settings};
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
+
+use log::{Record, LevelFilter};
+use env_logger::Builder;
 
 fn main() -> Result<(), Error> {
     // Set up ctrl-c handler
@@ -48,8 +51,7 @@ fn main() -> Result<(), Error> {
         running_.store(false, Ordering::SeqCst);
     })?;
 
-    // Set up logger
-    env_logger::init();
+    let mut builder = env_logger::Builder::new();
 
     // Parse options
     let matches = App::new("Polyswarm Relay")
@@ -72,6 +74,19 @@ fn main() -> Result<(), Error> {
         .get_matches();
 
     let settings = Settings::new(matches.value_of("config"))?;
+
+    // borrow rather than copying for the benefit of the following closure
+    let log_format = settings.logging.format;
+    builder
+        .format(move |buf, record| {
+            match log_format {
+                LogFmt::Raw => write!(buf, "msg= {}", record.args()),
+                LogFmt::JSON => write!(buf, "{{ unit: \"relay-rust\", message: {} }}", record.args()),
+            }
+
+        })
+        .filter(None, LevelFilter::Info)
+        .init();
 
     // Set up our two websocket connections on the same event loop
     let mut eloop = tokio_core::reactor::Core::new()?;

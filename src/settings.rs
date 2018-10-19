@@ -9,7 +9,7 @@ use super::errors::{ConfigError};
 pub struct Settings {
     /// Relay settings
     pub relay: Relay,
-    pub logging: LogFmt,
+    pub logging: Logging,
 }
 
 
@@ -19,6 +19,13 @@ pub enum LogFmt {
     Raw,
     JSON,
 }
+
+#[derive(Debug, Deserialize)]
+pub struct Logging {
+    pub format: LogFmt
+}
+
+
 
 impl LogFmt {
     pub fn from_str(s: &str) -> Option<LogFmt> {
@@ -36,7 +43,6 @@ impl LogFmt {
         }
     }
 }
-
 
 /// Relay settings
 #[derive(Debug, Deserialize)]

@@ -59,12 +59,15 @@ fn main() -> Result<(), Error> {
         .about("Relays ERC20 tokens between two different networks.")
         .arg(
             Arg::with_name("config")
+                .short("c")
+                .long("config")
                 .value_name("TOML config file")
                 .help("Configures the two networks we will relay between")
                 .required(true)
                 .takes_value(true),
         ).arg(
-            Arg::with_name("logging")
+            Arg::with_name("logfmt")
+                .long("logfmt")
                 .value_name("Logging output format")
                 .help("Specify the logging output format")
                 .takes_value(true),

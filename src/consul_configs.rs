@@ -1,10 +1,10 @@
+use base64::decode;
 use consul::Client;
-use base64::{decode};
 use serde_json;
-use std::{thread, time};
 use std::env;
+use std::{thread, time};
 
-pub fn wait_or_get(chain :&str, key :&str) -> String {
+pub fn wait_or_get(chain: &str, key: &str) -> String {
     let consul_uri = env::var("CONSUL").expect("CONSUL env variable is not defined!");
     let client = Client::new(consul_uri);
     let keystore = client.keystore;
@@ -25,8 +25,11 @@ pub fn wait_or_get(chain :&str, key :&str) -> String {
                 let config = decode(&result_string).unwrap();
                 let new_config = String::from_utf8(config).unwrap();
                 let json: serde_json::Value = serde_json::from_str(new_config.as_str()).unwrap();
-                ret = json[&key].as_str().expect(&format!("Key {} doesn't exist in consul", &key)).to_string();
-            },
+                ret = json[&key]
+                    .as_str()
+                    .expect(&format!("Key {} doesn't exist in consul", &key))
+                    .to_string();
+            }
             Err(_) => {
                 if first {
                     eprintln!("Chain for {:?} config not availible in consol yet", chain);
@@ -34,15 +37,14 @@ pub fn wait_or_get(chain :&str, key :&str) -> String {
                 }
                 thread::sleep(one_sec);
                 continue;
-            },
+            }
         };
     }
 
     return ret;
 }
 
-
-pub fn create_contract_abi(contract_name :&str) -> String {
+pub fn create_contract_abi(contract_name: &str) -> String {
     let consul_uri = env::var("CONSUL").expect("CONSUL env variable is not defined!");
     let client = Client::new(consul_uri);
     let keystore = client.keystore;
@@ -63,13 +65,12 @@ pub fn create_contract_abi(contract_name :&str) -> String {
                 let json: serde_json::Value = serde_json::from_str(&new_config.as_str()).unwrap();
 
                 ret = serde_json::ser::to_string(&json["abi"]).unwrap();
-
-            },
+            }
             Err(_) => {
                 eprintln!("ABI json for {:?} not availible in consol yet", contract_name);
                 thread::sleep(one_sec);
                 continue;
-            },
+            }
         }
     }
 

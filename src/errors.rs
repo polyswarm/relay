@@ -28,5 +28,5 @@ pub enum ConfigError {
     InvalidConfirmations,
 
     #[fail(display = "invalid anchor frequency, must be non-zero")]
-    InvalidAnchorFrequency
+    InvalidAnchorFrequency,
 }

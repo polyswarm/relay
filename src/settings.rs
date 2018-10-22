@@ -1,8 +1,8 @@
 use config::{Config, Environment, File};
+use failure::Error;
 use std::path::Path;
-use failure::{Error};
 
-use super::errors::{ConfigError};
+use super::errors::ConfigError;
 
 /// Settings for the application
 #[derive(Debug, Deserialize)]
@@ -11,7 +11,6 @@ pub struct Settings {
     pub relay: Relay,
     pub logging: Logging,
 }
-
 
 /// Relay settings
 #[derive(Debug, Deserialize)]
@@ -22,10 +21,8 @@ pub enum LogFmt {
 
 #[derive(Debug, Deserialize)]
 pub struct Logging {
-    pub format: LogFmt
+    pub format: LogFmt,
 }
-
-
 
 impl LogFmt {
     pub fn from_str(s: &str) -> Option<LogFmt> {
@@ -68,7 +65,6 @@ pub struct Network {
     /// URI for the Websocket RPC endpoint for an Ethereum client
     pub ws_uri: String,
 }
-
 
 impl Settings {
     /// Construct a new settings object from a file path and the environment

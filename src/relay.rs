@@ -11,9 +11,9 @@ use web3::{DuplexTransport, Web3};
 
 use failure::{Error, SyncFailure};
 
-use super::contracts::{TRANSFER_EVENT_SIGNATURE};
-use super::consul_configs::{create_contract_abi};
-use super::errors::{OperationError};
+use super::consul_configs::create_contract_abi;
+use super::contracts::TRANSFER_EVENT_SIGNATURE;
+use super::errors::OperationError;
 
 const GAS_LIMIT: u64 = 200000;
 const GAS_PRICE: u64 = 20000000000;
@@ -93,8 +93,7 @@ impl<T: DuplexTransport + 'static> Relay<T> {
                 Self::transfer_future(self.homechain.clone(), self.sidechain.clone(), handle).join(
                     Self::transfer_future(self.sidechain.clone(), self.homechain.clone(), handle),
                 ),
-            )
-            .and_then(|_| Ok(()))
+            ).and_then(|_| Ok(()))
     }
 }
 
@@ -189,11 +188,9 @@ impl<T: DuplexTransport + 'static> Network<T> {
             .parse()
             .or(Err(OperationError::InvalidAddress(relay.into())))?;
 
-        let token = Contract::from_json(web3.eth(), token_address, create_contract_abi("NectarToken")
-.as_bytes())
+        let token = Contract::from_json(web3.eth(), token_address, create_contract_abi("NectarToken").as_bytes())
             .or(Err(OperationError::InvalidContractAbi))?;
-        let relay = Contract::from_json(web3.eth(), relay_address, create_contract_abi("ERC20Relay")
-.as_bytes())
+        let relay = Contract::from_json(web3.eth(), relay_address, create_contract_abi("ERC20Relay").as_bytes())
             .or(Err(OperationError::InvalidContractAbi))?;
 
         Ok(Self {
@@ -215,7 +212,13 @@ impl<T: DuplexTransport + 'static> Network<T> {
     /// * `token` - Address of the ERC20 token contract to use
     /// * `relay` - Address of the ERC20Relay contract to use
     /// * `confirmations` - Number of blocks to wait for confirmation
-    pub fn homechain(transport: T, account: &str, token: &str, relay: &str, confirmations: u64) -> Result<Self, OperationError> {
+    pub fn homechain(
+        transport: T,
+        account: &str,
+        token: &str,
+        relay: &str,
+        confirmations: u64,
+    ) -> Result<Self, OperationError> {
         Self::new(NetworkType::Home, transport, account, token, relay, confirmations, 0)
     }
 
@@ -281,8 +284,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
                 None,
                 Some(vec![self.relay.address().into()]),
                 None,
-            )
-            .build();
+            ).build();
 
         let future = {
             let network_type = self.network_type;
@@ -336,19 +338,17 @@ impl<T: DuplexTransport + 'static> Network<T> {
                                         info!("transfer event confirmed, approving {}", &transfer);
                                         tx.unbounded_send(transfer).unwrap();
                                         Ok(())
-                                    })
-                                        .or_else(|e| {
-                                            error!("error waiting for transfer confirmations: {}", e);
-                                            Ok(())
-                                        }),
+                                    }).or_else(|e| {
+                                        error!("error waiting for transfer confirmations: {}", e);
+                                        Ok(())
+                                    }),
                                 );
 
                                 Ok(())
                             },
                         )
                     })
-                })
-                .or_else(move |e| {
+                }).or_else(move |e| {
                     error!("error in {:?} transfer stream: {}", network_type, e);
                     Ok(())
                 })
@@ -418,8 +418,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
 
                                                     tx.unbounded_send(anchor).unwrap();
                                                     Ok(())
-                                                })
-                                                .or_else(|e| {
+                                                }).or_else(|e| {
                                                     error!("error waiting for anchor confirmations: {}", e);
                                                     Ok(())
                                                 }),
@@ -432,8 +431,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
                             },
                         )
                     })
-                })
-                .or_else(move |e| {
+                }).or_else(move |e| {
                     error!("error in {:?} anchor stream: {}", network_type, e);
                     Ok(())
                 })
@@ -467,12 +465,10 @@ impl<T: DuplexTransport + 'static> Network<T> {
                     options.gas_price = Some(GAS_PRICE.into());
                 }),
                 self.confirmations as usize,
-            )
-            .and_then(|receipt| {
+            ).and_then(|receipt| {
                 info!("withdrawal approved: {:?}", receipt);
                 Ok(())
-            })
-            .or_else(|e| {
+            }).or_else(|e| {
                 error!("error approving withdrawal: {}", e);
                 Ok(())
             })
@@ -495,12 +491,10 @@ impl<T: DuplexTransport + 'static> Network<T> {
                     options.gas_price = Some(GAS_PRICE.into());
                 }),
                 self.confirmations as usize,
-            )
-            .and_then(|receipt| {
+            ).and_then(|receipt| {
                 info!("anchor processed: {:?}", receipt);
                 Ok(())
-            })
-            .or_else(|e| {
+            }).or_else(|e| {
                 error!("error anchoring block: {}", e);
                 Ok(())
             })

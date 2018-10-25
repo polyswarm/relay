@@ -173,9 +173,6 @@ impl<T: DuplexTransport + 'static> Network<T> {
         anchor_frequency: u64,
     ) -> Result<Self, OperationError> {
         let web3 = Web3::new(transport);
-        // let account = clean_0x(account)
-        //     .parse()
-        //     .chain_err(|| OperationError::InvalidAddress(account.to_owned()))?;
         let account = clean_0x(account)
             .parse()
             .or(Err(OperationError::InvalidAddress(account.into())))?;

@@ -12,33 +12,10 @@ pub struct Settings {
     pub logging: Logging,
 }
 
-/// Relay settings
 #[derive(Debug, Deserialize)]
-pub enum LogFmt {
-    Raw,
-    JSON,
-}
-
-#[derive(Debug, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub struct Logging {
-    pub format: LogFmt,
-}
-
-impl LogFmt {
-    pub fn from_str(s: &str) -> Option<LogFmt> {
-        match s {
-            "raw" => Some(LogFmt::Raw),
-            "json" => Some(LogFmt::JSON),
-            _ => None,
-        }
-    }
-
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            LogFmt::Raw => "raw",
-            LogFmt::JSON => "json",
-        }
-    }
+    pub format: String,
 }
 
 /// Relay settings
@@ -78,15 +55,12 @@ impl Settings {
     {
         let mut c = Config::new();
 
-        // We won't need to derive implementation from enum discriminator so
-        // don't bother implementing conversion for ValueKinds.
-        c.set_default("logging.format", LogFmt::JSON.as_str())?;
-
         c.set_default("relay.confirmations", 12)?;
         c.set_default("relay.anchor_frequency", 100)?;
 
         if let Some(p) = path {
             let ps = p.as_ref().to_str();
+
             if let Some(path_str) = ps {
                 c.merge(File::with_name(path_str))?;
             } else {
@@ -95,14 +69,21 @@ impl Settings {
         }
 
         c.merge(Environment::new())?;
-        c.try_into().map_err(|e| e.into()).and_then(|s: Self| s.validated())
+        c.try_into()
+            .map_err(|e| e.into())
+            .and_then(|s: Self| s.validated().map_err(|e| e.into()))
     }
 
-    fn validated(self) -> Result<Self, Error> {
+    fn validated(self) -> Result<Self, ConfigError> {
+        match self.logging.format.as_ref() {
+            "raw" | "json" => (),
+            _ => return Err(ConfigError::InvalidLogFmt)
+        }
+
         if self.relay.anchor_frequency == 0 {
-            Err(ConfigError::InvalidAnchorFrequency.into())
+            Err(ConfigError::InvalidAnchorFrequency)
         } else if self.relay.confirmations >= self.relay.anchor_frequency {
-            Err(ConfigError::InvalidConfirmations.into())
+            Err(ConfigError::InvalidConfirmations)
         } else {
             Ok(self)
         }

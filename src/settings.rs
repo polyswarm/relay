@@ -12,10 +12,15 @@ pub struct Settings {
     pub logging: Logging,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub struct Logging {
-    pub format: String,
+/// Logging settings
+///
+/// Currently just formatting style, but future loggers can complex embed options in their variant,
+/// so we derive Clone
+#[derive(Clone, Debug, Deserialize)]
+#[serde(tag = "format", rename_all = "snake_case")]
+pub enum Logging {
+    Raw,
+    Json,
 }
 
 /// Relay settings
@@ -59,27 +64,18 @@ impl Settings {
         c.set_default("relay.anchor_frequency", 100)?;
 
         if let Some(p) = path {
-            let ps = p.as_ref().to_str();
-
-            if let Some(path_str) = ps {
-                c.merge(File::with_name(path_str))?;
-            } else {
-                return Err(ConfigError::InvalidConfigFilePath.into());
-            }
+            let ps = p.as_ref().to_str().ok_or(ConfigError::InvalidConfigFilePath)?;
+            c.merge(File::with_name(ps))?;
         }
 
         c.merge(Environment::new())?;
+
         c.try_into()
             .map_err(|e| e.into())
             .and_then(|s: Self| s.validated().map_err(|e| e.into()))
     }
 
     fn validated(self) -> Result<Self, ConfigError> {
-        match self.logging.format.as_ref() {
-            "raw" | "json" => (),
-            _ => return Err(ConfigError::InvalidLogFmt)
-        }
-
         if self.relay.anchor_frequency == 0 {
             Err(ConfigError::InvalidAnchorFrequency)
         } else if self.relay.confirmations >= self.relay.anchor_frequency {

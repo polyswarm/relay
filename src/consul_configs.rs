@@ -41,7 +41,7 @@ pub fn wait_or_get(chain: &str, key: &str) -> String {
         };
     }
 
-    return ret;
+    ret
 }
 
 pub fn create_contract_abi(contract_name: &str) -> String {
@@ -74,5 +74,5 @@ pub fn create_contract_abi(contract_name: &str) -> String {
         }
     }
 
-    return ret;
+    ret
 }

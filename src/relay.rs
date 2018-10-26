@@ -15,8 +15,8 @@ use super::consul_configs::create_contract_abi;
 use super::contracts::TRANSFER_EVENT_SIGNATURE;
 use super::errors::OperationError;
 
-const GAS_LIMIT: u64 = 200000;
-const GAS_PRICE: u64 = 20000000000;
+const GAS_LIMIT: u64 = 200_000;
+const GAS_PRICE: u64 = 20_000_000_000;
 
 // From ethereum_types but not reexported by web3
 fn clean_0x(s: &str) -> &str {
@@ -49,7 +49,7 @@ impl<T: DuplexTransport + 'static> Relay<T> {
     }
 
     fn transfer_future(
-        chain_a: Rc<Network<T>>,
+        chain_a: &Rc<Network<T>>,
         chain_b: Rc<Network<T>>,
         handle: &reactor::Handle,
     ) -> impl Future<Item = (), Error = ()> {
@@ -62,8 +62,8 @@ impl<T: DuplexTransport + 'static> Relay<T> {
     }
 
     fn anchor_future(
+        sidechain: &Rc<Network<T>>,
         homechain: Rc<Network<T>>,
-        sidechain: Rc<Network<T>>,
         handle: &reactor::Handle,
     ) -> impl Future<Item = (), Error = ()> {
         sidechain.anchor_stream(handle).for_each(move |anchor| {
@@ -88,11 +88,13 @@ impl<T: DuplexTransport + 'static> Relay<T> {
     ///
     /// * `handle` - Handle to the event loop to spawn additional futures
     pub fn run(&self, handle: &reactor::Handle) -> impl Future<Item = (), Error = ()> {
-        Self::anchor_future(self.homechain.clone(), self.sidechain.clone(), handle)
+        Self::anchor_future(&self.sidechain, self.homechain.clone(), handle)
             .join(
-                Self::transfer_future(self.homechain.clone(), self.sidechain.clone(), handle).join(
-                    Self::transfer_future(self.sidechain.clone(), self.homechain.clone(), handle),
-                ),
+                Self::transfer_future(&self.homechain, self.sidechain.clone(), handle).join(Self::transfer_future(
+                    &self.sidechain,
+                    self.homechain.clone(),
+                    handle,
+                )),
             ).and_then(|_| Ok(()))
     }
 }
@@ -175,15 +177,15 @@ impl<T: DuplexTransport + 'static> Network<T> {
         let web3 = Web3::new(transport);
         let account = clean_0x(account)
             .parse()
-            .or(Err(OperationError::InvalidAddress(account.into())))?;
+            .or_else(|_| Err(OperationError::InvalidAddress(account.into())))?;
 
         let token_address: Address = clean_0x(token)
             .parse()
-            .or(Err(OperationError::InvalidAddress(token.into())))?;
+            .or_else(|_| Err(OperationError::InvalidAddress(token.into())))?;
 
         let relay_address: Address = clean_0x(relay)
             .parse()
-            .or(Err(OperationError::InvalidAddress(relay.into())))?;
+            .or_else(|_| Err(OperationError::InvalidAddress(relay.into())))?;
 
         let token = Contract::from_json(web3.eth(), token_address, create_contract_abi("NectarToken").as_bytes())
             .or(Err(OperationError::InvalidContractAbi))?;
@@ -261,7 +263,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
             .map_err(|e| e.into())
             .and_then(move |success| {
                 if !success {
-                    return Err(OperationError::CouldNotUnlockAccount(account.into()))?;
+                    return Err(OperationError::CouldNotUnlockAccount(format!("{:?}", &account)))?;
                 }
                 Ok(())
             })
@@ -314,7 +316,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
                                     &tx_hash
                                 );
 
-                                &handle.spawn(
+                                handle.spawn(
                                     wait_for_transaction_confirmation(
                                         transport.clone(),
                                         tx_hash,

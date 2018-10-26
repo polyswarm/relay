@@ -14,7 +14,7 @@ pub enum OperationError {
     InvalidAddress(String),
 
     #[fail(display = "could not unlock account '{}', check password", _0)]
-    CouldNotUnlockAccount(::web3::types::Address),
+    CouldNotUnlockAccount(String),
 }
 
 /// ConfigError defines errors arising from an application misconfiguration,

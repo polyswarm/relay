@@ -9,12 +9,14 @@ use web3::futures::{Future, Stream};
 use web3::types::{Address, BlockId, BlockNumber, FilterBuilder, H256, U256};
 use web3::{DuplexTransport, Web3};
 
-use super::contracts::{TRANSFER_EVENT_SIGNATURE};
-use super::consul_configs::{create_contract_abi};
-use super::errors::*;
+use failure::{Error, SyncFailure};
 
-const GAS_LIMIT: u64 = 200000;
-const GAS_PRICE: u64 = 20000000000;
+use super::consul_configs::create_contract_abi;
+use super::contracts::TRANSFER_EVENT_SIGNATURE;
+use super::errors::OperationError;
+
+const GAS_LIMIT: u64 = 200_000;
+const GAS_PRICE: u64 = 20_000_000_000;
 
 // From ethereum_types but not reexported by web3
 fn clean_0x(s: &str) -> &str {
@@ -47,7 +49,7 @@ impl<T: DuplexTransport + 'static> Relay<T> {
     }
 
     fn transfer_future(
-        chain_a: Rc<Network<T>>,
+        chain_a: &Rc<Network<T>>,
         chain_b: Rc<Network<T>>,
         handle: &reactor::Handle,
     ) -> impl Future<Item = (), Error = ()> {
@@ -60,8 +62,8 @@ impl<T: DuplexTransport + 'static> Relay<T> {
     }
 
     fn anchor_future(
+        sidechain: &Rc<Network<T>>,
         homechain: Rc<Network<T>>,
-        sidechain: Rc<Network<T>>,
         handle: &reactor::Handle,
     ) -> impl Future<Item = (), Error = ()> {
         sidechain.anchor_stream(handle).for_each(move |anchor| {
@@ -86,13 +88,14 @@ impl<T: DuplexTransport + 'static> Relay<T> {
     ///
     /// * `handle` - Handle to the event loop to spawn additional futures
     pub fn run(&self, handle: &reactor::Handle) -> impl Future<Item = (), Error = ()> {
-        Self::anchor_future(self.homechain.clone(), self.sidechain.clone(), handle)
+        Self::anchor_future(&self.sidechain, self.homechain.clone(), handle)
             .join(
-                Self::transfer_future(self.homechain.clone(), self.sidechain.clone(), handle).join(
-                    Self::transfer_future(self.sidechain.clone(), self.homechain.clone(), handle),
-                ),
-            )
-            .and_then(|_| Ok(()))
+                Self::transfer_future(&self.homechain, self.sidechain.clone(), handle).join(Self::transfer_future(
+                    &self.sidechain,
+                    self.homechain.clone(),
+                    handle,
+                )),
+            ).and_then(|_| Ok(()))
     }
 }
 
@@ -170,23 +173,24 @@ impl<T: DuplexTransport + 'static> Network<T> {
         relay: &str,
         confirmations: u64,
         anchor_frequency: u64,
-    ) -> Result<Self> {
+    ) -> Result<Self, OperationError> {
         let web3 = Web3::new(transport);
         let account = clean_0x(account)
             .parse()
-            .chain_err(|| ErrorKind::InvalidAddress(account.to_owned()))?;
+            .or_else(|_| Err(OperationError::InvalidAddress(account.into())))?;
+
         let token_address: Address = clean_0x(token)
             .parse()
-            .chain_err(|| ErrorKind::InvalidAddress(token.to_owned()))?;
+            .or_else(|_| Err(OperationError::InvalidAddress(token.into())))?;
+
         let relay_address: Address = clean_0x(relay)
             .parse()
-            .chain_err(|| ErrorKind::InvalidAddress(relay.to_owned()))?;
-        let token = Contract::from_json(web3.eth(), token_address, create_contract_abi("NectarToken")
-.as_bytes())
-            .chain_err(|| ErrorKind::InvalidContractAbi)?;
-        let relay = Contract::from_json(web3.eth(), relay_address, create_contract_abi("ERC20Relay")
-.as_bytes())
-            .chain_err(|| ErrorKind::InvalidContractAbi)?;
+            .or_else(|_| Err(OperationError::InvalidAddress(relay.into())))?;
+
+        let token = Contract::from_json(web3.eth(), token_address, create_contract_abi("NectarToken").as_bytes())
+            .or(Err(OperationError::InvalidContractAbi))?;
+        let relay = Contract::from_json(web3.eth(), relay_address, create_contract_abi("ERC20Relay").as_bytes())
+            .or(Err(OperationError::InvalidContractAbi))?;
 
         Ok(Self {
             network_type,
@@ -207,7 +211,13 @@ impl<T: DuplexTransport + 'static> Network<T> {
     /// * `token` - Address of the ERC20 token contract to use
     /// * `relay` - Address of the ERC20Relay contract to use
     /// * `confirmations` - Number of blocks to wait for confirmation
-    pub fn homechain(transport: T, account: &str, token: &str, relay: &str, confirmations: u64) -> Result<Self> {
+    pub fn homechain(
+        transport: T,
+        account: &str,
+        token: &str,
+        relay: &str,
+        confirmations: u64,
+    ) -> Result<Self, OperationError> {
         Self::new(NetworkType::Home, transport, account, token, relay, confirmations, 0)
     }
 
@@ -227,7 +237,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
         relay: &str,
         confirmations: u64,
         anchor_frequency: u64,
-    ) -> Result<Self> {
+    ) -> Result<Self, OperationError> {
         Self::new(
             NetworkType::Side,
             transport,
@@ -249,10 +259,11 @@ impl<T: DuplexTransport + 'static> Network<T> {
         self.web3
             .personal()
             .unlock_account(account, password, Some(0))
+            .map_err(SyncFailure::new)
             .map_err(|e| e.into())
             .and_then(move |success| {
                 if !success {
-                    return Err(ErrorKind::CouldNotUnlockAccount(account).into());
+                    return Err(OperationError::CouldNotUnlockAccount(format!("{:?}", &account)))?;
                 }
                 Ok(())
             })
@@ -272,8 +283,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
                 None,
                 Some(vec![self.relay.address().into()]),
                 None,
-            )
-            .build();
+            ).build();
 
         let future = {
             let network_type = self.network_type;
@@ -306,7 +316,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
                                     &tx_hash
                                 );
 
-                                &handle.spawn(
+                                handle.spawn(
                                     wait_for_transaction_confirmation(
                                         transport.clone(),
                                         tx_hash,
@@ -327,19 +337,17 @@ impl<T: DuplexTransport + 'static> Network<T> {
                                         info!("transfer event confirmed, approving {}", &transfer);
                                         tx.unbounded_send(transfer).unwrap();
                                         Ok(())
-                                    })
-                                        .or_else(|e| {
-                                            error!("error waiting for transfer confirmations: {}", e);
-                                            Ok(())
-                                        }),
+                                    }).or_else(|e| {
+                                        error!("error waiting for transfer confirmations: {}", e);
+                                        Ok(())
+                                    }),
                                 );
 
                                 Ok(())
                             },
                         )
                     })
-                })
-                .or_else(move |e| {
+                }).or_else(move |e| {
                     error!("error in {:?} transfer stream: {}", network_type, e);
                     Ok(())
                 })
@@ -409,8 +417,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
 
                                                     tx.unbounded_send(anchor).unwrap();
                                                     Ok(())
-                                                })
-                                                .or_else(|e| {
+                                                }).or_else(|e| {
                                                     error!("error waiting for anchor confirmations: {}", e);
                                                     Ok(())
                                                 }),
@@ -423,8 +430,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
                             },
                         )
                     })
-                })
-                .or_else(move |e| {
+                }).or_else(move |e| {
                     error!("error in {:?} anchor stream: {}", network_type, e);
                     Ok(())
                 })
@@ -458,12 +464,10 @@ impl<T: DuplexTransport + 'static> Network<T> {
                     options.gas_price = Some(GAS_PRICE.into());
                 }),
                 self.confirmations as usize,
-            )
-            .and_then(|receipt| {
+            ).and_then(|receipt| {
                 info!("withdrawal approved: {:?}", receipt);
                 Ok(())
-            })
-            .or_else(|e| {
+            }).or_else(|e| {
                 error!("error approving withdrawal: {}", e);
                 Ok(())
             })
@@ -486,12 +490,10 @@ impl<T: DuplexTransport + 'static> Network<T> {
                     options.gas_price = Some(GAS_PRICE.into());
                 }),
                 self.confirmations as usize,
-            )
-            .and_then(|receipt| {
+            ).and_then(|receipt| {
                 info!("anchor processed: {:?}", receipt);
                 Ok(())
-            })
-            .or_else(|e| {
+            }).or_else(|e| {
                 error!("error anchoring block: {}", e);
                 Ok(())
             })

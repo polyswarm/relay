@@ -1,13 +1,26 @@
 use config::{Config, Environment, File};
+use failure::Error;
 use std::path::Path;
 
-use super::errors::*;
+use super::errors::ConfigError;
 
 /// Settings for the application
 #[derive(Debug, Deserialize)]
 pub struct Settings {
     /// Relay settings
     pub relay: Relay,
+    pub logging: Logging,
+}
+
+/// Logging settings
+///
+/// Currently just formatting style, but future loggers can complex embed options in their variant,
+/// so we derive Clone
+#[derive(Clone, Debug, Deserialize)]
+#[serde(tag = "format", rename_all = "snake_case")]
+pub enum Logging {
+    Raw,
+    Json,
 }
 
 /// Relay settings
@@ -41,7 +54,7 @@ impl Settings {
     /// # Arguments
     ///
     /// * `path` - Path to a configuration file
-    pub fn new<P>(path: Option<P>) -> Result<Self>
+    pub fn new<P>(path: Option<P>) -> Result<Self, Error>
     where
         P: AsRef<Path>,
     {
@@ -51,19 +64,22 @@ impl Settings {
         c.set_default("relay.anchor_frequency", 100)?;
 
         if let Some(p) = path {
-            let ps = p.as_ref().to_str().chain_err(|| ErrorKind::InvalidConfigFilePath)?;
+            let ps = p.as_ref().to_str().ok_or(ConfigError::InvalidConfigFilePath)?;
             c.merge(File::with_name(ps))?;
         }
 
         c.merge(Environment::new())?;
-        c.try_into().map_err(|e| e.into()).and_then(|s: Self| s.validated())
+
+        c.try_into()
+            .map_err(|e| e.into())
+            .and_then(|s: Self| s.validated().map_err(|e| e.into()))
     }
 
-    fn validated(self) -> Result<Self> {
+    fn validated(self) -> Result<Self, ConfigError> {
         if self.relay.anchor_frequency == 0 {
-            Err(ErrorKind::InvalidAnchorFrequency.into())
+            Err(ConfigError::InvalidAnchorFrequency)
         } else if self.relay.confirmations >= self.relay.anchor_frequency {
-            Err(ErrorKind::InvalidConfirmations.into())
+            Err(ConfigError::InvalidConfirmations)
         } else {
             Ok(self)
         }

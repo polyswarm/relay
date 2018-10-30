@@ -1,13 +1,27 @@
+# This example assumes RELAY_ACCOUNT and RELAY_PASSWORD are passed via the environment
+
+[logging]
+    # Supports "raw" or "json"
+    format = "json"
+
 [relay]
+    # How frequently do we anchor the sidechain to the homechain, in sidechain blocks
     anchor_frequency = 100
+    # Number of confirmations to wait for to ensure transfer has completed
     confirmations = 20
 
 [relay.homechain]
+    # Websocket RPC endpoint for the homechain
     ws-uri = "ws://localhost:8546"
+    # Token contract address for the homechain
     token = "0x273f0a1f19478605e8ee50fa309a933f2a04584b"
+    # Relay contract address for the homechain
     relay = "0x11c60f7c6a3b5d01fb051a81cdcbb144280da8e4"
 
 [relay.sidechain]
+    # Websocket RPC endpoint for the sidechain
     ws-uri = "ws://localhost:8546"
+    # Token contract address for the sidechain
     token = "0x273f0a1f19478605e8ee50fa309a933f2a04584b"
+    # Relay contract address for the sidechain
     relay = "0x11c60f7c6a3b5d01fb051a81cdcbb144280da8e4"

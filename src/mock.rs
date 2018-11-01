@@ -12,6 +12,8 @@ use web3::transports::Result;
 use web3::types::{BlockHeader, Log, H160, H2048, H256, U256};
 use web3::{BatchTransport, DuplexTransport, Error, ErrorKind, RequestId, Transport};
 
+use tokio_core::reactor;
+
 // Result from a MockTask
 pub type MockTask<T> = Box<Future<Item = T, Error = Error>>;
 
@@ -133,21 +135,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn should_build_network_with_mock() {
-        Network::new(
-            NetworkType::Home,
-            MockTransport::new(),
-            "0x5af8bcc6127afde967279dc04661f599a5c0cafa",
-            "0x7e7087c25df885f97aeacbfae84ea12016799eee",
-            "0x7e7087c25df885f97aeacbfae84ea12016799eee",
-            0,
-            0,
-        ).unwrap();
-    }
-
-    #[test]
     fn should_respond_with_add_single_response() {
-        let mut eloop = tokio_core::reactor::Core::new().unwrap();
+        let mut eloop = reactor::Core::new().unwrap();
         let mut mock = MockTransport::new();
         mock.clear_rpc();
         let response = rpc::Value::String("asdf".into());
@@ -160,7 +149,7 @@ mod tests {
 
     #[test]
     fn should_respond_normally_even_with_extra_data() {
-        let mut eloop = tokio_core::reactor::Core::new().unwrap();
+        let mut eloop = reactor::Core::new().unwrap();
         let mut mock = MockTransport::new();
         mock.clear_rpc();
         let response = rpc::Value::String("asdf".into());
@@ -173,7 +162,7 @@ mod tests {
 
     #[test]
     fn should_respond_with_error_when_no_added_single_response() {
-        let mut eloop = tokio_core::reactor::Core::new().unwrap();
+        let mut eloop = reactor::Core::new().unwrap();
         let mut mock = MockTransport::new();
         mock.clear_rpc();
         let finished = eloop.run(mock.execute("eth_accounts", vec![rpc::Value::String("1".into())]));
@@ -182,7 +171,7 @@ mod tests {
 
     #[test]
     fn should_respond_with_result_wrapped_added_batch_response() {
-        let mut eloop = tokio_core::reactor::Core::new().unwrap();
+        let mut eloop = reactor::Core::new().unwrap();
         let mut mock = MockTransport::new();
         mock.clear_rpc();
         let response = rpc::Value::String("asdf".into());
@@ -201,7 +190,7 @@ mod tests {
 
     #[test]
     fn should_respond_with_error_when_no_added_batch_response() {
-        let mut eloop = tokio_core::reactor::Core::new().unwrap();
+        let mut eloop = reactor::Core::new().unwrap();
         let mut mock = MockTransport::new();
         mock.clear_rpc();
         let requests = vec![
@@ -215,7 +204,7 @@ mod tests {
 
     #[test]
     fn should_have_one_error_when_added_batch_too_short() {
-        let mut eloop = tokio_core::reactor::Core::new().unwrap();
+        let mut eloop = reactor::Core::new().unwrap();
         let mut mock = MockTransport::new();
         mock.clear_rpc();
         let response = rpc::Value::String("asdf".into());
@@ -248,7 +237,7 @@ mod tests {
         // Turn Log into an rpc::Value representation
         let value: rpc::Value = serde_json::to_string(&log).unwrap().into();
         // Create event loop & mock
-        let mut eloop = tokio_core::reactor::Core::new().unwrap();
+        let mut eloop = reactor::Core::new().unwrap();
         let mock = MockTransport::new();
         // Create future to subscribe and return vec of logs
         let subscription_id = SubscriptionId::from("a".to_owned());
@@ -282,7 +271,7 @@ mod tests {
         // Turn Log into an rpc::Value representation
         let value: rpc::Value = serde_json::to_string(&header).unwrap().into();
         // Create event loop & mock
-        let mut eloop = tokio_core::reactor::Core::new().unwrap();
+        let mut eloop = reactor::Core::new().unwrap();
         let mock = MockTransport::new();
         // Create future to subscribe and return vec of logs
         let subscription_id = SubscriptionId::from("a".to_owned());

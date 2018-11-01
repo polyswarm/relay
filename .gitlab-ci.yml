@@ -3,23 +3,25 @@ image: docker:stable
 services:
   - docker:dind
 
-before_script:
-  - apk --no-cache add curl jq
+build-relay:
+  stage: build
+  image: rust:1.30
+  script:
+    - cargo build
+
+kick-unittest:
+  stage: test
+  image: rust:1.30
+  script:
+    - cargo test
 
 build-docker:
+    before_script:
+      - apk --no-cache add curl jq
     tags:
       - docker
-    stage: test
+    stage: deploy
     script: 
       - docker build -t $CI_REGISTRY_IMAGE/relay -f docker/Dockerfile .
       - docker build -t $CI_REGISTRY_IMAGE/homechain -f docker/homechain/Dockerfile docker/homechain
       - docker build -t $CI_REGISTRY_IMAGE/sidechain -f docker/sidechain/Dockerfile docker/sidechain
-
-stages:
-  - unittest
-
-kick-unittest:
-  stage: unittest
-  image: rust:1.30
-  script:
-    - cargo test

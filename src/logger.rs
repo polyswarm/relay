@@ -1,6 +1,15 @@
 use log::Level;
 use settings::Logging;
 
+pub fn flush() {
+    // flushing `println!` shouldn't be nessasary unless we are writing
+    // to a hard fd or line discipline is fully buffered. i've
+    // implemented `flush` anyway to this to ensure no termios emit bugs
+    use std::io::stdout;
+    use std::io::Write;
+    let _ = stdout().flush();
+}
+
 mod raw_logger {
     use log::{set_boxed_logger, set_max_level, Level, Log, Metadata, Record, SetLoggerError};
 
@@ -26,7 +35,9 @@ mod raw_logger {
             }
         }
 
-        fn flush(&self) {}
+        fn flush(&self) {
+            super::flush()
+        }
     }
 
     pub fn init(name: &str, level: Level) -> Result<(), SetLoggerError> {
@@ -72,7 +83,9 @@ mod json_logger {
             }
         }
 
-        fn flush(&self) {}
+        fn flush(&self) {
+            super::flush()
+        }
     }
 
     pub fn init(name: &str, level: Level) -> Result<(), SetLoggerError> {

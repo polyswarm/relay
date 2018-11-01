@@ -1,5 +1,5 @@
 use parking_lot::Mutex;
-use relay::{Network, NetworkType};
+use relay::Network;
 use rpc;
 use serde_json;
 use std::collections::BTreeMap;

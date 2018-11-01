@@ -20,6 +20,6 @@ stages:
 
 kick-unittest:
   stage: unittest
-  image: rust
+  image: rust:1.30
   script:
     - cargo test

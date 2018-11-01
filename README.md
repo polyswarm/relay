@@ -1,5 +1,7 @@
 # Polyswarm Relay
 
+[![pipeline status](https://gitlab.polyswarm.io/externalci/relay/badges/master/pipeline.svg)](https://gitlab.polyswarm.io/externalci/relay/commits/master)
+
 This acts as a relay between two networks so deposited ERC20 tokens can be
 transferred between networks.
 

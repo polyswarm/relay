@@ -45,5 +45,5 @@ Overview of Ethereum accounts:
 
 To run:
 
-1. `docker-compose -f compose/sidechain.yml -f compose/homechain.yml -f compose/relay.yml -f compose/networks.yml -f conpose/config.yml up --build`
+1. `docker-compose -f compose/sidechain.yml -f compose/homechain.yml -f compose/relay.yml -f compose/networks.yml -f compose/config.yml up --build`
 1. From polyswarm/contracts Interact with contracts through `truffle console --network={homechain|sidechain]`

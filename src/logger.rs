@@ -1,14 +1,22 @@
 use log::Level;
 use settings::Logging;
+use std::io::stderr;
+use std::io::Write;
 
 pub fn flush() {
     // flushing `println!` shouldn't be nessasary unless we are writing
     // to a hard fd or line discipline is fully buffered. i've
     // implemented `flush` anyway to this to ensure no termios emit bugs
-    use std::io::stdout;
-    use std::io::Write;
-    let _ = stdout().flush();
+    let _ = stderr().flush();
 }
+
+macro_rules! logln(
+    ($($arg:tt)*) => { {
+        use std::io::Write;
+        let r = writeln!(&mut ::std::io::stderr(), $($arg)*);
+        r.expect("failed printing to stderr");
+    } }
+);
 
 mod raw_logger {
     use log::{set_boxed_logger, set_max_level, Level, Log, Metadata, Record, SetLoggerError};
@@ -25,8 +33,7 @@ mod raw_logger {
 
         fn log(&self, record: &Record) {
             if self.enabled(record.metadata()) {
-                println!(
-                    "{} {:<5} [{}] {}",
+                logln!("{} {:<5} [{}] {}",
                     self.name,
                     record.level().to_string(),
                     record.module_path().unwrap_or_default(),
@@ -79,7 +86,7 @@ mod json_logger {
             });
 
             if self.enabled(record.metadata()) {
-                println!("{}", json_record.to_string());
+                logln!("{}", json_record.to_string());
             }
         }
 

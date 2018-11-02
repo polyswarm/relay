@@ -19,7 +19,7 @@ macro_rules! logln(
 );
 
 mod raw_logger {
-    use log::{set_boxed_logger, set_max_level, Level, Log, Metadata, Record, SetLoggerError};
+    use log::{Level, Log, Metadata, Record};
 
     struct RawLogger {
         name: String,
@@ -33,7 +33,8 @@ mod raw_logger {
 
         fn log(&self, record: &Record) {
             if self.enabled(record.metadata()) {
-                logln!("{} {:<5} [{}] {}",
+                logln!(
+                    "{} {:<5} [{}] {}",
                     self.name,
                     record.level().to_string(),
                     record.module_path().unwrap_or_default(),
@@ -47,21 +48,16 @@ mod raw_logger {
         }
     }
 
-    pub fn init(name: &str, level: Level) -> Result<(), SetLoggerError> {
-        let logger = RawLogger {
+    pub fn build(name: &str, level: Level) -> Box<Log> {
+        Box::new(RawLogger {
             name: name.to_owned(),
             level: level,
-        };
-
-        set_boxed_logger(Box::new(logger))?;
-        set_max_level(level.to_level_filter());
-
-        Ok(())
+        })
     }
 }
 
 mod json_logger {
-    use log::{set_boxed_logger, set_max_level, Level, Log, Metadata, Record, SetLoggerError};
+    use log::{Level, Log, Metadata, Record};
 
     pub struct JsonLogger {
         level: Level,
@@ -95,22 +91,23 @@ mod json_logger {
         }
     }
 
-    pub fn init(name: &str, level: Level) -> Result<(), SetLoggerError> {
-        let logger = JsonLogger {
+    pub fn build(name: &str, level: Level) -> Box<Log> {
+        Box::new(JsonLogger {
             level: level,
             name: name.to_owned(),
-        };
-
-        set_boxed_logger(Box::new(logger))?;
-        set_max_level(level.to_level_filter());
-
-        Ok(())
+        })
     }
 }
 
-pub fn init_logger(log_type: Logging, name: &str, level: Level) {
-    match log_type {
-        Logging::Raw => raw_logger::init(name, level),
-        Logging::Json => json_logger::init(name, level),
-    }.unwrap()
+use log::{set_boxed_logger, set_max_level, SetLoggerError};
+
+pub fn init_logger(log_type: Logging, name: &str, level: Level) -> Result<(), SetLoggerError> {
+    set_boxed_logger(match log_type {
+        Logging::Raw => raw_logger::build(name, level),
+        Logging::Json => json_logger::build(name, level),
+    })?;
+
+    set_max_level(level.to_level_filter());
+
+    Ok(())
 }

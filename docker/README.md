@@ -45,10 +45,5 @@ Overview of Ethereum accounts:
 
 To run:
 
-1. `docker-compose -f compose/sidechain.yml -f compose/homechain.yml -f compose/networks.yml up --build`
-1. From `truffle` directory: `truffle migrate --reset --network=homechain`
-1. From `truffle` directory: `truffle migrate --reset --network=sidechain`
-1. Update `docker/config.toml`
-1. Stop `docker-compose` (Ctrl-c)
-1. `docker-compose -f compose/sidechain.yml -f compose/homechain.yml -f compose/relay.yml -f compose/networks.yml up --build`
-1. Interact with contracts through `truffle console --network={homechain|sidechain]`
+1. `docker-compose -f compose/sidechain.yml -f compose/homechain.yml -f compose/relay.yml -f compose/networks.yml -f conpose/config.yml up --build`
+1. From polyswarm/contracts Interact with contracts through `truffle console --network={homechain|sidechain]`

@@ -7,3 +7,6 @@
 
 [relay.sidechain]
     ws-uri = "ws://sidechain:8546"
+
+[logging]
+    format = "json"

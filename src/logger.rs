@@ -21,12 +21,12 @@ macro_rules! logln(
 mod raw_logger {
     use log::{set_boxed_logger, set_max_level, Level, Log, Metadata, Record, SetLoggerError};
 
-    struct SimpleLogger {
+    struct RawLogger {
         name: String,
         level: Level,
     }
 
-    impl Log for SimpleLogger {
+    impl Log for RawLogger {
         fn enabled(&self, metadata: &Metadata) -> bool {
             metadata.level() <= self.level
         }
@@ -48,7 +48,7 @@ mod raw_logger {
     }
 
     pub fn init(name: &str, level: Level) -> Result<(), SetLoggerError> {
-        let logger = SimpleLogger {
+        let logger = RawLogger {
             name: name.to_owned(),
             level: level,
         };

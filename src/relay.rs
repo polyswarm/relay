@@ -413,7 +413,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
                                                         block_number,
                                                     };
 
-                                                    trace!("anchor block confirmed, anchoring: {}", &anchor);
+                                                    info!("anchor block confirmed, anchoring: {}", &anchor);
 
                                                     tx.unbounded_send(anchor).unwrap();
                                                     Ok(())
@@ -447,7 +447,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
     ///
     /// * `transfer` - The transfer to approve
     pub fn approve_withdrawal(&self, transfer: &Transfer) -> impl Future<Item = (), Error = Error> {
-        trace!("approving withdrawal {}", transfer);
+        info!("approving withdrawal {}", transfer);
         self.relay
             .call_with_confirmations(
                 "approveWithdrawal",
@@ -479,7 +479,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
     ///
     /// * `anchor` - The block to anchor
     pub fn anchor(&self, anchor: &Anchor) -> impl Future<Item = (), Error = Error> {
-        trace!("anchoring block {}", anchor);
+        info!("anchoring block {}", anchor);
         self.relay
             .call_with_confirmations(
                 "anchor",

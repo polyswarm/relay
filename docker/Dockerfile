@@ -23,4 +23,4 @@ RUN cargo install
 
 COPY ./docker ./docker
 
-CMD ["polyswarm-relay", "docker/config.toml"]
+CMD ["polyswarm-relay", "--config", "docker/config.toml"]

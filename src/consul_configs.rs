@@ -3,10 +3,15 @@ use consul::Client;
 use serde_json;
 use std::env;
 use std::{thread, time};
+use std::ffi::{OsString};
 
 pub fn wait_or_get(chain: &str, key: &str) -> String {
     let consul_uri = env::var("CONSUL").expect("CONSUL env variable is not defined!");
-    let client = Client::new(consul_uri);
+    let consul_token = match env::var_os("CONSUL_TOKEN") {
+        Some(val) => val,
+        None => OsString::from("")
+    };
+    let client = Client::new(consul_uri, consul_token.to_string_lossy().to_string());
     let keystore = client.keystore;
     let sidechain_name = env::var("POLY_SIDECHAIN_NAME").expect("POLY_SIDECHAIN_NAME env variable is not defined!");
     let one_sec = time::Duration::from_secs(1);
@@ -46,7 +51,11 @@ pub fn wait_or_get(chain: &str, key: &str) -> String {
 
 pub fn create_contract_abi(contract_name: &str) -> String {
     let consul_uri = env::var("CONSUL").expect("CONSUL env variable is not defined!");
-    let client = Client::new(consul_uri);
+    let consul_token = match env::var_os("CONSUL_TOKEN") {
+        Some(val) => val,
+        None => OsString::from("")
+    };
+    let client = Client::new(consul_uri, consul_token.to_string_lossy().to_string());
     let keystore = client.keystore;
     let one_sec = time::Duration::from_secs(1);
     let sidechain_name = env::var("POLY_SIDECHAIN_NAME").expect("Chain name is not defined!");

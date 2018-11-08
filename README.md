@@ -43,3 +43,17 @@ FLAGS:
 ARGS:
     <TOML config file>    Configures the two networks we will relay between
 ```
+
+
+## Running tests
+
+`relay` needs more tests, including both integration and unit tests.
+
+To run a full test suite, use:
+
+```
+$ cargo test all
+```
+
+from the repository root
+

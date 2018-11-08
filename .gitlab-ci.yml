@@ -4,7 +4,7 @@ stages:
   - coverage
   - deploy
 
-kick-lint:
+lint:
   stage: lint
   image: rust:1.30
   allow_failure: true
@@ -14,13 +14,13 @@ kick-lint:
     - rustup component add clippy-preview
     - cargo clippy -- --allow "clippy::redundant_field_names"
 
-kick-test:
+test:
   stage: test
   image: rust:1.30
   script:
     - cargo test --verbose
 
-kick-coverage:
+coverage:
   stage: coverage
   image: rust:1.30
   allow_failure: true
@@ -33,9 +33,7 @@ kick-coverage:
     - cargo install cargo-cov
     - ./testutils/collect_coverage.sh --auto
 
-build-docker:
-    before_script:
-      - apk --no-cache add curl jq
+kick-e2e:
     tags:
         - docker
     stage: deploy

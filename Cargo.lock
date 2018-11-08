@@ -157,7 +157,7 @@ dependencies = [
 [[package]]
 name = "consul"
 version = "0.2.0"
-source = "git+https://github.com/stusmall/consul-rust.git#2414abd9e85b2f4fe52e689960453a0dd0a2e1ef"
+source = "git+https://github.com/polyswarm/consul-rust#d714419c47e8b634ce2be8170fdd023a3f1cd2b5"
 dependencies = [
  "hyper 0.10.13 (registry+https://github.com/rust-lang/crates.io-index)",
  "hyper-openssl 0.2.7 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -796,7 +796,7 @@ dependencies = [
  "base64 0.9.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "clap 2.31.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "config 0.8.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "consul 0.2.0 (git+https://github.com/stusmall/consul-rust.git)",
+ "consul 0.2.0 (git+https://github.com/polyswarm/consul-rust)",
  "ctrlc 3.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "env_logger 0.5.13 (registry+https://github.com/rust-lang/crates.io-index)",
  "failure 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1653,7 +1653,7 @@ dependencies = [
 "checksum cfg-if 0.1.5 (registry+https://github.com/rust-lang/crates.io-index)" = "0c4e7bb64a8ebb0d856483e1e682ea3422f883c5f5615a90d51a2c82fe87fdd3"
 "checksum clap 2.31.2 (registry+https://github.com/rust-lang/crates.io-index)" = "f0f16b89cbb9ee36d87483dc939fe9f1e13c05898d56d7b230a0d4dff033a536"
 "checksum config 0.8.0 (registry+https://github.com/rust-lang/crates.io-index)" = "e595d1735d8ab6b04906bbdcfc671cce2a5e609b6f8e92865e67331cc2f41ba4"
-"checksum consul 0.2.0 (git+https://github.com/stusmall/consul-rust.git)" = "<none>"
+"checksum consul 0.2.0 (git+https://github.com/polyswarm/consul-rust)" = "<none>"
 "checksum core-foundation 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)" = "25bfd746d203017f7d5cbd31ee5d8e17f94b6521c7af77ece6c9e4b2d4b16c67"
 "checksum core-foundation-sys 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)" = "065a5d7ffdcbc8fa145d6f0746f3555025b9097a9e9cda59f7467abae670c78d"
 "checksum crossbeam-deque 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)" = "c1bdc73742c36f7f35ebcda81dbb33a7e0d33757d03a06d9ddca762712ec5ea2"

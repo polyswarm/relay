@@ -53,11 +53,10 @@ impl<T: DuplexTransport + 'static> Relay<T> {
         chain_b: Rc<Network<T>>,
         handle: &reactor::Handle,
     ) -> impl Future<Item = (), Error = ()> {
+        let h = handle.clone();
         chain_a.transfer_stream(handle).for_each(move |transfer| {
-            chain_b.approve_withdrawal(&transfer).or_else(|e| {
-                error!("error approving withdrawal: {}", e);
-                Ok(())
-            })
+            h.spawn(chain_b.approve_withdrawal(&transfer));
+            Ok(())
         })
     }
 
@@ -464,7 +463,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
     /// # Arguments
     ///
     /// * `transfer` - The transfer to approve
-    pub fn approve_withdrawal(&self, transfer: &Transfer) -> impl Future<Item = (), Error = Error> {
+    pub fn approve_withdrawal(&self, transfer: &Transfer) -> impl Future<Item = (), Error = ()> {
         info!("approving withdrawal {}", transfer);
         self.relay
             .call_with_confirmations(

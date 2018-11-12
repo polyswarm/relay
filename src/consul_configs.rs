@@ -4,7 +4,6 @@ use serde_json;
 use std::{thread, time};
 
 pub fn wait_or_get(chain: &str, key: &str, consul_url: &str, consul_token: &str, sidechain_name: &str) -> String {
-
     let client = Client::new(consul_url, consul_token);
     let keystore = client.keystore;
     let one_sec = time::Duration::from_secs(1);
@@ -30,7 +29,7 @@ pub fn wait_or_get(chain: &str, key: &str, consul_url: &str, consul_token: &str,
             }
             Err(_) => {
                 if first {
-                    eprintln!("Chain for {:?} config not availible in consol yet", chain);
+                    info!("Chain for {:?} config not availible in consol yet", chain);
                     first = false;
                 }
                 thread::sleep(one_sec);
@@ -43,7 +42,6 @@ pub fn wait_or_get(chain: &str, key: &str, consul_url: &str, consul_token: &str,
 }
 
 pub fn create_contract_abi(contract_name: &str, consul_url: &str, consul_token: &str, sidechain_name: &str) -> String {
-
     let client = Client::new(consul_url, consul_token);
     let keystore = client.keystore;
     let one_sec = time::Duration::from_secs(1);
@@ -64,7 +62,7 @@ pub fn create_contract_abi(contract_name: &str, consul_url: &str, consul_token: 
                 ret = serde_json::ser::to_string(&json["abi"]).unwrap();
             }
             Err(_) => {
-                eprintln!("ABI json for {:?} not availible in consol yet", contract_name);
+                info!("ABI json for {:?} not availible in consol yet", contract_name);
                 thread::sleep(one_sec);
                 continue;
             }

@@ -13,7 +13,7 @@ use web3::transports::Result;
 use web3::types::{BlockHeader, Log, H160, H2048, H256, U256};
 use web3::{BatchTransport, DuplexTransport, Error, ErrorKind, RequestId, Transport};
 
-// Result from a MockTNetworkTypeask
+// Result from a MockTask
 pub type MockTask<T> = Box<Future<Item = T, Error = Error>>;
 
 // Just hiding the details of the sender
@@ -135,28 +135,29 @@ mod tests {
 
     #[test]
     fn should_build_network_with_mock() {
-
-        let mock_abi = format!(r#"[
-        {{
-          "constant": true,
-          "inputs": [
+        let mock_abi = format!(
+            r#"[
             {{
-              "name": "_state",
-              "type": "bytes"
+              "constant": true,
+              "inputs": [
+                {{
+                  "name": "_state",
+                  "type": "bytes"
+                }}
+              ],
+              "name": "mockConstant",
+              "outputs": [
+                {{
+                  "name": "_flag",
+                  "type": "uint8"
+                }}
+              ],
+              "payable": false,
+              "stateMutability": "pure",
+              "type": "function"
             }}
-          ],
-          "name": "mockConstant",
-          "outputs": [
-            {{
-              "name": "_flag",
-              "type": "uint8"
-            }}
-          ],
-          "payable": false,
-          "stateMutability": "pure",
-          "type": "function"
-        }}
-        ]"#);
+        ]"#
+        );
 
         Network::new(
             NetworkType::Home,

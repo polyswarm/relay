@@ -33,6 +33,7 @@ pub struct Relay<T: DuplexTransport> {
     sidechain: Rc<Network<T>>,
 }
 
+#[cfg_attr(feature = "cargo-clippy", allow(too_many_arguments))]
 impl<T: DuplexTransport + 'static> Relay<T> {
     /// Constructs a token relay given two Ethereum networks
     ///
@@ -220,7 +221,17 @@ impl<T: DuplexTransport + 'static> Network<T> {
         relay_abi: &str,
         confirmations: u64,
     ) -> Result<Self, OperationError> {
-        Self::new(NetworkType::Home, transport, account, token, token_abi, relay, relay_abi, confirmations, 0)
+        Self::new(
+            NetworkType::Home,
+            transport,
+            account,
+            token,
+            token_abi,
+            relay,
+            relay_abi,
+            confirmations,
+            0,
+        )
     }
 
     /// Constructs a new side network
@@ -331,12 +342,12 @@ impl<T: DuplexTransport + 'static> Network<T> {
                                     ).and_then(move |receipt| {
                                         if receipt.block_number.is_none() {
                                             warn!("no block number in transfer receipt");
-                                            return Ok(())
+                                            return Ok(());
                                         }
 
                                         if receipt.block_hash.is_none() {
                                             warn!("no block hash in transfer receipt");
-                                            return Ok(())
+                                            return Ok(());
                                         }
 
                                         let block_hash = receipt.block_hash.unwrap();
@@ -410,36 +421,34 @@ impl<T: DuplexTransport + 'static> Network<T> {
                                         handle.spawn(
                                             web3.eth()
                                                 .block(block_id)
-                                                .and_then(move |block| {
-                                                    match block {
-                                                        Some(b) => {
-                                                            if b.number.is_none() {
-                                                                warn!("no block number in anchor block");
-                                                                return Ok(());
-                                                            }
-
-                                                            if b.hash.is_none() {
-                                                                warn!("no block hash in anchor block");
-                                                                return Ok(());
-                                                            }
-
-                                                            let block_hash: H256 = b.hash.unwrap();
-                                                            let block_number: U256 = b.number.unwrap().into();
-
-                                                            let anchor = Anchor {
-                                                                block_hash,
-                                                                block_number,
-                                                            };
-
-                                                            info!("anchor block confirmed, anchoring: {}", &anchor);
-
-                                                            tx.unbounded_send(anchor).unwrap();
-                                                            Ok(())
-                                                        },
-                                                        None => {
-                                                            warn!("no block found for anchor confirmations");
-                                                            Ok(())
+                                                .and_then(move |block| match block {
+                                                    Some(b) => {
+                                                        if b.number.is_none() {
+                                                            warn!("no block number in anchor block");
+                                                            return Ok(());
                                                         }
+
+                                                        if b.hash.is_none() {
+                                                            warn!("no block hash in anchor block");
+                                                            return Ok(());
+                                                        }
+
+                                                        let block_hash: H256 = b.hash.unwrap();
+                                                        let block_number: U256 = b.number.unwrap().into();
+
+                                                        let anchor = Anchor {
+                                                            block_hash,
+                                                            block_number,
+                                                        };
+
+                                                        info!("anchor block confirmed, anchoring: {}", &anchor);
+
+                                                        tx.unbounded_send(anchor).unwrap();
+                                                        Ok(())
+                                                    }
+                                                    None => {
+                                                        warn!("no block found for anchor confirmations");
+                                                        Ok(())
                                                     }
                                                 }).or_else(|e| {
                                                     error!("error waiting for anchor confirmations: {}", e);

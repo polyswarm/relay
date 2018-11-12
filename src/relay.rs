@@ -65,11 +65,10 @@ impl<T: DuplexTransport + 'static> Relay<T> {
         homechain: Rc<Network<T>>,
         handle: &reactor::Handle,
     ) -> impl Future<Item = (), Error = ()> {
+        let h = handle.clone();
         sidechain.anchor_stream(handle).for_each(move |anchor| {
-            homechain.anchor(&anchor).or_else(|e| {
-                error!("error anchoring block: {}", e);
-                Ok(())
-            })
+            h.spawn(homechain.anchor(&anchor));
+            Ok(())
         })
     }
 
@@ -495,7 +494,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
     /// # Arguments
     ///
     /// * `anchor` - The block to anchor
-    pub fn anchor(&self, anchor: &Anchor) -> impl Future<Item = (), Error = Error> {
+    pub fn anchor(&self, anchor: &Anchor) -> impl Future<Item = (), Error = ()> {
         info!("anchoring block {}", anchor);
         self.relay
             .call_with_confirmations(

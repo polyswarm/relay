@@ -3,10 +3,10 @@
     confirmations = 20
 
 [relay.homechain]
-    ws-uri = "ws://homechain:8546"
+    wsuri = "ws://homechain:8546"
 
 [relay.sidechain]
-    ws-uri = "ws://sidechain:8546"
+    wsuri = "ws://sidechain:8546"
 
 [logging]
     format = "json"

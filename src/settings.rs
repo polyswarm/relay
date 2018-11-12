@@ -17,7 +17,7 @@ pub struct Settings {
 /// Currently just formatting style, but future loggers can complex embed options in their variant,
 /// so we derive Clone
 #[derive(Clone, Debug, Deserialize)]
-#[serde(tag = "format", rename_all = "snake_case")]
+#[serde(tag = "format", rename_all = "kebab-case")]
 pub enum Logging {
     Raw,
     Json,
@@ -42,10 +42,9 @@ pub struct Relay {
 
 /// Per-network settings
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "kebab-case")]
 pub struct Network {
     /// URI for the Websocket RPC endpoint for an Ethereum client
-    pub ws_uri: String,
+    pub wsuri: String,
 }
 
 impl Settings {

@@ -73,9 +73,9 @@ fn main() -> Result<(), Error> {
     // Set up our two websocket connections on the same event loop
     let mut eloop = tokio_core::reactor::Core::new()?;
     let handle = eloop.handle();
-    let home_ws = web3::transports::WebSocket::with_event_loop(&settings.relay.homechain.ws_uri, &handle)
+    let home_ws = web3::transports::WebSocket::with_event_loop(&settings.relay.homechain.wsuri, &handle)
         .map_err(SyncFailure::new)?;
-    let side_ws = web3::transports::WebSocket::with_event_loop(&settings.relay.sidechain.ws_uri, &handle)
+    let side_ws = web3::transports::WebSocket::with_event_loop(&settings.relay.sidechain.wsuri, &handle)
         .map_err(SyncFailure::new)?;
 
     let relay = Relay::new(

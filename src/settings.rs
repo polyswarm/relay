@@ -38,6 +38,12 @@ pub struct Relay {
     pub homechain: Network,
     /// Network to use as the sidechain
     pub sidechain: Network,
+    /// consul url to grab contracts from
+    pub consul: String,
+    /// consul token used to access consul
+    pub consul_token: String,
+    /// poly sidechain name
+    pub poly_sidechain_name: String,
 }
 
 /// Per-network settings
@@ -62,6 +68,8 @@ impl Settings {
 
         c.set_default("relay.confirmations", 12)?;
         c.set_default("relay.anchor_frequency", 100)?;
+        c.set_default("relay.poly_sidechain_name", "")?;
+        c.set_default("relay.consul_token", "")?;
 
         if let Some(p) = path {
             let ps = p.as_ref().to_str().ok_or(ConfigError::InvalidConfigFilePath)?;

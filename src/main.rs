@@ -64,7 +64,8 @@ fn main() -> Result<(), Error> {
                 .help("Configures the two networks we will relay between")
                 .required(true)
                 .takes_value(true),
-        ).get_matches();
+        )
+        .get_matches();
 
     let settings = Settings::new(matches.value_of("config"))?;
 
@@ -82,19 +83,63 @@ fn main() -> Result<(), Error> {
         Network::homechain(
             home_ws.clone(),
             &settings.relay.account,
-            &*consul_configs::wait_or_get("homechain", "nectar_token_address", &settings.relay.consul, &settings.relay.consul_token, &settings.relay.poly_sidechain_name),
-            &*consul_configs::create_contract_abi("NectarToken", &settings.relay.consul, &settings.relay.consul_token, &settings.relay.poly_sidechain_name),
-            &*consul_configs::wait_or_get("homechain", "erc20_relay_address", &settings.relay.consul, &settings.relay.consul_token, &settings.relay.poly_sidechain_name),
-            &*consul_configs::create_contract_abi("ERC20Relay", &settings.relay.consul, &settings.relay.consul_token, &settings.relay.poly_sidechain_name),
+            &*consul_configs::wait_or_get(
+                "homechain",
+                "nectar_token_address",
+                &settings.relay.consul,
+                &settings.relay.consul_token,
+                &settings.relay.poly_sidechain_name,
+            ),
+            &*consul_configs::create_contract_abi(
+                "NectarToken",
+                &settings.relay.consul,
+                &settings.relay.consul_token,
+                &settings.relay.poly_sidechain_name,
+            ),
+            &*consul_configs::wait_or_get(
+                "homechain",
+                "erc20_relay_address",
+                &settings.relay.consul,
+                &settings.relay.consul_token,
+                &settings.relay.poly_sidechain_name,
+            ),
+            &*consul_configs::create_contract_abi(
+                "ERC20Relay",
+                &settings.relay.consul,
+                &settings.relay.consul_token,
+                &settings.relay.poly_sidechain_name,
+            ),
             settings.relay.confirmations,
         )?,
         Network::sidechain(
             side_ws.clone(),
             &settings.relay.account,
-            &*consul_configs::wait_or_get("sidechain", "nectar_token_address", &settings.relay.consul, &settings.relay.consul_token, &settings.relay.poly_sidechain_name),
-            &*consul_configs::create_contract_abi("NectarToken", &settings.relay.consul, &settings.relay.consul_token, &settings.relay.poly_sidechain_name),
-            &*consul_configs::wait_or_get("sidechain", "erc20_relay_address", &settings.relay.consul, &settings.relay.consul_token, &settings.relay.poly_sidechain_name),
-            &*consul_configs::create_contract_abi("ERC20Relay", &settings.relay.consul, &settings.relay.consul_token, &settings.relay.poly_sidechain_name),
+            &*consul_configs::wait_or_get(
+                "sidechain",
+                "nectar_token_address",
+                &settings.relay.consul,
+                &settings.relay.consul_token,
+                &settings.relay.poly_sidechain_name,
+            ),
+            &*consul_configs::create_contract_abi(
+                "NectarToken",
+                &settings.relay.consul,
+                &settings.relay.consul_token,
+                &settings.relay.poly_sidechain_name,
+            ),
+            &*consul_configs::wait_or_get(
+                "sidechain",
+                "erc20_relay_address",
+                &settings.relay.consul,
+                &settings.relay.consul_token,
+                &settings.relay.poly_sidechain_name,
+            ),
+            &*consul_configs::create_contract_abi(
+                "ERC20Relay",
+                &settings.relay.consul,
+                &settings.relay.consul_token,
+                &settings.relay.poly_sidechain_name,
+            ),
             settings.relay.confirmations,
             settings.relay.anchor_frequency,
         )?,

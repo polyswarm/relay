@@ -15,6 +15,9 @@ pub enum OperationError {
 
     #[fail(display = "could not unlock account '{}', check password", _0)]
     CouldNotUnlockAccount(String),
+
+    #[fail(display = "Unable to get key: {} from consul", _0)]
+    CouldNotGetConsulKey(String),
 }
 
 /// ConfigError defines errors arising from an application misconfiguration,

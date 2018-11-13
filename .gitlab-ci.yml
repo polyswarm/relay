@@ -1,12 +1,41 @@
-image: docker:stable
+stages:
+  - lint
+  - test
+  - coverage
+  - deploy
 
-services:
-  - docker:dind
+kick-lint:
+  stage: lint
+  image: rust:1.30
+  allow_failure: true
+  script:
+    - rustup component add rustfmt-preview
+    - cargo fmt --all -- --check
+    - rustup component add clippy-preview
+    - cargo clippy -- --allow "clippy::redundant_field_names"
 
-before_script:
-  - apk --no-cache add curl jq
-  
-kick-e2e:
+kick-test:
+  stage: test
+  image: rust:1.30
+  script:
+    - cargo test --verbose
+
+kick-coverage:
+  stage: coverage
+  image: rust:1.30
+  allow_failure: true
+  coverage: '/COVERAGE:\d+\.\d+/'
+  script:
+    - apt-get update
+    - apt-get install -y jq zsh binutils-dev libcurl4-openssl-dev zlib1g-dev libdw-dev libiberty-dev unzip cmake build-essential
+    - rustup update nightly # required for kcov instrumentation
+    - rustup default nightly
+    - cargo install cargo-cov
+    - ./testutils/collect_coverage.sh --auto
+
+build-docker:
+    before_script:
+      - apk --no-cache add curl jq
     tags:
         - docker
     stage: deploy

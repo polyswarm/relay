@@ -13,7 +13,9 @@ use web3::transports::Result;
 use web3::types::{BlockHeader, H160, H2048, H256, Log, U256};
 use web3::{BatchTransport, DuplexTransport, Error, ErrorKind, RequestId, Transport};
 
-// Result from a MockTNetworkTypeask
+use tokio_core::reactor;
+
+// Result from a MockTask
 pub type MockTask<T> = Box<Future<Item = T, Error = Error>>;
 
 // Just hiding the details of the sender

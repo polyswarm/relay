@@ -3,7 +3,6 @@ extern crate clap;
 extern crate config;
 extern crate consul;
 extern crate ctrlc;
-extern crate env_logger;
 extern crate tokio_core;
 extern crate web3;
 
@@ -64,8 +63,7 @@ fn main() -> Result<(), Error> {
                 .help("Configures the two networks we will relay between")
                 .required(true)
                 .takes_value(true),
-        )
-        .get_matches();
+        ).get_matches();
 
     let settings = Settings::new(matches.value_of("config"))?;
 
@@ -89,26 +87,26 @@ fn main() -> Result<(), Error> {
                 &settings.relay.consul,
                 &settings.relay.consul_token,
                 &settings.relay.poly_sidechain_name,
-            ),
+            )?,
             &*consul_configs::create_contract_abi(
                 "NectarToken",
                 &settings.relay.consul,
                 &settings.relay.consul_token,
                 &settings.relay.poly_sidechain_name,
-            ),
+            )?,
             &*consul_configs::wait_or_get(
                 "homechain",
                 "erc20_relay_address",
                 &settings.relay.consul,
                 &settings.relay.consul_token,
                 &settings.relay.poly_sidechain_name,
-            ),
+            )?,
             &*consul_configs::create_contract_abi(
                 "ERC20Relay",
                 &settings.relay.consul,
                 &settings.relay.consul_token,
                 &settings.relay.poly_sidechain_name,
-            ),
+            )?,
             settings.relay.confirmations,
         )?,
         Network::sidechain(
@@ -120,26 +118,26 @@ fn main() -> Result<(), Error> {
                 &settings.relay.consul,
                 &settings.relay.consul_token,
                 &settings.relay.poly_sidechain_name,
-            ),
+            )?,
             &*consul_configs::create_contract_abi(
                 "NectarToken",
                 &settings.relay.consul,
                 &settings.relay.consul_token,
                 &settings.relay.poly_sidechain_name,
-            ),
+            )?,
             &*consul_configs::wait_or_get(
                 "sidechain",
                 "erc20_relay_address",
                 &settings.relay.consul,
                 &settings.relay.consul_token,
                 &settings.relay.poly_sidechain_name,
-            ),
+            )?,
             &*consul_configs::create_contract_abi(
                 "ERC20Relay",
                 &settings.relay.consul,
                 &settings.relay.consul_token,
                 &settings.relay.poly_sidechain_name,
-            ),
+            )?,
             settings.relay.confirmations,
             settings.relay.anchor_frequency,
         )?,

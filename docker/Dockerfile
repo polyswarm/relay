@@ -9,7 +9,6 @@ WORKDIR /polyswarm-relay
 COPY ./Cargo.lock ./Cargo.lock
 COPY ./Cargo.toml ./Cargo.toml
 
-
 # this build step will cache your dependencies
 RUN cargo build
 RUN rm src/*.rs
@@ -21,6 +20,9 @@ COPY ./src ./src
 RUN cargo build --release
 
 RUN cargo install
+
+RUN rustup component add clippy-preview
+RUN cargo clippy
 
 COPY ./docker ./docker
 

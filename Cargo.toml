@@ -17,6 +17,6 @@ serde = "1.0"
 serde_derive = "1.0"
 serde_json = "1.0"
 tokio-core = "0.1"
-web3 = { git = "https://github.com/polyswarm/rust-web3.git", branch = "relay" }
+web3 = { git = "https://github.com/polyswarm/rust-web3.git", branch = "fix/non-blocking-poll-confirmations" }
 consul = { git = "https://github.com/polyswarm/consul-rust", branch = "master" }
 base64 = "0.9.3"

@@ -53,11 +53,10 @@ impl<T: DuplexTransport + 'static> Relay<T> {
         chain_b: Rc<Network<T>>,
         handle: &reactor::Handle,
     ) -> impl Future<Item = (), Error = ()> {
+        let h = handle.clone();
         chain_a.transfer_stream(handle).for_each(move |transfer| {
-            chain_b.approve_withdrawal(&transfer).or_else(|e| {
-                error!("error approving withdrawal: {}", e);
-                Ok(())
-            })
+            h.spawn(chain_b.approve_withdrawal(&transfer));
+            Ok(())
         })
     }
 
@@ -66,11 +65,10 @@ impl<T: DuplexTransport + 'static> Relay<T> {
         homechain: Rc<Network<T>>,
         handle: &reactor::Handle,
     ) -> impl Future<Item = (), Error = ()> {
+        let h = handle.clone();
         sidechain.anchor_stream(handle).for_each(move |anchor| {
-            homechain.anchor(&anchor).or_else(|e| {
-                error!("error anchoring block: {}", e);
-                Ok(())
-            })
+            h.spawn(homechain.anchor(&anchor));
+            Ok(())
         })
     }
 
@@ -323,8 +321,18 @@ impl<T: DuplexTransport + 'static> Network<T> {
                                         time::Duration::from_secs(1),
                                         confirmations,
                                     ).and_then(move |receipt| {
-                                        let block_hash = receipt.block_hash;
-                                        let block_number = receipt.block_number;
+                                        if receipt.block_number.is_none() {
+                                            warn!("no block number in transfer receipt");
+                                            return Ok(())
+                                        }
+
+                                        if receipt.block_hash.is_none() {
+                                            warn!("no block hash in transfer receipt");
+                                            return Ok(())
+                                        }
+
+                                        let block_hash = receipt.block_hash.unwrap();
+                                        let block_number = receipt.block_number.unwrap();
 
                                         let transfer = Transfer {
                                             destination,
@@ -395,28 +403,36 @@ impl<T: DuplexTransport + 'static> Network<T> {
                                             web3.eth()
                                                 .block(block_id)
                                                 .and_then(move |block| {
-                                                    if block.number.is_none() {
-                                                        warn!("no block number in anchor block");
-                                                        return Ok(());
+                                                    match block {
+                                                        Some(b) => {
+                                                            if b.number.is_none() {
+                                                                warn!("no block number in anchor block");
+                                                                return Ok(());
+                                                            }
+
+                                                            if b.hash.is_none() {
+                                                                warn!("no block hash in anchor block");
+                                                                return Ok(());
+                                                            }
+
+                                                            let block_hash: H256 = b.hash.unwrap();
+                                                            let block_number: U256 = b.number.unwrap().into();
+
+                                                            let anchor = Anchor {
+                                                                block_hash,
+                                                                block_number,
+                                                            };
+
+                                                            info!("anchor block confirmed, anchoring: {}", &anchor);
+
+                                                            tx.unbounded_send(anchor).unwrap();
+                                                            Ok(())
+                                                        },
+                                                        None => {
+                                                            warn!("no block found for anchor confirmations");
+                                                            Ok(())
+                                                        }
                                                     }
-
-                                                    if block.hash.is_none() {
-                                                        warn!("no block hash in anchor block");
-                                                        return Ok(());
-                                                    }
-
-                                                    let block_hash: H256 = block.hash.unwrap();
-                                                    let block_number: U256 = block.number.unwrap().into();
-
-                                                    let anchor = Anchor {
-                                                        block_hash,
-                                                        block_number,
-                                                    };
-
-                                                    info!("anchor block confirmed, anchoring: {}", &anchor);
-
-                                                    tx.unbounded_send(anchor).unwrap();
-                                                    Ok(())
                                                 }).or_else(|e| {
                                                     error!("error waiting for anchor confirmations: {}", e);
                                                     Ok(())
@@ -446,7 +462,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
     /// # Arguments
     ///
     /// * `transfer` - The transfer to approve
-    pub fn approve_withdrawal(&self, transfer: &Transfer) -> impl Future<Item = (), Error = Error> {
+    pub fn approve_withdrawal(&self, transfer: &Transfer) -> impl Future<Item = (), Error = ()> {
         info!("approving withdrawal {}", transfer);
         self.relay
             .call_with_confirmations(
@@ -478,7 +494,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
     /// # Arguments
     ///
     /// * `anchor` - The block to anchor
-    pub fn anchor(&self, anchor: &Anchor) -> impl Future<Item = (), Error = Error> {
+    pub fn anchor(&self, anchor: &Anchor) -> impl Future<Item = (), Error = ()> {
         info!("anchoring block {}", anchor);
         self.relay
             .call_with_confirmations(

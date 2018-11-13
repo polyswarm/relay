@@ -12,7 +12,7 @@
 
 [relay.homechain]
     # Websocket RPC endpoint for the homechain
-    ws-uri = "ws://localhost:8546"
+    wsuri = "ws://localhost:8546"
     # Token contract address for the homechain
     token = "0x273f0a1f19478605e8ee50fa309a933f2a04584b"
     # Relay contract address for the homechain
@@ -20,7 +20,7 @@
 
 [relay.sidechain]
     # Websocket RPC endpoint for the sidechain
-    ws-uri = "ws://localhost:8546"
+    wsuri = "ws://localhost:8546"
     # Token contract address for the sidechain
     token = "0x273f0a1f19478605e8ee50fa309a933f2a04584b"
     # Relay contract address for the sidechain

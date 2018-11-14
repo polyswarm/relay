@@ -40,7 +40,10 @@ pub fn create_contract_abi(
         info!("Chain for config not availible in consol yet")
     })?;
 
-    Ok(serde_json::ser::to_string(&json["abi"]).or(Err(OperationError::CouldNotGetConsulKey("abi".into())))?)
+    Ok(
+        serde_json::ser::to_string(&json["abi"])
+            .or_else(|_| Err(OperationError::CouldNotGetConsulKey("abi".into())))?,
+    )
 }
 
 fn consul_select<F>(

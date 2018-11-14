@@ -37,6 +37,8 @@ kick-e2e:
     tags:
         - docker
     stage: deploy
+    before_script:
+      - apk --no-cache add curl jq    
     script:
       - set -e
 

@@ -9,7 +9,7 @@ use web3::futures::sync::mpsc;
 use web3::futures::{future, Future, Stream};
 use web3::helpers;
 use web3::transports::Result;
-use web3::types::{BlockHeader, H160, H2048, H256, Log, U256};
+use web3::types::{BlockHeader, Log, H160, H2048, H256, U256};
 use web3::{BatchTransport, DuplexTransport, Error, ErrorKind, RequestId, Transport};
 
 use tokio_core::reactor;

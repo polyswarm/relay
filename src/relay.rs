@@ -94,8 +94,7 @@ impl<T: DuplexTransport + 'static> Relay<T> {
                     self.homechain.clone(),
                     handle,
                 )),
-            )
-            .and_then(|_| Ok(()))
+            ).and_then(|_| Ok(()))
     }
 }
 
@@ -302,8 +301,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
                 None,
                 Some(vec![self.relay.address().into()]),
                 None,
-            )
-            .build();
+            ).build();
 
         let future = {
             let network_type = self.network_type;
@@ -357,19 +355,17 @@ impl<T: DuplexTransport + 'static> Network<T> {
                                         info!("transfer event confirmed, approving {}", &transfer);
                                         tx.unbounded_send(transfer).unwrap();
                                         Ok(())
-                                    })
-                                        .or_else(|e| {
-                                            error!("error waiting for transfer confirmations: {}", e);
-                                            Ok(())
-                                        }),
+                                    }).or_else(|e| {
+                                        error!("error waiting for transfer confirmations: {}", e);
+                                        Ok(())
+                                    }),
                                 );
 
                                 Ok(())
                             },
                         )
                     })
-                })
-                .or_else(move |e| {
+                }).or_else(move |e| {
                     error!("error in {:?} transfer stream: {}", network_type, e);
                     Ok(())
                 })
@@ -439,8 +435,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
 
                                                     tx.unbounded_send(anchor).unwrap();
                                                     Ok(())
-                                                })
-                                                .or_else(|e| {
+                                                }).or_else(|e| {
                                                     error!("error waiting for anchor confirmations: {}", e);
                                                     Ok(())
                                                 }),
@@ -453,8 +448,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
                             },
                         )
                     })
-                })
-                .or_else(move |e| {
+                }).or_else(move |e| {
                     error!("error in {:?} anchor stream: {}", network_type, e);
                     Ok(())
                 })
@@ -488,12 +482,10 @@ impl<T: DuplexTransport + 'static> Network<T> {
                     options.gas_price = Some(GAS_PRICE.into());
                 }),
                 self.confirmations as usize,
-            )
-            .and_then(|receipt| {
+            ).and_then(|receipt| {
                 info!("withdrawal approved: {:?}", receipt);
                 Ok(())
-            })
-            .or_else(|e| {
+            }).or_else(|e| {
                 error!("error approving withdrawal: {}", e);
                 Ok(())
             })
@@ -516,12 +508,10 @@ impl<T: DuplexTransport + 'static> Network<T> {
                     options.gas_price = Some(GAS_PRICE.into());
                 }),
                 self.confirmations as usize,
-            )
-            .and_then(|receipt| {
+            ).and_then(|receipt| {
                 info!("anchor processed: {:?}", receipt);
                 Ok(())
-            })
-            .or_else(|e| {
+            }).or_else(|e| {
                 error!("error anchoring block: {}", e);
                 Ok(())
             })

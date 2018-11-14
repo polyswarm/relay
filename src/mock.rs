@@ -4,7 +4,6 @@ use rpc;
 use serde_json;
 use std::collections::BTreeMap;
 use std::sync::{atomic, Arc};
-use tokio_core::reactor;
 use web3::api::SubscriptionId;
 use web3::futures::sync::mpsc;
 use web3::futures::{future, Future, Stream};

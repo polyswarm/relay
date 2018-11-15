@@ -42,8 +42,8 @@ pub struct Relay {
     pub consul: String,
     /// consul token used to access consul
     pub consul_token: String,
-    /// poly sidechain name
-    pub poly_sidechain_name: String,
+    /// community name for consul kv
+    pub community: String,
 }
 
 /// Per-network settings
@@ -67,7 +67,7 @@ impl Settings {
 
         c.set_default("relay.confirmations", 12)?;
         c.set_default("relay.anchor_frequency", 100)?;
-        c.set_default("relay.poly_sidechain_name", "")?;
+        c.set_default("relay.community", "")?;
         c.set_default("relay.consul_token", "")?;
 
         if let Some(p) = path {

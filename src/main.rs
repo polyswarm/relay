@@ -3,7 +3,6 @@ extern crate clap;
 extern crate config;
 extern crate consul;
 extern crate ctrlc;
-extern crate env_logger;
 extern crate tokio_core;
 extern crate web3;
 
@@ -68,7 +67,7 @@ fn main() -> Result<(), Error> {
 
     let settings = Settings::new(matches.value_of("config"))?;
 
-    logger::init_logger(settings.logging, "relay", Level::Debug).expect("problem initializing relay logger");
+    logger::init_logger(&settings.logging, "relay", Level::Debug).expect("problem initializing relay logger");
 
     // Set up our two websocket connections on the same event loop
     let mut eloop = tokio_core::reactor::Core::new()?;
@@ -82,16 +81,64 @@ fn main() -> Result<(), Error> {
         Network::homechain(
             home_ws.clone(),
             &settings.relay.account,
-            &*consul_configs::wait_or_get("homechain", "nectar_token_address"),
-            &*consul_configs::wait_or_get("homechain", "erc20_relay_address"),
+            &*consul_configs::wait_or_get(
+                "homechain",
+                "nectar_token_address",
+                &settings.relay.consul,
+                &settings.relay.consul_token,
+                &settings.relay.poly_sidechain_name,
+            )?,
+            &*consul_configs::create_contract_abi(
+                "NectarToken",
+                &settings.relay.consul,
+                &settings.relay.consul_token,
+                &settings.relay.poly_sidechain_name,
+            )?,
+            &*consul_configs::wait_or_get(
+                "homechain",
+                "erc20_relay_address",
+                &settings.relay.consul,
+                &settings.relay.consul_token,
+                &settings.relay.poly_sidechain_name,
+            )?,
+            &*consul_configs::create_contract_abi(
+                "ERC20Relay",
+                &settings.relay.consul,
+                &settings.relay.consul_token,
+                &settings.relay.poly_sidechain_name,
+            )?,
             &settings.relay.homechain.free,
             settings.relay.confirmations,
         )?,
         Network::sidechain(
             side_ws.clone(),
             &settings.relay.account,
-            &*consul_configs::wait_or_get("sidechain", "nectar_token_address"),
-            &*consul_configs::wait_or_get("sidechain", "erc20_relay_address"),
+            &*consul_configs::wait_or_get(
+                "sidechain",
+                "nectar_token_address",
+                &settings.relay.consul,
+                &settings.relay.consul_token,
+                &settings.relay.poly_sidechain_name,
+            )?,
+            &*consul_configs::create_contract_abi(
+                "NectarToken",
+                &settings.relay.consul,
+                &settings.relay.consul_token,
+                &settings.relay.poly_sidechain_name,
+            )?,
+            &*consul_configs::wait_or_get(
+                "sidechain",
+                "erc20_relay_address",
+                &settings.relay.consul,
+                &settings.relay.consul_token,
+                &settings.relay.poly_sidechain_name,
+            )?,
+            &*consul_configs::create_contract_abi(
+                "ERC20Relay",
+                &settings.relay.consul,
+                &settings.relay.consul_token,
+                &settings.relay.poly_sidechain_name,
+            )?,
             &settings.relay.sidechain.free,
             settings.relay.confirmations,
             settings.relay.anchor_frequency,

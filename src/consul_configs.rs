@@ -1,87 +1,74 @@
 use base64::decode;
 use consul::Client;
+use errors::OperationError;
+use failure::Error;
 use serde_json;
-use std::env;
 use std::{thread, time};
-use std::ffi::{OsString};
 
-pub fn wait_or_get(chain: &str, key: &str) -> String {
-    let consul_uri = env::var("CONSUL").expect("CONSUL env variable is not defined!");
-    let consul_token = match env::var_os("CONSUL_TOKEN") {
-        Some(val) => val,
-        None => OsString::from("")
+pub fn wait_or_get(
+    chain: &str,
+    key: &str,
+    consul_url: &str,
+    consul_token: &str,
+    sidechain_name: &str,
+) -> Result<String, Error> {
+    let keyname = format!("chain/{}/{}", &sidechain_name, &chain);
+    let first = Box::new(true);
+    let print_err = || {
+        if *first {
+            info!("Chain for config not availible in consol yet");
+        }
     };
-    let client = Client::new(consul_uri, consul_token.to_string_lossy().to_string());
-    let keystore = client.keystore;
-    let sidechain_name = env::var("POLY_SIDECHAIN_NAME").expect("POLY_SIDECHAIN_NAME env variable is not defined!");
-    let one_sec = time::Duration::from_secs(1);
-    let mut done = false;
-    let mut ret = "".to_string();
-    let mut first = true;
+    let json = consul_select(keyname.as_ref(), consul_url, consul_token, print_err)?;
 
-    while !done {
-        let result = keystore.get_key(format!("chain/{}/{}", &sidechain_name, &chain));
+    info!("Chain for {:?} config availible in consol now", chain);
 
-        match result {
-            Ok(result) => {
-                info!("Chain for {:?} config availible in consol now", chain);
-                done = true;
-                let result_string = result.unwrap();
-                let config = decode(&result_string).unwrap();
-                let new_config = String::from_utf8(config).unwrap();
-                let json: serde_json::Value = serde_json::from_str(new_config.as_str()).unwrap();
-                ret = json[&key]
-                    .as_str()
-                    .expect(&format!("Key {} doesn't exist in consul", &key))
-                    .to_string();
-            }
-            Err(_) => {
-                if first {
-                    eprintln!("Chain for {:?} config not availible in consol yet", chain);
-                    first = false;
-                }
-                thread::sleep(one_sec);
-                continue;
-            }
-        };
+    match json[&key].as_str() {
+        Some(result) => Ok(result.to_string()),
+        None => Err(OperationError::CouldNotGetConsulKey(key.to_string()).into()),
     }
-
-    ret
 }
 
-pub fn create_contract_abi(contract_name: &str) -> String {
-    let consul_uri = env::var("CONSUL").expect("CONSUL env variable is not defined!");
-    let consul_token = match env::var_os("CONSUL_TOKEN") {
-        Some(val) => val,
-        None => OsString::from("")
-    };
-    let client = Client::new(consul_uri, consul_token.to_string_lossy().to_string());
+pub fn create_contract_abi(
+    contract_name: &str,
+    consul_url: &str,
+    consul_token: &str,
+    sidechain_name: &str,
+) -> Result<String, Error> {
+    let keyname = format!("chain/{}/{}", &sidechain_name, &contract_name);
+    let print_err = || info!("Chain for config not availible in consol yet");
+    let json = consul_select(keyname.as_ref(), consul_url, consul_token, print_err)?;
+
+    match json["abi"].as_str() {
+        Some(result) => Ok(result.to_string()),
+        None => Err(OperationError::CouldNotCreateContractABI.into()),
+    }
+}
+
+fn consul_select<F>(
+    keyname: &str,
+    consul_uri: &str,
+    consul_token: &str,
+    mut print_err: F,
+) -> Result<serde_json::Value, Error>
+where
+    F: FnMut(),
+{
+    let client = Client::new(consul_uri, consul_token);
     let keystore = client.keystore;
     let one_sec = time::Duration::from_secs(1);
-    let sidechain_name = env::var("POLY_SIDECHAIN_NAME").expect("Chain name is not defined!");
-    let mut done = false;
-    let mut ret = "".to_string();
 
-    while !done {
-        let result = keystore.get_key(format!("chain/{}/{}", &sidechain_name, &contract_name));
-
-        match result {
-            Ok(result) => {
-                done = true;
-                let result_string = result.unwrap();
-                let config = decode(&result_string).unwrap();
-                let new_config = String::from_utf8(config).unwrap();
-                let json: serde_json::Value = serde_json::from_str(&new_config.as_str()).unwrap();
-
-                ret = serde_json::ser::to_string(&json["abi"]).unwrap();
-            }
-            Err(_) => {
-                eprintln!("ABI json for {:?} not availible in consol yet", contract_name);
-                thread::sleep(one_sec);
-                continue;
-            }
+    loop {
+        if let Ok(result) = keystore.get_key(keyname.into()) {
+            let result_string = result.unwrap();
+            let config = decode(&result_string)?;
+            let new_config = String::from_utf8(config)?;
+            let json: serde_json::Value = serde_json::from_str(&new_config.as_str())?;
+            return Ok(json);
+        } else {
+            print_err();
+            thread::sleep(one_sec);
+            continue;
         }
     }
-
-    ret
 }

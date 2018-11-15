@@ -1,11 +1,38 @@
-image: docker:stable
+stages:
+  - lint
+  - test
+  - coverage
+  - deploy
 
-services:
-  - docker:dind
+lint:
+  stage: lint
+  image: rust:1.30
+  allow_failure: true
+  script:
+    - rustup component add rustfmt-preview
+    - cargo fmt --all -- --check
+    - rustup component add clippy-preview
+    - cargo clippy -- --allow "clippy::redundant_field_names"
 
-before_script:
-  - apk --no-cache add curl jq
-  
+test:
+  stage: test
+  image: rust:1.30
+  script:
+    - cargo test --verbose
+
+coverage:
+  stage: coverage
+  image: rust:1.30
+  allow_failure: true
+  coverage: '/COVERAGE:\d+\.\d+/'
+  script:
+    - apt-get update
+    - apt-get install -y jq zsh binutils-dev libcurl4-openssl-dev zlib1g-dev libdw-dev libiberty-dev unzip cmake build-essential
+    - rustup update nightly # required for kcov instrumentation
+    - rustup default nightly
+    - cargo install cargo-cov
+    - ./testutils/collect_coverage.sh --auto
+
 kick-e2e:
     tags:
         - docker
@@ -23,6 +50,10 @@ kick-e2e:
         --form "variables[SOURCE_BRANCH]=$CI_COMMIT_REF_NAME"
         --form ref="master"
         "https://gitlab.polyswarm.io/api/v4/projects/${CI_CUSTOM_PROJECT_ID_E2E}/trigger/pipeline" | jq -r ".id"`
+
+      # run unit tests
+      - docker build -f docker/Dockerfile --cache-from polyswarm/relay -t polyswarm/relay .
+      - docker run polyswarm/relay bash -c "cargo test"
 
       # poll for it to finish
       - >-

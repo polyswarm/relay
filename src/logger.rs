@@ -1,4 +1,4 @@
-#![allow(redundant_field_names)]
+#![allow(unknown_lints, redundant_field_names)]
 use log::Level;
 use settings::Logging;
 use std::io::stderr;

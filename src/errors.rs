@@ -18,6 +18,9 @@ pub enum OperationError {
 
     #[fail(display = "Unable to get key: {} from consul", _0)]
     CouldNotGetConsulKey(String),
+
+    #[fail(display = "Could not create contract ABI: consul keystore did not contain key \"abi\"")]
+    CouldNotCreateContractABI,
 }
 
 /// ConfigError defines errors arising from an application misconfiguration,

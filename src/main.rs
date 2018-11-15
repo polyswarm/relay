@@ -107,6 +107,7 @@ fn main() -> Result<(), Error> {
                 &settings.relay.consul_token,
                 &settings.relay.community,
             )?,
+            &settings.relay.homechain.free,
             settings.relay.confirmations,
         )?,
         Network::sidechain(
@@ -138,6 +139,7 @@ fn main() -> Result<(), Error> {
                 &settings.relay.consul_token,
                 &settings.relay.community,
             )?,
+            &settings.relay.sidechain.free,
             settings.relay.confirmations,
             settings.relay.anchor_frequency,
         )?,

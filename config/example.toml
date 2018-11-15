@@ -17,6 +17,8 @@
     token = "0x273f0a1f19478605e8ee50fa309a933f2a04584b"
     # Relay contract address for the homechain
     relay = "0x11c60f7c6a3b5d01fb051a81cdcbb144280da8e4"
+    # Whether transactions on this chain use gasPrice = 0
+    free = false
 
 [relay.sidechain]
     # Websocket RPC endpoint for the sidechain
@@ -25,3 +27,5 @@
     token = "0x273f0a1f19478605e8ee50fa309a933f2a04584b"
     # Relay contract address for the sidechain
     relay = "0x11c60f7c6a3b5d01fb051a81cdcbb144280da8e4"
+    # Whether transactions on this chain use gasPrice = 0
+    free = true

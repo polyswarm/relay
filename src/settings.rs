@@ -51,6 +51,8 @@ pub struct Relay {
 pub struct Network {
     /// URI for the Websocket RPC endpoint for an Ethereum client
     pub wsuri: String,
+    /// Whether or not the transactions should be free
+    pub free: bool,
 }
 
 impl Settings {

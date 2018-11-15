@@ -15,7 +15,8 @@ use super::contracts::TRANSFER_EVENT_SIGNATURE;
 use super::errors::OperationError;
 
 const GAS_LIMIT: u64 = 200_000;
-const GAS_PRICE: u64 = 20_000_000_000;
+const DEFAULT_GAS_PRICE: u64 = 20_000_000_000;
+const FREE_GAS_PRICE: u64 = 0;
 
 // From ethereum_types but not reexported by web3
 fn clean_0x(s: &str) -> &str {
@@ -147,6 +148,7 @@ pub struct Network<T: DuplexTransport> {
     account: Address,
     token: Contract<T>,
     relay: Contract<T>,
+    free: bool,
     confirmations: u64,
     anchor_frequency: u64,
 }
@@ -170,6 +172,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
         token_abi: &str,
         relay: &str,
         relay_abi: &str,
+        free: &bool,
         confirmations: u64,
         anchor_frequency: u64,
     ) -> Result<Self, OperationError> {
@@ -192,12 +195,15 @@ impl<T: DuplexTransport + 'static> Network<T> {
         let relay = Contract::from_json(web3.eth(), relay_address, relay_abi.as_bytes())
             .or(Err(OperationError::InvalidContractAbi))?;
 
+        let free = free.clone();
+
         Ok(Self {
             network_type,
             web3,
             account,
             token,
             relay,
+            free,
             confirmations,
             anchor_frequency,
         })
@@ -218,6 +224,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
         token_abi: &str,
         relay: &str,
         relay_abi: &str,
+        free: &bool,
         confirmations: u64,
     ) -> Result<Self, OperationError> {
         Self::new(
@@ -228,6 +235,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
             token_abi,
             relay,
             relay_abi,
+            free,
             confirmations,
             0,
         )
@@ -249,6 +257,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
         token_abi: &str,
         relay: &str,
         relay_abi: &str,
+        free: &bool,
         confirmations: u64,
         anchor_frequency: u64,
     ) -> Result<Self, OperationError> {
@@ -260,6 +269,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
             token_abi,
             relay,
             relay_abi,
+            free,
             confirmations,
             anchor_frequency,
         )
@@ -495,7 +505,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
                 self.account,
                 Options::with(|options| {
                     options.gas = Some(GAS_LIMIT.into());
-                    options.gas_price = Some(GAS_PRICE.into());
+                    options.gas_price = Some(self.get_gas_price());
                 }),
                 self.confirmations as usize,
             ).and_then(|receipt| {
@@ -521,7 +531,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
                 self.account,
                 Options::with(|options| {
                     options.gas = Some(GAS_LIMIT.into());
-                    options.gas_price = Some(GAS_PRICE.into());
+                    options.gas_price = Some(self.get_gas_price());
                 }),
                 self.confirmations as usize,
             ).and_then(|receipt| {
@@ -531,5 +541,12 @@ impl<T: DuplexTransport + 'static> Network<T> {
                 error!("error anchoring block: {}", e);
                 Ok(())
             })
+    }
+
+    fn get_gas_price(&self) -> U256 {
+        if self.free {
+            return FREE_GAS_PRICE.into();
+        }
+        DEFAULT_GAS_PRICE.into()
     }
 }

@@ -14,19 +14,19 @@ pub fn wait_or_get(
 ) -> Result<String, Error> {
     let keyname = format!("chain/{}/{}", &sidechain_name, &chain);
     let first = Box::new(true);
-    let print_err = || {
+    let json = consul_select(keyname.as_ref(), consul_url, consul_token, || {
         if *first {
             info!("Chain for config not availible in consol yet");
         }
-    };
-    let json = consul_select(keyname.as_ref(), consul_url, consul_token, print_err)?;
+    })?;
 
     info!("Chain for {:?} config availible in consol now", chain);
 
-    match json[&key].as_str() {
-        Some(result) => Ok(result.to_string()),
-        None => Err(OperationError::CouldNotGetConsulKey(key.to_string()).into()),
-    }
+    json[&key]
+        .as_str()
+        .map_or(Err(OperationError::CouldNotGetConsulKey(key.to_string()).into()), |v| {
+            Ok(v.to_string())
+        })
 }
 
 pub fn create_contract_abi(
@@ -36,13 +36,14 @@ pub fn create_contract_abi(
     sidechain_name: &str,
 ) -> Result<String, Error> {
     let keyname = format!("chain/{}/{}", &sidechain_name, &contract_name);
-    let print_err = || info!("Chain for config not availible in consol yet");
-    let json = consul_select(keyname.as_ref(), consul_url, consul_token, print_err)?;
+    let json = consul_select(keyname.as_ref(), consul_url, consul_token, || {
+        info!("Chain for config not availible in consol yet")
+    })?;
 
-    match json["abi"].as_str() {
-        Some(result) => Ok(result.to_string()),
-        None => Err(OperationError::CouldNotCreateContractABI.into()),
-    }
+    Ok(
+        serde_json::ser::to_string(&json["abi"])
+            .or_else(|_| Err(OperationError::CouldNotGetConsulKey("abi".into())))?,
+    )
 }
 
 fn consul_select<F>(

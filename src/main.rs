@@ -82,6 +82,7 @@ fn main() -> Result<(), Error> {
         Network::homechain(
             home_ws.clone(),
             &settings.relay.account,
+            &settings.relay.homechain.free,
             &*consul_configs::wait_or_get("homechain", "nectar_token_address"),
             &*consul_configs::wait_or_get("homechain", "erc20_relay_address"),
             settings.relay.confirmations,
@@ -89,6 +90,7 @@ fn main() -> Result<(), Error> {
         Network::sidechain(
             side_ws.clone(),
             &settings.relay.account,
+            &settings.relay.sidechain.free,
             &*consul_configs::wait_or_get("sidechain", "nectar_token_address"),
             &*consul_configs::wait_or_get("sidechain", "erc20_relay_address"),
             settings.relay.confirmations,

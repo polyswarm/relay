@@ -16,7 +16,8 @@ use super::contracts::TRANSFER_EVENT_SIGNATURE;
 use super::errors::OperationError;
 
 const GAS_LIMIT: u64 = 200_000;
-const GAS_PRICE: u64 = 20_000_000_000;
+const DEFAULT_GAS_PRICE: u64 = 20_000_000_000;
+const FREE_GAS_PRICE: u64 = 0;
 
 // From ethereum_types but not reexported by web3
 fn clean_0x(s: &str) -> &str {
@@ -146,6 +147,7 @@ pub struct Network<T: DuplexTransport> {
     network_type: NetworkType,
     web3: Web3<T>,
     account: Address,
+    free: bool,
     token: Contract<T>,
     relay: Contract<T>,
     confirmations: u64,
@@ -167,6 +169,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
         network_type: NetworkType,
         transport: T,
         account: &str,
+        free: &bool,
         token: &str,
         relay: &str,
         confirmations: u64,
@@ -176,6 +179,8 @@ impl<T: DuplexTransport + 'static> Network<T> {
         let account = clean_0x(account)
             .parse()
             .or_else(|_| Err(OperationError::InvalidAddress(account.into())))?;
+
+        let free = free.clone();
 
         let token_address: Address = clean_0x(token)
             .parse()
@@ -194,6 +199,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
             network_type,
             web3,
             account,
+            free,
             token,
             relay,
             confirmations,
@@ -212,11 +218,12 @@ impl<T: DuplexTransport + 'static> Network<T> {
     pub fn homechain(
         transport: T,
         account: &str,
+        free: &bool,
         token: &str,
         relay: &str,
         confirmations: u64,
     ) -> Result<Self, OperationError> {
-        Self::new(NetworkType::Home, transport, account, token, relay, confirmations, 0)
+        Self::new(NetworkType::Home, transport, account, free, token, relay, confirmations, 0)
     }
 
     /// Constructs a new side network
@@ -231,6 +238,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
     pub fn sidechain(
         transport: T,
         account: &str,
+        free: &bool,
         token: &str,
         relay: &str,
         confirmations: u64,
@@ -240,6 +248,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
             NetworkType::Side,
             transport,
             account,
+            free,
             token,
             relay,
             confirmations,
@@ -477,7 +486,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
                 self.account,
                 Options::with(|options| {
                     options.gas = Some(GAS_LIMIT.into());
-                    options.gas_price = Some(GAS_PRICE.into());
+                    options.gas_price = self.get_gas_price();
                 }),
                 self.confirmations as usize,
             ).and_then(|receipt| {
@@ -503,7 +512,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
                 self.account,
                 Options::with(|options| {
                     options.gas = Some(GAS_LIMIT.into());
-                    options.gas_price = Some(GAS_PRICE.into());
+                    options.gas_price = self.get_gas_price();
                 }),
                 self.confirmations as usize,
             ).and_then(|receipt| {
@@ -513,5 +522,12 @@ impl<T: DuplexTransport + 'static> Network<T> {
                 error!("error anchoring block: {}", e);
                 Ok(())
             })
+    }
+
+    fn get_gas_price(&self) -> Option<U256> {
+        if self.free {
+            return Some(FREE_GAS_PRICE.into());
+        }
+        Some(DEFAULT_GAS_PRICE.into())
     }
 }

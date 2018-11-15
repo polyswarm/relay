@@ -11,7 +11,6 @@ use web3::{DuplexTransport, Web3};
 
 use failure::{Error, SyncFailure};
 
-use super::consul_configs::create_contract_abi;
 use super::contracts::TRANSFER_EVENT_SIGNATURE;
 use super::errors::OperationError;
 
@@ -168,7 +167,9 @@ impl<T: DuplexTransport + 'static> Network<T> {
         transport: T,
         account: &str,
         token: &str,
+        token_abi: &str,
         relay: &str,
+        relay_abi: &str,
         confirmations: u64,
         anchor_frequency: u64,
     ) -> Result<Self, OperationError> {
@@ -185,9 +186,10 @@ impl<T: DuplexTransport + 'static> Network<T> {
             .parse()
             .or_else(|_| Err(OperationError::InvalidAddress(relay.into())))?;
 
-        let token = Contract::from_json(web3.eth(), token_address, create_contract_abi("NectarToken").as_bytes())
+        let token = Contract::from_json(web3.eth(), token_address, token_abi.as_bytes())
             .or(Err(OperationError::InvalidContractAbi))?;
-        let relay = Contract::from_json(web3.eth(), relay_address, create_contract_abi("ERC20Relay").as_bytes())
+
+        let relay = Contract::from_json(web3.eth(), relay_address, relay_abi.as_bytes())
             .or(Err(OperationError::InvalidContractAbi))?;
 
         Ok(Self {
@@ -213,10 +215,22 @@ impl<T: DuplexTransport + 'static> Network<T> {
         transport: T,
         account: &str,
         token: &str,
+        token_abi: &str,
         relay: &str,
+        relay_abi: &str,
         confirmations: u64,
     ) -> Result<Self, OperationError> {
-        Self::new(NetworkType::Home, transport, account, token, relay, confirmations, 0)
+        Self::new(
+            NetworkType::Home,
+            transport,
+            account,
+            token,
+            token_abi,
+            relay,
+            relay_abi,
+            confirmations,
+            0,
+        )
     }
 
     /// Constructs a new side network
@@ -232,7 +246,9 @@ impl<T: DuplexTransport + 'static> Network<T> {
         transport: T,
         account: &str,
         token: &str,
+        token_abi: &str,
         relay: &str,
+        relay_abi: &str,
         confirmations: u64,
         anchor_frequency: u64,
     ) -> Result<Self, OperationError> {
@@ -241,7 +257,9 @@ impl<T: DuplexTransport + 'static> Network<T> {
             transport,
             account,
             token,
+            token_abi,
             relay,
+            relay_abi,
             confirmations,
             anchor_frequency,
         )

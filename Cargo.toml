@@ -7,7 +7,6 @@ authors = ["PolySwarm Developers <info@polyswarm.io>"]
 clap = "2.31"
 config = "0.8"
 ctrlc = "3.1"
-env_logger = "0.5.13"
 failure = "0.1.2"
 failure_derive = "0.1.2"
 log = "0.4.5"

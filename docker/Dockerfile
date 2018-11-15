@@ -27,6 +27,9 @@ RUN cargo build --release
 
 RUN cargo install
 
+RUN rustup component add clippy-preview
+RUN cargo clippy
+
 COPY ./docker ./docker
 
 CMD ["polyswarm-relay", "--config", "docker/config.toml"]

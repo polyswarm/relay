@@ -1,5 +1,8 @@
 # Polyswarm Relay
 
+[![pipeline status](https://gitlab.polyswarm.io/externalci/relay/badges/feature/coverage-tests/pipeline.svg)](https://gitlab.polyswarm.io/externalci/relay/commits/feature/coverage-tests)
+[![coverage report](https://gitlab.polyswarm.io/externalci/relay/badges/feature/coverage-tests/coverage.svg)](https://gitlab.polyswarm.io/externalci/relay/commits/feature/coverage-tests)
+
 This acts as a relay between two networks so deposited ERC20 tokens can be
 transferred between networks.
 
@@ -40,3 +43,17 @@ FLAGS:
 ARGS:
     <TOML config file>    Configures the two networks we will relay between
 ```
+
+
+## Running tests
+
+`relay` needs more tests, including both integration and unit tests.
+
+To run a full test suite, use:
+
+```
+$ cargo test all
+```
+
+from the repository root
+

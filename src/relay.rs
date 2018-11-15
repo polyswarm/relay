@@ -505,7 +505,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
                 self.account,
                 Options::with(|options| {
                     options.gas = Some(GAS_LIMIT.into());
-                    options.gas_price = self.get_gas_price();
+                    options.gas_price = Some(self.get_gas_price());
                 }),
                 self.confirmations as usize,
             ).and_then(|receipt| {
@@ -531,7 +531,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
                 self.account,
                 Options::with(|options| {
                     options.gas = Some(GAS_LIMIT.into());
-                    options.gas_price = self.get_gas_price();
+                    options.gas_price = Some(self.get_gas_price());
                 }),
                 self.confirmations as usize,
             ).and_then(|receipt| {
@@ -543,10 +543,10 @@ impl<T: DuplexTransport + 'static> Network<T> {
             })
     }
 
-    fn get_gas_price(&self) -> Option<U256> {
+    fn get_gas_price(&self) -> U256 {
         if self.free {
-            return Some(FREE_GAS_PRICE.into());
+            return FREE_GAS_PRICE.into();
         }
-        Some(DEFAULT_GAS_PRICE.into())
+        DEFAULT_GAS_PRICE.into()
     }
 }

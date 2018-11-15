@@ -168,6 +168,7 @@ mod tests {
             &mock_abi,
             "0x7e7087c25df885f97aeacbfae84ea12016799eee",
             &mock_abi,
+            &true,
             0,
             0,
         ).unwrap();

@@ -256,8 +256,8 @@ impl<T: DuplexTransport + 'static> Network<T> {
         token: &str,
         token_abi: &str,
         relay: &str,
-        free: &bool,
         relay_abi: &str,
+        free: &bool,
         confirmations: u64,
         anchor_frequency: u64,
     ) -> Result<Self, OperationError> {

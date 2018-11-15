@@ -147,9 +147,9 @@ pub struct Network<T: DuplexTransport> {
     network_type: NetworkType,
     web3: Web3<T>,
     account: Address,
-    free: bool,
     token: Contract<T>,
     relay: Contract<T>,
+    free: bool,
     confirmations: u64,
     anchor_frequency: u64,
 }
@@ -169,9 +169,9 @@ impl<T: DuplexTransport + 'static> Network<T> {
         network_type: NetworkType,
         transport: T,
         account: &str,
-        free: &bool,
         token: &str,
         relay: &str,
+        free: &bool,
         confirmations: u64,
         anchor_frequency: u64,
     ) -> Result<Self, OperationError> {
@@ -179,8 +179,6 @@ impl<T: DuplexTransport + 'static> Network<T> {
         let account = clean_0x(account)
             .parse()
             .or_else(|_| Err(OperationError::InvalidAddress(account.into())))?;
-
-        let free = free.clone();
 
         let token_address: Address = clean_0x(token)
             .parse()
@@ -195,13 +193,15 @@ impl<T: DuplexTransport + 'static> Network<T> {
         let relay = Contract::from_json(web3.eth(), relay_address, create_contract_abi("ERC20Relay").as_bytes())
             .or(Err(OperationError::InvalidContractAbi))?;
 
+        let free = free.clone();
+
         Ok(Self {
             network_type,
             web3,
             account,
-            free,
             token,
             relay,
+            free,
             confirmations,
             anchor_frequency,
         })
@@ -218,12 +218,12 @@ impl<T: DuplexTransport + 'static> Network<T> {
     pub fn homechain(
         transport: T,
         account: &str,
-        free: &bool,
         token: &str,
         relay: &str,
+        free: &bool,
         confirmations: u64,
     ) -> Result<Self, OperationError> {
-        Self::new(NetworkType::Home, transport, account, free, token, relay, confirmations, 0)
+        Self::new(NetworkType::Home, transport, account, token, relay, free, confirmations, 0)
     }
 
     /// Constructs a new side network
@@ -238,9 +238,9 @@ impl<T: DuplexTransport + 'static> Network<T> {
     pub fn sidechain(
         transport: T,
         account: &str,
-        free: &bool,
         token: &str,
         relay: &str,
+        free: &bool,
         confirmations: u64,
         anchor_frequency: u64,
     ) -> Result<Self, OperationError> {
@@ -248,9 +248,9 @@ impl<T: DuplexTransport + 'static> Network<T> {
             NetworkType::Side,
             transport,
             account,
-            free,
             token,
             relay,
+            free,
             confirmations,
             anchor_frequency,
         )

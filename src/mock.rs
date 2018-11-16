@@ -168,7 +168,7 @@ mod tests {
             &mock_abi,
             "0x7e7087c25df885f97aeacbfae84ea12016799eee",
             &mock_abi,
-            &true,
+            true,
             0,
             0,
         ).unwrap();
@@ -294,17 +294,17 @@ mod tests {
     fn should_receive_header_when_emited() {
         let header = BlockHeader {
             hash: None,
-            parent_hash: H256::new(),
-            uncles_hash: H256::new(),
-            author: H160::new(),
-            state_root: H256::new(),
-            transactions_root: H256::new(),
-            receipts_root: H256::new(),
+            parent_hash: H256::zero(),
+            uncles_hash: H256::zero(),
+            author: H160::zero(),
+            state_root: H256::zero(),
+            transactions_root: H256::zero(),
+            receipts_root: H256::zero(),
             number: None,
             gas_used: U256::from(1),
             gas_limit: U256::from(1),
             extra_data: Default::default(),
-            logs_bloom: H2048::new(),
+            logs_bloom: H2048::zero(),
             timestamp: U256::from(1),
             difficulty: U256::from(1),
         };

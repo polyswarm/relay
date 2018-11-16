@@ -1,4 +1,3 @@
-#![allow(redundant_field_names)]
 use log::Level;
 use settings::Logging;
 use std::io::stderr;
@@ -10,14 +9,6 @@ pub fn flush() {
     // implemented `flush` anyway to this to ensure no termios emit bugs
     let _ = stderr().flush();
 }
-
-macro_rules! logln(
-    ($($arg:tt)*) => { {
-        use std::io::Write;
-        let r = writeln!(&mut ::std::io::stderr(), $($arg)*);
-        r.expect("failed printing to stderr");
-    } }
-);
 
 mod raw_logger {
     use log::{Level, Log, Metadata, Record};
@@ -34,7 +25,7 @@ mod raw_logger {
 
         fn log(&self, record: &Record) {
             if self.enabled(record.metadata()) {
-                logln!(
+                eprintln!(
                     "{} {:<5} [{}] {}",
                     self.name,
                     record.level().to_string(),
@@ -83,7 +74,7 @@ mod json_logger {
             });
 
             if self.enabled(record.metadata()) {
-                logln!("{}", json_record.to_string());
+                eprintln!("{}", json_record.to_string());
             }
         }
 

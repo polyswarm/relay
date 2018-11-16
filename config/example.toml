@@ -9,6 +9,10 @@
     anchor_frequency = 100
     # Number of confirmations to wait for to ensure transfer has completed
     confirmations = 20
+    # Address of consul (if configs stored there)
+    consul = "http://consul:8500"
+    # What community the sidechain is a part of
+    community = "gamma"
 
 [relay.homechain]
     # Websocket RPC endpoint for the homechain

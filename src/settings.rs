@@ -1,5 +1,7 @@
 use config::{Config, Environment, File};
 use failure::Error;
+use std::env;
+use std::ffi::OsString;
 use std::path::Path;
 
 use super::errors::ConfigError;
@@ -70,7 +72,16 @@ impl Settings {
         c.set_default("relay.confirmations", 12)?;
         c.set_default("relay.anchor_frequency", 100)?;
         c.set_default("relay.community", "")?;
-        c.set_default("relay.consul_token", "")?;
+
+        // XXX: Get default from the CONSUL_TOKEN environment variable, look into naming such that
+        // below Environment override does this for us
+        c.set_default(
+            "relay.consul_token",
+            env::var_os("CONSUL_TOKEN")
+                .unwrap_or(OsString::from(""))
+                .to_string_lossy()
+                .to_string(),
+        )?;
 
         if let Some(p) = path {
             let ps = p.as_ref().to_str().ok_or(ConfigError::InvalidConfigFilePath)?;

@@ -78,7 +78,7 @@ impl Settings {
         c.set_default(
             "relay.consul_token",
             env::var_os("CONSUL_TOKEN")
-                .unwrap_or(OsString::from(""))
+                .unwrap_or_else(|| OsString::from(""))
                 .to_string_lossy()
                 .to_string(),
         )?;

@@ -1,6 +1,8 @@
 [relay]
     anchor_frequency = 100
     confirmations = 20
+    consul = "http://consul:8500"
+    community = "gamma"
 
 [relay.homechain]
     wsuri = "ws://homechain:8546"

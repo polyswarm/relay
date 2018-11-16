@@ -1,12 +1,6 @@
 FROM rust
 LABEL maintainer="PolySwarm Developers <info@polyswarm.io>"
 
-ENV DOCKERIZE_VERSION v0.6.1
-
-RUN wget https://github.com/jwilder/dockerize/releases/download/$DOCKERIZE_VERSION/dockerize-alpine-linux-amd64-$DOCKERIZE_VERSION.tar.gz \
-    && tar -C /usr/local/bin -xzvf dockerize-alpine-linux-amd64-$DOCKERIZE_VERSION.tar.gz \
-    && rm dockerize-alpine-linux-amd64-$DOCKERIZE_VERSION.tar.gz
-
 # # create a new empty shell project
 RUN USER=root cargo new --bin polyswarm-relay
 WORKDIR /polyswarm-relay
@@ -16,20 +10,27 @@ COPY ./Cargo.lock ./Cargo.lock
 COPY ./Cargo.toml ./Cargo.toml
 
 # this build step will cache your dependencies
-RUN cargo build
-RUN rm src/*.rs
-
-# copy your source tree
-COPY ./src ./src
-
-# build for release
 RUN cargo build --release
 
-RUN cargo install
+RUN rm -r src/
+COPY ./src ./src
 
-RUN rustup component add clippy-preview
-RUN cargo clippy
+RUN find ./src -type f -exec touch {} \; && \
+    cargo build --release
 
-COPY ./docker ./docker
+FROM ubuntu:bionic
 
-CMD ["polyswarm-relay", "--config", "docker/config.toml"]
+RUN apt-get update && apt-get install -y \
+        wget \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV DOCKERIZE_VERSION v0.6.1
+
+RUN wget https://github.com/jwilder/dockerize/releases/download/$DOCKERIZE_VERSION/dockerize-alpine-linux-amd64-$DOCKERIZE_VERSION.tar.gz \
+    && tar -C /usr/local/bin -xzvf dockerize-alpine-linux-amd64-$DOCKERIZE_VERSION.tar.gz \
+    && rm dockerize-alpine-linux-amd64-$DOCKERIZE_VERSION.tar.gz
+
+COPY --from=0 /polyswarm-relay/target/release/polyswarm-relay /usr/local/bin
+COPY ./docker/config.toml ./config.toml
+
+CMD ["polyswarm-relay", "--config", "config.toml"]

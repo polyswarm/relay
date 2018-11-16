@@ -172,7 +172,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
         token_abi: &str,
         relay: &str,
         relay_abi: &str,
-        free: &bool,
+        free: bool,
         confirmations: u64,
         anchor_frequency: u64,
     ) -> Result<Self, OperationError> {
@@ -194,8 +194,6 @@ impl<T: DuplexTransport + 'static> Network<T> {
 
         let relay = Contract::from_json(web3.eth(), relay_address, relay_abi.as_bytes())
             .or(Err(OperationError::InvalidContractAbi))?;
-
-        let free = free.clone();
 
         Ok(Self {
             network_type,
@@ -224,7 +222,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
         token_abi: &str,
         relay: &str,
         relay_abi: &str,
-        free: &bool,
+        free: bool,
         confirmations: u64,
     ) -> Result<Self, OperationError> {
         Self::new(
@@ -257,7 +255,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
         token_abi: &str,
         relay: &str,
         relay_abi: &str,
-        free: &bool,
+        free: bool,
         confirmations: u64,
         anchor_frequency: u64,
     ) -> Result<Self, OperationError> {

@@ -4,18 +4,24 @@ version = "0.1.0"
 authors = ["PolySwarm Developers <info@polyswarm.io>"]
 
 [dependencies]
+base64 = "0.9.3"
 clap = "2.31"
 config = "0.8"
 ctrlc = "3.1"
 failure = "0.1.2"
 failure_derive = "0.1.2"
-log = "0.4.5"
 jsonrpc-core = "8.0.1"
+log = "0.4.5"
 parking_lot = "0.5"
 serde = "1.0"
 serde_derive = "1.0"
 serde_json = "1.0"
 tokio-core = "0.1"
-web3 = { git = "https://github.com/polyswarm/rust-web3.git", branch = "fix/non-blocking-poll-confirmations" }
+web3 = { git = "https://github.com/polyswarm/rust-web3.git", branch = "relay" }
 consul = { git = "https://github.com/polyswarm/consul-rust", branch = "master" }
-base64 = "0.9.3"
+
+[profile.dev]
+opt-level = 0
+
+[profile.release]
+opt-level = 3

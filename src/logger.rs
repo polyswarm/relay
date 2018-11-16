@@ -14,8 +14,8 @@ mod raw_logger {
     use log::{Level, Log, Metadata, Record};
 
     struct RawLogger {
-        name: String,
         level: Level,
+        name: String,
     }
 
     impl Log for RawLogger {
@@ -42,8 +42,8 @@ mod raw_logger {
 
     pub fn build(name: &str, level: Level) -> Box<Log> {
         Box::new(RawLogger {
+            level,
             name: name.to_owned(),
-            level: level,
         })
     }
 }
@@ -85,7 +85,7 @@ mod json_logger {
 
     pub fn build(name: &str, level: Level) -> Box<Log> {
         Box::new(JsonLogger {
-            level: level,
+            level,
             name: name.to_owned(),
         })
     }

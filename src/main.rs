@@ -63,11 +63,28 @@ fn main() -> Result<(), Error> {
                 .help("Configures the two networks we will relay between")
                 .required(true)
                 .takes_value(true),
-        ).get_matches();
+        )
+        .arg(
+            Arg::with_name("log")
+                .long("log")
+                .value_name("Log level")
+                .help("Specifies the logging severity level")
+                .takes_value(true),
+        )
+        .get_matches();
 
     let settings = Settings::new(matches.value_of("config"))?;
 
-    logger::init_logger(&settings.logging, "relay", Level::Info).expect("problem initializing relay logger");
+    let log_severity = match matches.value_of("log").unwrap_or("info") {
+        "trace" => Level::Trace,
+        "debug" => Level::Debug,
+        "info" => Level::Info,
+        "warn" => Level::Warn,
+        "error" => Level::Error,
+        _ => Level::Info
+    };
+
+    logger::init_logger(&settings.logging, "relay", log_severity).expect("problem initializing relay logger");
 
     // Set up our two websocket connections on the same event loop
     let mut eloop = tokio_core::reactor::Core::new()?;

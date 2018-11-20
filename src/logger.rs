@@ -1,5 +1,5 @@
 use log::Level;
-use settings::Logging;
+use settings::LogFmt;
 use std::io::stderr;
 use std::io::Write;
 
@@ -93,10 +93,10 @@ mod json_logger {
 
 use log::{set_boxed_logger, set_max_level, SetLoggerError};
 
-pub fn init_logger(log_type: &Logging, name: &str, level: Level) -> Result<(), SetLoggerError> {
+pub fn init_logger(log_type: &LogFmt, name: &str, level: Level) -> Result<(), SetLoggerError> {
     set_boxed_logger(match log_type {
-        Logging::Raw => raw_logger::build(name, level),
-        Logging::Json => json_logger::build(name, level),
+        LogFmt::Raw => raw_logger::build(name, level),
+        LogFmt::Json => json_logger::build(name, level),
     })?;
 
     set_max_level(level.to_level_filter());

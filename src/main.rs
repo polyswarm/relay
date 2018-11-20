@@ -67,7 +67,7 @@ fn main() -> Result<(), Error> {
 
     let settings = Settings::new(matches.value_of("config"))?;
 
-    logger::init_logger(&settings.logging, "relay", Level::Info).expect("problem initializing relay logger");
+    logger::init_logger(&settings.log_format, "relay", Level::Info).expect("problem initializing relay logger");
 
     // Set up our two websocket connections on the same event loop
     let mut eloop = tokio_core::reactor::Core::new()?;

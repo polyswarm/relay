@@ -11,16 +11,16 @@ use super::errors::ConfigError;
 pub struct Settings {
     /// Relay settings
     pub relay: Relay,
-    pub logging: Logging,
+    pub log_format: LogFmt,
 }
 
-/// Logging settings
+/// Log formatting settings
 ///
 /// Currently just formatting style, but future loggers can complex embed options in their variant,
 /// so we derive Clone
 #[derive(Clone, Debug, Deserialize)]
 #[serde(tag = "format", rename_all = "kebab-case")]
-pub enum Logging {
+pub enum LogFmt {
     Raw,
     Json,
 }

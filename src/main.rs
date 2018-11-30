@@ -5,6 +5,8 @@ extern crate consul;
 extern crate ctrlc;
 extern crate tokio_core;
 extern crate web3;
+extern crate ethabi;
+extern crate tiny_keccak;
 
 extern crate failure;
 #[macro_use]
@@ -33,6 +35,7 @@ mod mock;
 use failure::{Error, SyncFailure};
 use relay::{Network, Relay};
 use settings::Settings;
+use tokio_core::reactor::Interval;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -165,8 +168,11 @@ fn main() -> Result<(), Error> {
     // Unlock accounts now
     eloop.run(relay.unlock(&settings.relay.password))?;
 
+    let lookback_interval_side = Interval::new(Duration::from_secs(settings.relay.sidechain.interval.clone()), &handle)?;
+    let lookback_interval_home = Interval::new(Duration::from_secs(settings.relay.homechain.interval.clone()), &handle)?;
+
     // Run the relay
-    handle.spawn(relay.run(&handle));
+    handle.spawn(relay.run(lookback_interval_home, lookback_interval_side, &handle));
     while running.load(Ordering::SeqCst) {
         eloop.turn(Some(Duration::from_secs(1)));
     }

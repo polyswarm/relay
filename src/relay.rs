@@ -1,17 +1,17 @@
+use ethabi::Token;
 use std::fmt;
 use std::rc::Rc;
 use std::time;
+use tiny_keccak::keccak256;
 use tokio_core::reactor;
 use web3::confirm::wait_for_transaction_confirmation;
 use web3::contract;
-use web3::contract::{Contract, Options};
 use web3::contract::tokens::Detokenize;
+use web3::contract::{Contract, Options};
 use web3::futures::sync::mpsc;
 use web3::futures::{Future, Stream};
 use web3::types::{Address, BlockId, BlockNumber, FilterBuilder, H256, U256};
 use web3::{DuplexTransport, Web3};
-use ethabi::Token;
-use tiny_keccak::keccak256;
 
 use failure::{Error, SyncFailure};
 
@@ -43,30 +43,33 @@ impl Detokenize for Withdrawal {
     /// Creates a new instance from parsed ABI tokens.
     fn from_tokens(tokens: Vec<Token>) -> Result<Self, contract::Error>
     where
-        Self: Sized {
-            let mut destination = None;
-            let mut amount = None;
-            // let mut approvals = None;
-            let mut processed = None;
-            if let Token::Address(addr) = tokens[0] {
-                destination = Some(addr);
-            }
-            if let Token::Uint(i) = tokens[1] {
-                amount = Some(i);
-            }
-            if let Token::Bool(p) = tokens[2] {
-                processed = Some(p);
-            }
-            if destination.is_none() || amount.is_none() || /*approvals.is_none() ||*/ processed.is_none() {
-                error!("error parsing withdrawal from contract");
-                return Err(contract::Error::from_kind(contract::ErrorKind::Msg("cannot parse withdrawal from this contract".to_string())));
-            }
-            Ok(Withdrawal {
-                destination: destination.unwrap(),
-                amount: amount.unwrap(),
-                processed: processed.unwrap(),
-            })
+        Self: Sized,
+    {
+        let mut destination = None;
+        let mut amount = None;
+        // let mut approvals = None;
+        let mut processed = None;
+        if let Token::Address(addr) = tokens[0] {
+            destination = Some(addr);
         }
+        if let Token::Uint(i) = tokens[1] {
+            amount = Some(i);
+        }
+        if let Token::Bool(p) = tokens[2] {
+            processed = Some(p);
+        }
+        if destination.is_none() || amount.is_none() || /*approvals.is_none() ||*/ processed.is_none() {
+            error!("error parsing withdrawal from contract");
+            return Err(contract::Error::from_kind(contract::ErrorKind::Msg(
+                "cannot parse withdrawal from this contract".to_string(),
+            )));
+        }
+        Ok(Withdrawal {
+            destination: destination.unwrap(),
+            amount: amount.unwrap(),
+            processed: processed.unwrap(),
+        })
+    }
 }
 
 /// Token relay between two Ethereum networks
@@ -110,27 +113,31 @@ impl<T: DuplexTransport + 'static> Relay<T> {
     ) -> impl Future<Item = (), Error = ()> {
         let handle = handle.clone();
         let chain_a = chain_a.clone();
-        chain_a.missed_transfer_stream(interval, &handle).for_each(move |transfer| {
-            let chain_b = chain_b.clone();
-            let handle = handle.clone();
-            chain_b.clone().get_withdrawal_future(&transfer)
-            .and_then(move |withdrawal| {
-                info!("Found withdrawal: {:?}", &withdrawal);
-                if withdrawal.processed {
-                    info!("skipping already processed transaction {:?}", &transfer.tx_hash);
-                    Ok(None)
-                } else {
-                    Ok(Some(transfer))
-                }
-            }).and_then(move |transfer_option| {
+        chain_a
+            .missed_transfer_stream(interval, &handle)
+            .for_each(move |transfer| {
                 let chain_b = chain_b.clone();
                 let handle = handle.clone();
-                if let Some(transfer) = transfer_option {
-                    handle.spawn(chain_b.approve_withdrawal(&transfer))
-                }
-                Ok(())
+                chain_b
+                    .clone()
+                    .get_withdrawal_future(&transfer)
+                    .and_then(move |withdrawal| {
+                        info!("Found withdrawal: {:?}", &withdrawal);
+                        if withdrawal.processed {
+                            info!("skipping already processed transaction {:?}", &transfer.tx_hash);
+                            Ok(None)
+                        } else {
+                            Ok(Some(transfer))
+                        }
+                    }).and_then(move |transfer_option| {
+                        let chain_b = chain_b.clone();
+                        let handle = handle.clone();
+                        if let Some(transfer) = transfer_option {
+                            handle.spawn(chain_b.approve_withdrawal(&transfer))
+                        }
+                        Ok(())
+                    })
             })
-        })
     }
 
     fn anchor_future(
@@ -158,16 +165,27 @@ impl<T: DuplexTransport + 'static> Relay<T> {
     /// # Arguments
     ///
     /// * `handle` - Handle to the event loop to spawn additional futures
-    pub fn run(&self, home: reactor::Interval, side: reactor::Interval, handle: &reactor::Handle) -> impl Future<Item = (), Error = ()> {
+    pub fn run(
+        &self,
+        home: reactor::Interval,
+        side: reactor::Interval,
+        handle: &reactor::Handle,
+    ) -> impl Future<Item = (), Error = ()> {
         Self::anchor_future(&self.sidechain, self.homechain.clone(), handle)
             .join(
-                Self::transfer_future(&self.homechain, self.sidechain.clone(), handle).join(Self::transfer_future(
-                    &self.sidechain,
-                    self.homechain.clone(),
-                    handle,
-                ))
-                .join(Self::missed_transfer_future(&self.homechain, self.sidechain.clone(), side, handle))
-                .join(Self::missed_transfer_future(&self.sidechain, self.homechain.clone(), home, handle))
+                Self::transfer_future(&self.homechain, self.sidechain.clone(), handle)
+                    .join(Self::transfer_future(&self.sidechain, self.homechain.clone(), handle))
+                    .join(Self::missed_transfer_future(
+                        &self.homechain,
+                        self.sidechain.clone(),
+                        side,
+                        handle,
+                    )).join(Self::missed_transfer_future(
+                        &self.sidechain,
+                        self.homechain.clone(),
+                        home,
+                        handle,
+                    )),
             ).and_then(|_| Ok(()))
     }
 }
@@ -376,7 +394,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
     pub fn get_withdrawal_future(&self, transfer: &Transfer) -> impl Future<Item = Withdrawal, Error = ()> {
         let tx_hash = transfer.tx_hash;
         let block_hash = transfer.block_hash;
-        let block_number: &mut[u8] = &mut[0; 32];
+        let block_number: &mut [u8] = &mut [0; 32];
         transfer.block_number.to_big_endian(block_number);
         let mut grouped: Vec<u8> = Vec::new();
         grouped.extend_from_slice(&tx_hash[..]);
@@ -384,16 +402,17 @@ impl<T: DuplexTransport + 'static> Network<T> {
         grouped.extend_from_slice(block_number);
         let hash = H256(keccak256(&grouped[..]));
         let account = self.account;
-        self.relay.query::<Withdrawal, Address, BlockNumber, H256>(
+        self.relay
+            .query::<Withdrawal, Address, BlockNumber, H256>(
                 "withdrawals",
                 hash,
                 account,
                 Options::default(),
                 BlockNumber::Latest,
-        ).or_else(|e| {
-            error!("error getting withdrawal: {}", e);
-            Err(())
-        })
+            ).or_else(|e| {
+                error!("error getting withdrawal: {}", e);
+                Err(())
+            })
     }
 
     /// Returns a Stream of Transfer that were missed, either from downtime, or failed approvals
@@ -401,7 +420,11 @@ impl<T: DuplexTransport + 'static> Network<T> {
     /// # Arguments
     ///
     /// * `handle` - Handle to the event loop to spawn additional futures
-    pub fn missed_transfer_stream(&self, interval: reactor::Interval, handle: &reactor::Handle) -> impl Stream<Item = Transfer, Error = ()> {
+    pub fn missed_transfer_stream(
+        &self,
+        interval: reactor::Interval,
+        handle: &reactor::Handle,
+    ) -> impl Stream<Item = Transfer, Error = ()> {
         let (tx, rx) = mpsc::unbounded();
         let handle = handle.clone();
         let h = handle.clone();
@@ -409,99 +432,107 @@ impl<T: DuplexTransport + 'static> Network<T> {
         let relay_address = self.relay.address();
         let network_type = self.network_type;
         let web3 = self.web3.clone();
-        let future = interval.for_each(move |_| {
-            let handle = h.clone();
-            let tx = tx.clone();
-            let web3 = web3.clone();
-            let w3 = web3.clone();
-            web3.clone().eth().block_number()
-                .and_then(move |block| {
-                    Ok(FilterBuilder::default()
-                        .address(vec![token_address])
-                        .from_block(BlockNumber::from(block.as_u64() - 100))
-                        .to_block(BlockNumber::from(block.as_u64() - 25))
-                        .topics(
-                            Some(vec![TRANSFER_EVENT_SIGNATURE.into()]),
-                            None,
-                            Some(vec![relay_address.into()]),
-                            None,
-                        ).build())
-                }).and_then(move |filter| {
-                    let web3 = web3.clone();
-                    web3.eth().logs(filter.clone())
-                }).and_then(move |logs| {
-                    let tx = tx.clone();
-                    let web3 = w3.clone();
-                    let handle = handle.clone();
-                    info!("found {} log(s)", &logs.len());
-                    logs.iter().for_each(|log| {
-                        if Some(true) == log.removed {
-                            info!("removed logs :(");
-                            return;
-                        }
+        let future = interval
+            .for_each(move |_| {
+                let handle = h.clone();
+                let tx = tx.clone();
+                let web3 = web3.clone();
+                let w3 = web3.clone();
+                web3.clone()
+                    .eth()
+                    .block_number()
+                    .and_then(move |block| {
+                        Ok(FilterBuilder::default()
+                            .address(vec![token_address])
+                            .from_block(BlockNumber::from(block.as_u64() - 100))
+                            .to_block(BlockNumber::from(block.as_u64() - 25))
+                            .topics(
+                                Some(vec![TRANSFER_EVENT_SIGNATURE.into()]),
+                                None,
+                                Some(vec![relay_address.into()]),
+                                None,
+                            ).build())
+                    }).and_then(move |filter| {
+                        let web3 = web3.clone();
+                        web3.eth().logs(filter.clone())
+                    }).and_then(move |logs| {
+                        let tx = tx.clone();
+                        let web3 = w3.clone();
+                        let handle = handle.clone();
+                        info!("found {} log(s)", &logs.len());
+                        logs.iter().for_each(|log| {
+                            if Some(true) == log.removed {
+                                info!("removed logs :(");
+                                return;
+                            }
 
-                        log.transaction_hash.map_or_else(|| {
-                            warn!("log missing transaction hash");
-                            return;
-                        },
-                        |tx_hash| {
-                            let tx = tx.clone();
-                            let destination: Address = log.topics[1].into();
-                            let amount: U256 = log.data.0[..32].into();
-                            info!(
-                                "found transfer event in tx hash {:?}, checking for approval",
-                                &tx_hash
-                            );
+                            log.transaction_hash.map_or_else(
+                                || {
+                                    warn!("log missing transaction hash");
+                                    return;
+                                },
+                                |tx_hash| {
+                                    let tx = tx.clone();
+                                    let destination: Address = log.topics[1].into();
+                                    let amount: U256 = log.data.0[..32].into();
+                                    info!("found transfer event in tx hash {:?}, checking for approval", &tx_hash);
 
-                            handle.spawn(web3.eth()
-                                .transaction_receipt(tx_hash)
-                                .and_then(move |transaction_receipt| {
-                                    let tx_hash = tx_hash;
-                                    transaction_receipt.map_or_else( || {
-                                        error!("no receipt found for transaction hash {}", &tx_hash);
-                                        Ok(())
-                                    },
-                                    |receipt| {
-                                        if receipt.block_number.is_none() {
-                                            warn!("no block number in transfer receipt");
-                                            return Ok(());
-                                        }
+                                    handle.spawn(
+                                        web3.eth()
+                                            .transaction_receipt(tx_hash)
+                                            .and_then(move |transaction_receipt| {
+                                                let tx_hash = tx_hash;
+                                                transaction_receipt.map_or_else(
+                                                    || {
+                                                        error!("no receipt found for transaction hash {}", &tx_hash);
+                                                        Ok(())
+                                                    },
+                                                    |receipt| {
+                                                        if receipt.block_number.is_none() {
+                                                            warn!("no block number in transfer receipt");
+                                                            return Ok(());
+                                                        }
 
-                                        if receipt.block_hash.is_none() {
-                                            warn!("no block hash in transfer receipt");
-                                            return Ok(());
-                                        }
+                                                        if receipt.block_hash.is_none() {
+                                                            warn!("no block hash in transfer receipt");
+                                                            return Ok(());
+                                                        }
 
-                                        let block_hash = receipt.block_hash.unwrap();
-                                        let block_number = receipt.block_number.unwrap();
+                                                        let block_hash = receipt.block_hash.unwrap();
+                                                        let block_number = receipt.block_number.unwrap();
 
-                                        let transfer = Transfer {
-                                            destination,
-                                            amount,
-                                            tx_hash,
-                                            block_hash,
-                                            block_number,
-                                        };
-                                        info!("transfer event not yet approved, approving {}", &transfer);
-                                        tx.unbounded_send(transfer).unwrap();
-                                        Ok(())
-                                    })
-                                }).or_else(|e| {
-                                    error!("error approving transaction: {}", e);
-                                    Ok(())
-                                })
+                                                        let transfer = Transfer {
+                                                            destination,
+                                                            amount,
+                                                            tx_hash,
+                                                            block_hash,
+                                                            block_number,
+                                                        };
+                                                        info!(
+                                                            "transfer event not yet approved, approving {}",
+                                                            &transfer
+                                                        );
+                                                        tx.unbounded_send(transfer).unwrap();
+                                                        Ok(())
+                                                    },
+                                                )
+                                            }).or_else(|e| {
+                                                error!("error approving transaction: {}", e);
+                                                Ok(())
+                                            }),
+                                    );
+                                },
                             );
                         });
-                    });
-                    Ok(())
-                }).or_else(move |e| {
-                    error!("error in {:?} transfer logs: {}", network_type, e);
-                    Ok(())
-                })
-        }).or_else(move |e| {
-            error!("error in {:?} transfer logs: {}", network_type, e);
-            Ok(())
-        });
+                        Ok(())
+                    }).or_else(move |e| {
+                        error!("error in {:?} transfer logs: {}", network_type, e);
+                        Ok(())
+                    })
+            }).or_else(move |e| {
+                error!("error in {:?} transfer logs: {}", network_type, e);
+                Ok(())
+            });
         handle.spawn(future);
         rx
     }

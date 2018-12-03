@@ -58,7 +58,7 @@ impl Detokenize for Withdrawal {
         if let Token::Bool(p) = tokens[2] {
             processed = Some(p);
         }
-        if destination.is_none() || amount.is_none() || /*approvals.is_none() ||*/ processed.is_none() {
+        if destination.is_none() || amount.is_none() || processed.is_none() {
             error!("error parsing withdrawal from contract");
             return Err(contract::Error::from_kind(contract::ErrorKind::Msg(
                 "cannot parse withdrawal from this contract".to_string(),

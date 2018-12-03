@@ -32,5 +32,6 @@ RUN wget https://github.com/jwilder/dockerize/releases/download/$DOCKERIZE_VERSI
 
 COPY --from=0 /polyswarm-relay/target/release/polyswarm-relay /usr/local/bin
 COPY ./docker/config.toml ./config.toml
+COPY ./docker/keyfiles ./keyfiles
 
 CMD ["polyswarm-relay", "--config", "config.toml"]

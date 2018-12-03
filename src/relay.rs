@@ -7,7 +7,6 @@ use web3::types::{Address, U256};
 use web3::{DuplexTransport, Web3};
 
 use failure::{Error, SyncFailure};
-
 use super::anchor::HandleAnchors;
 use super::errors::OperationError;
 use super::missed_transfer::HandleMissedTransfers;
@@ -92,6 +91,9 @@ pub struct Network<T: DuplexTransport> {
     pub confirmations: u64,
     pub anchor_frequency: u64,
     pub interval: u64,
+    pub chain_id: u64,
+    pub keydir: String,
+    pub password: String,
 }
 
 impl<T: DuplexTransport + 'static> Network<T> {
@@ -118,6 +120,9 @@ impl<T: DuplexTransport + 'static> Network<T> {
         confirmations: u64,
         anchor_frequency: u64,
         interval: u64,
+        chain_id: u64,
+        keydir: &str,
+        password: &str,
     ) -> Result<Self, OperationError> {
         let web3 = Web3::new(transport);
         let account = clean_0x(account)
@@ -148,6 +153,9 @@ impl<T: DuplexTransport + 'static> Network<T> {
             confirmations,
             anchor_frequency,
             interval,
+            chain_id,
+            keydir: keydir.to_string(),
+            password: password.to_string(),
         })
     }
 
@@ -169,6 +177,9 @@ impl<T: DuplexTransport + 'static> Network<T> {
         free: bool,
         confirmations: u64,
         interval: u64,
+        chain_id: u64,
+        keydir: &str,
+        password: &str,
     ) -> Result<Self, OperationError> {
         Self::new(
             NetworkType::Home,
@@ -182,6 +193,9 @@ impl<T: DuplexTransport + 'static> Network<T> {
             confirmations,
             0,
             interval,
+            chain_id,
+            keydir,
+            password,
         )
     }
 
@@ -205,6 +219,9 @@ impl<T: DuplexTransport + 'static> Network<T> {
         confirmations: u64,
         anchor_frequency: u64,
         interval: u64,
+        chain_id: u64,
+        keydir: &str,
+        password: &str,
     ) -> Result<Self, OperationError> {
         Self::new(
             NetworkType::Side,
@@ -218,6 +235,9 @@ impl<T: DuplexTransport + 'static> Network<T> {
             confirmations,
             anchor_frequency,
             interval,
+            chain_id,
+            keydir,
+            password,
         )
     }
 

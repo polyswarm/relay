@@ -7,7 +7,6 @@ extern crate ethabi;
 extern crate tiny_keccak;
 extern crate tokio_core;
 extern crate web3;
-
 extern crate failure;
 #[macro_use]
 extern crate failure_derive;
@@ -100,6 +99,8 @@ fn main() -> Result<(), Error> {
     let side_ws = web3::transports::WebSocket::with_event_loop(&settings.relay.sidechain.wsuri, &handle)
         .map_err(SyncFailure::new)?;
 
+
+
     let relay = Relay::new(
         Network::homechain(
             home_ws.clone(),
@@ -133,6 +134,9 @@ fn main() -> Result<(), Error> {
             settings.relay.homechain.free,
             settings.relay.confirmations,
             settings.relay.homechain.interval,
+            settings.relay.homechain.chain_id,
+            &settings.relay.keydir,
+            &settings.relay.password,
         )?,
         Network::sidechain(
             side_ws.clone(),
@@ -167,11 +171,12 @@ fn main() -> Result<(), Error> {
             settings.relay.confirmations,
             settings.relay.anchor_frequency,
             settings.relay.sidechain.interval,
+            settings.relay.sidechain.chain_id,
+            &settings.relay.keydir,
+            &settings.relay.password,
+
         )?,
     );
-
-    // Unlock accounts now
-    eloop.run(relay.unlock(&settings.relay.password))?;
 
     // Run the relay
     handle.spawn(relay.run(&handle));

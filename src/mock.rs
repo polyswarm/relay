@@ -172,8 +172,10 @@ mod tests {
             0,
             0,
             30,
-        )
-        .unwrap();
+            1338,
+            "../",
+            "password"
+        ).unwrap();
     }
 
     #[test]

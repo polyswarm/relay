@@ -47,6 +47,8 @@ pub struct Relay {
     pub consul_token: String,
     /// community name for consul kv
     pub community: String,
+    /// keyfile used to confirm blocks
+    pub keydir: String,
 }
 
 /// Per-network settings
@@ -58,6 +60,8 @@ pub struct Network {
     pub free: bool,
     /// seconds between checks for missed transactions
     pub interval: u64,
+    /// Chain id for an Ethereum client
+    pub chain_id: u64,
 }
 
 impl Settings {

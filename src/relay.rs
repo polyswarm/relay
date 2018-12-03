@@ -36,7 +36,6 @@ fn clean_0x(s: &str) -> &str {
 pub struct Withdrawal {
     destination: Address,
     amount: U256,
-    // approvals: Vec<Address>,
     processed: bool,
 }
 
@@ -50,18 +49,11 @@ impl Detokenize for Withdrawal {
             // let mut approvals = None;
             let mut processed = None;
             if let Token::Address(addr) = tokens[0] {
-                destination = Some(addr.clone());
+                destination = Some(addr);
             }
             if let Token::Uint(i) = tokens[1] {
-                amount = Some(i.clone());
+                amount = Some(i);
             }
-            // if let Token::Array(ref approval_array) = tokens[2] {
-            //     let addrs: Vec<Address> = approval_array.iter().filter_map(|approval| match approval {
-            //         Token::Address(addr) => Some(addr.clone()),
-            //         _ => {None},
-            //     }).collect();
-            //     approvals = Some(addrs);
-            // }
             if let Token::Bool(p) = tokens[2] {
                 processed = Some(p);
             }
@@ -382,16 +374,16 @@ impl<T: DuplexTransport + 'static> Network<T> {
     ///
     /// * `transfer` - A Transfer struct with the tx_hash, block_hash, and block_number we need to retrieve the withdrawal
     pub fn get_withdrawal_future(&self, transfer: &Transfer) -> impl Future<Item = Withdrawal, Error = ()> {
-        let tx_hash = transfer.tx_hash.clone();
-        let block_hash = transfer.block_hash.clone();
-        let block_number: &mut[u8] = &mut vec![0; 32];
+        let tx_hash = transfer.tx_hash;
+        let block_hash = transfer.block_hash;
+        let block_number: &mut[u8] = &mut[0; 32];
         transfer.block_number.to_big_endian(block_number);
         let mut grouped: Vec<u8> = Vec::new();
         grouped.extend_from_slice(&tx_hash[..]);
         grouped.extend_from_slice(&block_hash[..]);
         grouped.extend_from_slice(block_number);
         let hash = H256(keccak256(&grouped[..]));
-        let account = self.account.clone();
+        let account = self.account;
         self.relay.query::<Withdrawal, Address, BlockNumber, H256>(
                 "withdrawals",
                 hash,
@@ -413,8 +405,8 @@ impl<T: DuplexTransport + 'static> Network<T> {
         let (tx, rx) = mpsc::unbounded();
         let handle = handle.clone();
         let h = handle.clone();
-        let token_address = self.token.address().clone();
-        let relay_address = self.relay.address().clone();
+        let token_address = self.token.address();
+        let relay_address = self.relay.address();
         let network_type = self.network_type;
         let web3 = self.web3.clone();
         let future = interval.for_each(move |_| {
@@ -462,9 +454,9 @@ impl<T: DuplexTransport + 'static> Network<T> {
                             );
 
                             handle.spawn(web3.eth()
-                                .transaction_receipt(tx_hash.clone())
+                                .transaction_receipt(tx_hash)
                                 .and_then(move |transaction_receipt| {
-                                    let tx_hash = tx_hash.clone();
+                                    let tx_hash = tx_hash;
                                     transaction_receipt.map_or_else( || {
                                         error!("no receipt found for transaction hash {}", &tx_hash);
                                         Ok(())

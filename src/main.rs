@@ -168,8 +168,8 @@ fn main() -> Result<(), Error> {
     // Unlock accounts now
     eloop.run(relay.unlock(&settings.relay.password))?;
 
-    let lookback_interval_side = Interval::new(Duration::from_secs(settings.relay.sidechain.interval.clone()), &handle)?;
-    let lookback_interval_home = Interval::new(Duration::from_secs(settings.relay.homechain.interval.clone()), &handle)?;
+    let lookback_interval_side = Interval::new(Duration::from_secs(settings.relay.sidechain.interval), &handle)?;
+    let lookback_interval_home = Interval::new(Duration::from_secs(settings.relay.homechain.interval), &handle)?;
 
     // Run the relay
     handle.spawn(relay.run(lookback_interval_home, lookback_interval_side, &handle));

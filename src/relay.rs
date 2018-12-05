@@ -46,29 +46,13 @@ impl Detokenize for Withdrawal {
     where
         Self: Sized,
     {
-        let mut destination = None;
-        let mut amount = None;
-        // let mut approvals = None;
-        let mut processed = None;
-        if let Token::Address(addr) = tokens[0] {
-            destination = Some(addr);
-        }
-        if let Token::Uint(i) = tokens[1] {
-            amount = Some(i);
-        }
-        if let Token::Bool(p) = tokens[2] {
-            processed = Some(p);
-        }
-        if destination.is_none() || amount.is_none() || processed.is_none() {
-            error!("error parsing withdrawal from contract");
-            return Err(contract::Error::from_kind(contract::ErrorKind::Msg(
-                "cannot parse withdrawal from this contract".to_string(),
-            )));
-        }
+        let destination = tokens[0].clone().to_address().ok_or(contract::Error::from_kind(contract::ErrorKind::Msg("cannot parse destination address from contract response".to_string())))?;
+        let amount = tokens[1].clone().to_uint().ok_or(contract::Error::from_kind(contract::ErrorKind::Msg("cannot parse amount uint from contract response".to_string())))?;
+        let processed = tokens[2].clone().to_bool().ok_or(contract::Error::from_kind(contract::ErrorKind::Msg("cannot parse processed bool from contract response".to_string())))?;
         Ok(Withdrawal {
-            destination: destination.unwrap(),
-            amount: amount.unwrap(),
-            processed: processed.unwrap(),
+            destination,
+            amount,
+            processed,
         })
     }
 }

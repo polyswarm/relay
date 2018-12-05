@@ -127,7 +127,6 @@ impl<T: DuplexTransport + 'static> Relay<T> {
                 let chain_b = chain_b.clone();
                 let handle = handle.clone();
                 chain_b
-                    .clone()
                     .get_withdrawal_future(&transfer)
                     .and_then(move |withdrawal| {
                         info!("Found withdrawal: {:?}", &withdrawal);
@@ -452,7 +451,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
                     .eth()
                     .block_number()
                     .and_then(move |block| {
-                        Ok(FilterBuilder::default()
+                        let filter = FilterBuilder::default()
                             .address(vec![token_address])
                             .from_block(BlockNumber::from(block.as_u64() - 100))
                             .to_block(BlockNumber::from(block.as_u64() - 25))
@@ -461,10 +460,8 @@ impl<T: DuplexTransport + 'static> Network<T> {
                                 None,
                                 Some(vec![relay_address.into()]),
                                 None,
-                            ).build())
-                    }).and_then(move |filter| {
-                        let web3 = web3.clone();
-                        web3.eth().logs(filter.clone())
+                            ).build();
+                        web3.eth().logs(filter)
                     }).and_then(move |logs| {
                         let tx = tx.clone();
                         let web3 = w3.clone();

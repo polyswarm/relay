@@ -8,9 +8,9 @@ use web3::confirm::wait_for_transaction_confirmation;
 use web3::contract;
 use web3::contract::tokens::Detokenize;
 use web3::contract::{Contract, Options};
+use web3::futures::future;
 use web3::futures::sync::mpsc;
 use web3::futures::{Future, Stream};
-use web3::futures::future;
 use web3::types::{Address, BlockId, BlockNumber, FilterBuilder, H256, U256};
 use web3::{DuplexTransport, Web3};
 
@@ -46,9 +46,25 @@ impl Detokenize for Withdrawal {
     where
         Self: Sized,
     {
-        let destination = tokens[0].clone().to_address().ok_or(contract::Error::from_kind(contract::ErrorKind::Msg("cannot parse destination address from contract response".to_string())))?;
-        let amount = tokens[1].clone().to_uint().ok_or(contract::Error::from_kind(contract::ErrorKind::Msg("cannot parse amount uint from contract response".to_string())))?;
-        let processed = tokens[2].clone().to_bool().ok_or(contract::Error::from_kind(contract::ErrorKind::Msg("cannot parse processed bool from contract response".to_string())))?;
+        let destination =
+            tokens[0]
+                .clone()
+                .to_address()
+                .ok_or(contract::Error::from_kind(contract::ErrorKind::Msg(
+                    "cannot parse destination address from contract response".to_string(),
+                )))?;
+        let amount = tokens[1]
+            .clone()
+            .to_uint()
+            .ok_or(contract::Error::from_kind(contract::ErrorKind::Msg(
+                "cannot parse amount uint from contract response".to_string(),
+            )))?;
+        let processed = tokens[2]
+            .clone()
+            .to_bool()
+            .ok_or(contract::Error::from_kind(contract::ErrorKind::Msg(
+                "cannot parse processed bool from contract response".to_string(),
+            )))?;
         Ok(Withdrawal {
             destination,
             amount,
@@ -103,7 +119,7 @@ impl<T: DuplexTransport + 'static> Relay<T> {
             Err(e) => {
                 error!("error creating lookback interval: {:?}", e);
                 return Box::new(future::err(()));
-            },
+            }
         };
         let future = chain_a
             .missed_transfer_stream(lookback_interval, &handle)
@@ -158,7 +174,7 @@ impl<T: DuplexTransport + 'static> Relay<T> {
     /// # Arguments
     ///
     /// * `handle` - Handle to the event loop to spawn additional futures
-    pub fn run( &self, handle: &reactor::Handle) -> impl Future<Item = (), Error = ()> {
+    pub fn run(&self, handle: &reactor::Handle) -> impl Future<Item = (), Error = ()> {
         Self::anchor_future(&self.sidechain, self.homechain.clone(), handle)
             .join(
                 Self::transfer_future(&self.homechain, self.sidechain.clone(), handle)

@@ -3,10 +3,10 @@ extern crate clap;
 extern crate config;
 extern crate consul;
 extern crate ctrlc;
-extern crate tokio_core;
-extern crate web3;
 extern crate ethabi;
 extern crate tiny_keccak;
+extern crate tokio_core;
+extern crate web3;
 
 extern crate failure;
 #[macro_use]
@@ -65,15 +65,13 @@ fn main() -> Result<(), Error> {
                 .help("Configures the two networks we will relay between")
                 .required(true)
                 .takes_value(true),
-        )
-        .arg(
+        ).arg(
             Arg::with_name("log")
                 .long("log")
                 .value_name("Log level")
                 .help("Specifies the logging severity level")
                 .takes_value(true),
-        )
-        .get_matches();
+        ).get_matches();
 
     let settings = Settings::new(matches.value_of("config"))?;
 
@@ -83,7 +81,7 @@ fn main() -> Result<(), Error> {
         "info" => Level::Info,
         "warn" => Level::Warn,
         "error" => Level::Error,
-        _ => Level::Info
+        _ => Level::Info,
     };
 
     logger::init_logger(&settings.logging, "relay", log_severity).expect("problem initializing relay logger");

@@ -8,7 +8,6 @@ use web3::confirm::wait_for_transaction_confirmation;
 use web3::contract;
 use web3::contract::tokens::Detokenize;
 use web3::contract::{Contract, Options};
-use web3::futures::future;
 use web3::futures::sync::mpsc;
 use web3::futures::{Future, Stream};
 use web3::types::{Address, BlockId, BlockNumber, FilterBuilder, H256, U256};
@@ -22,6 +21,7 @@ use super::errors::OperationError;
 const GAS_LIMIT: u64 = 200_000;
 const DEFAULT_GAS_PRICE: u64 = 20_000_000_000;
 const FREE_GAS_PRICE: u64 = 0;
+const LOOKBACK_LEEWAY: u64 = 10;
 
 // From ethereum_types but not reexported by web3
 fn clean_0x(s: &str) -> &str {
@@ -110,42 +110,32 @@ impl<T: DuplexTransport + 'static> Relay<T> {
         chain_a: &Rc<Network<T>>,
         chain_b: Rc<Network<T>>,
         handle: &reactor::Handle,
-    ) -> Box<Future<Item = (), Error = ()>> {
+    ) -> impl Future<Item = (), Error = ()> {
         let handle = handle.clone();
         let chain_a = chain_a.clone();
-        let duration = chain_a.interval;
-        let lookback_interval = match reactor::Interval::new(time::Duration::from_secs(duration), &handle) {
-            Ok(interval) => interval,
-            Err(e) => {
-                error!("error creating lookback interval: {:?}", e);
-                return Box::new(future::err(()));
-            }
-        };
-        let future = chain_a
-            .missed_transfer_stream(lookback_interval, &handle)
-            .for_each(move |transfer| {
-                let chain_b = chain_b.clone();
-                let handle = handle.clone();
-                chain_b
-                    .get_withdrawal_future(&transfer)
-                    .and_then(move |withdrawal| {
-                        info!("Found withdrawal: {:?}", &withdrawal);
-                        if withdrawal.processed {
-                            info!("skipping already processed transaction {:?}", &transfer.tx_hash);
-                            Ok(None)
-                        } else {
-                            Ok(Some(transfer))
-                        }
-                    }).and_then(move |transfer_option| {
-                        let chain_b = chain_b.clone();
-                        let handle = handle.clone();
-                        if let Some(transfer) = transfer_option {
-                            handle.spawn(chain_b.approve_withdrawal(&transfer))
-                        }
-                        Ok(())
-                    })
-            });
-        Box::new(future)
+        chain_a.missed_transfer_stream(&handle)
+        .for_each(move |transfer| {
+            let chain_b = chain_b.clone();
+            let handle = handle.clone();
+            chain_b
+                .get_withdrawal_future(&transfer)
+                .and_then(move |withdrawal| {
+                    info!("Found withdrawal: {:?}", &withdrawal);
+                    if withdrawal.processed {
+                        info!("skipping already processed transaction {:?}", &transfer.tx_hash);
+                        Ok(None)
+                    } else {
+                        Ok(Some(transfer))
+                    }
+                }).and_then(move |transfer_option| {
+                    let chain_b = chain_b.clone();
+                    let handle = handle.clone();
+                    if let Some(transfer) = transfer_option {
+                        handle.spawn(chain_b.approve_withdrawal(&transfer))
+                    }
+                    Ok(())
+                })
+        })
     }
 
     fn anchor_future(
@@ -427,32 +417,38 @@ impl<T: DuplexTransport + 'static> Network<T> {
     ///
     /// # Arguments
     ///
-    /// * `interval` - Interval future to periodically trigger a scan of old logs
     /// * `handle` - Handle to the event loop to spawn additional futures
-    pub fn missed_transfer_stream(
-        &self,
-        interval: reactor::Interval,
-        handle: &reactor::Handle,
-    ) -> impl Stream<Item = Transfer, Error = ()> {
+    pub fn missed_transfer_stream(&self,handle: &reactor::Handle,) -> impl Stream<Item = Transfer, Error = ()> {
         let (tx, rx) = mpsc::unbounded();
         let h = handle.clone();
         let token_address = self.token.address();
         let relay_address = self.relay.address();
         let network_type = self.network_type;
-        let web3 = Rc::new(Box::new(self.web3.clone()));
-        let future = interval
-            .for_each(move |_| {
-                let handle = h.clone();
+        let interval = self.interval;
+        let confirmations = self.confirmations;
+        let web3 = self.web3.clone();
+        let future =
+        web3.clone().eth_subscribe()
+        .subscribe_new_heads()
+        .and_then(move |sub| {
+            let handle = h.clone();
+            let tx = tx.clone();
+            let web3 = web3.clone();
+            sub.chunks(interval as usize).for_each(move |_| {
+                let handle = handle.clone();
                 let tx = tx.clone();
                 let web3 = web3.clone();
                 web3.clone()
                     .eth()
                     .block_number()
                     .and_then(move |block| {
+                        info!("Scanning at block {}", block);
+                        let from = block.as_u64() - confirmations - interval - LOOKBACK_LEEWAY;
+                        let to = block.as_u64() - confirmations;
                         let filter = FilterBuilder::default()
                             .address(vec![token_address])
-                            .from_block(BlockNumber::from(block.as_u64() - 100))
-                            .to_block(BlockNumber::from(block.as_u64() - 25))
+                            .from_block(BlockNumber::from(from))
+                            .to_block(BlockNumber::from(to))
                             .topics(
                                 Some(vec![TRANSFER_EVENT_SIGNATURE.into()]),
                                 None,
@@ -527,7 +523,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
                                                 }).or_else(|e| {
                                                     error!("error approving transaction: {}", e);
                                                     Ok(())
-                                                }),
+                                                })
                                         );
                                     },
                                 );
@@ -541,7 +537,11 @@ impl<T: DuplexTransport + 'static> Network<T> {
             }).or_else(move |e| {
                 error!("error in {:?} transfer logs: {}", network_type, e);
                 Ok(())
-            });
+            })
+        }).or_else(move |e| {
+            error!("error checking every {} blocks: {}", interval, e);
+            Ok(())
+        });
         handle.spawn(future);
         rx
     }

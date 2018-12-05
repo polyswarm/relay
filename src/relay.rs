@@ -50,19 +50,19 @@ impl Detokenize for Withdrawal {
             tokens[0]
                 .clone()
                 .to_address()
-                .ok_or(contract::Error::from_kind(contract::ErrorKind::Msg(
+                .ok_or_else(|| contract::Error::from_kind(contract::ErrorKind::Msg(
                     "cannot parse destination address from contract response".to_string(),
                 )))?;
         let amount = tokens[1]
             .clone()
             .to_uint()
-            .ok_or(contract::Error::from_kind(contract::ErrorKind::Msg(
+            .ok_or_else(|| contract::Error::from_kind(contract::ErrorKind::Msg(
                 "cannot parse amount uint from contract response".to_string(),
             )))?;
         let processed = tokens[2]
             .clone()
             .to_bool()
-            .ok_or(contract::Error::from_kind(contract::ErrorKind::Msg(
+            .ok_or_else(|| contract::Error::from_kind(contract::ErrorKind::Msg(
                 "cannot parse processed bool from contract response".to_string(),
             )))?;
         Ok(Withdrawal {

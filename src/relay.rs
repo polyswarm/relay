@@ -10,6 +10,7 @@ use web3::contract::tokens::Detokenize;
 use web3::contract::{Contract, Options};
 use web3::futures::sync::mpsc;
 use web3::futures::{Future, Stream};
+use web3::futures::future;
 use web3::types::{Address, BlockId, BlockNumber, FilterBuilder, H256, U256};
 use web3::{DuplexTransport, Web3};
 
@@ -73,7 +74,7 @@ impl Detokenize for Withdrawal {
 }
 
 /// Token relay between two Ethereum networks
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Relay<T: DuplexTransport> {
     homechain: Rc<Network<T>>,
     sidechain: Rc<Network<T>>,
@@ -108,13 +109,20 @@ impl<T: DuplexTransport + 'static> Relay<T> {
     fn missed_transfer_future(
         chain_a: &Rc<Network<T>>,
         chain_b: Rc<Network<T>>,
-        interval: reactor::Interval,
         handle: &reactor::Handle,
-    ) -> impl Future<Item = (), Error = ()> {
+    ) -> Box<Future<Item = (), Error = ()>> {
         let handle = handle.clone();
         let chain_a = chain_a.clone();
-        chain_a
-            .missed_transfer_stream(interval, &handle)
+        let duration = chain_a.interval;
+        let lookback_interval = match reactor::Interval::new(time::Duration::from_secs(duration), &handle) {
+            Ok(interval) => interval,
+            Err(e) => {
+                error!("error creating lookback interval: {:?}", e);
+                return Box::new(future::err(()));
+            },
+        };
+        let future = chain_a
+            .missed_transfer_stream(lookback_interval, &handle)
             .for_each(move |transfer| {
                 let chain_b = chain_b.clone();
                 let handle = handle.clone();
@@ -137,7 +145,8 @@ impl<T: DuplexTransport + 'static> Relay<T> {
                         }
                         Ok(())
                     })
-            })
+            });
+        Box::new(future)
     }
 
     fn anchor_future(
@@ -165,12 +174,7 @@ impl<T: DuplexTransport + 'static> Relay<T> {
     /// # Arguments
     ///
     /// * `handle` - Handle to the event loop to spawn additional futures
-    pub fn run(
-        &self,
-        home: reactor::Interval,
-        side: reactor::Interval,
-        handle: &reactor::Handle,
-    ) -> impl Future<Item = (), Error = ()> {
+    pub fn run( &self, handle: &reactor::Handle) -> impl Future<Item = (), Error = ()> {
         Self::anchor_future(&self.sidechain, self.homechain.clone(), handle)
             .join(
                 Self::transfer_future(&self.homechain, self.sidechain.clone(), handle)
@@ -178,12 +182,10 @@ impl<T: DuplexTransport + 'static> Relay<T> {
                     .join(Self::missed_transfer_future(
                         &self.homechain,
                         self.sidechain.clone(),
-                        side,
                         handle,
                     )).join(Self::missed_transfer_future(
                         &self.sidechain,
                         self.homechain.clone(),
-                        home,
                         handle,
                     )),
             ).and_then(|_| Ok(()))
@@ -234,7 +236,6 @@ pub enum NetworkType {
 }
 
 /// Represents an Ethereum network with a deployed ERC20Relay contract
-#[derive(Debug)]
 pub struct Network<T: DuplexTransport> {
     network_type: NetworkType,
     web3: Web3<T>,
@@ -244,6 +245,7 @@ pub struct Network<T: DuplexTransport> {
     free: bool,
     confirmations: u64,
     anchor_frequency: u64,
+    interval: u64,
 }
 
 impl<T: DuplexTransport + 'static> Network<T> {
@@ -268,6 +270,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
         free: bool,
         confirmations: u64,
         anchor_frequency: u64,
+        interval: u64,
     ) -> Result<Self, OperationError> {
         let web3 = Web3::new(transport);
         let account = clean_0x(account)
@@ -297,6 +300,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
             free,
             confirmations,
             anchor_frequency,
+            interval,
         })
     }
 
@@ -317,6 +321,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
         relay_abi: &str,
         free: bool,
         confirmations: u64,
+        interval: u64,
     ) -> Result<Self, OperationError> {
         Self::new(
             NetworkType::Home,
@@ -329,6 +334,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
             free,
             confirmations,
             0,
+            interval,
         )
     }
 
@@ -351,6 +357,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
         free: bool,
         confirmations: u64,
         anchor_frequency: u64,
+        interval: u64,
     ) -> Result<Self, OperationError> {
         Self::new(
             NetworkType::Side,
@@ -363,6 +370,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
             free,
             confirmations,
             anchor_frequency,
+            interval,
         )
     }
 

@@ -35,7 +35,6 @@ mod mock;
 use failure::{Error, SyncFailure};
 use relay::{Network, Relay};
 use settings::Settings;
-use tokio_core::reactor::Interval;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -129,6 +128,7 @@ fn main() -> Result<(), Error> {
             )?,
             settings.relay.homechain.free,
             settings.relay.confirmations,
+            settings.relay.homechain.interval,
         )?,
         Network::sidechain(
             side_ws.clone(),
@@ -162,17 +162,15 @@ fn main() -> Result<(), Error> {
             settings.relay.sidechain.free,
             settings.relay.confirmations,
             settings.relay.anchor_frequency,
+            settings.relay.sidechain.interval,
         )?,
     );
 
     // Unlock accounts now
     eloop.run(relay.unlock(&settings.relay.password))?;
 
-    let lookback_interval_side = Interval::new(Duration::from_secs(settings.relay.sidechain.interval), &handle)?;
-    let lookback_interval_home = Interval::new(Duration::from_secs(settings.relay.homechain.interval), &handle)?;
-
     // Run the relay
-    handle.spawn(relay.run(lookback_interval_home, lookback_interval_side, &handle));
+    handle.spawn(relay.run(&handle));
     while running.load(Ordering::SeqCst) {
         eloop.turn(Some(Duration::from_secs(1)));
     }

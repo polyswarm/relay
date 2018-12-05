@@ -469,7 +469,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
                         info!("found {} log(s)", &logs.len());
                         logs.iter().for_each(|log| {
                             if Some(true) == log.removed {
-                                info!("removed logs :(");
+                                warn!("found removed log");
                                 return;
                             }
 

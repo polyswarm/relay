@@ -435,18 +435,16 @@ impl<T: DuplexTransport + 'static> Network<T> {
         handle: &reactor::Handle,
     ) -> impl Stream<Item = Transfer, Error = ()> {
         let (tx, rx) = mpsc::unbounded();
-        let handle = handle.clone();
         let h = handle.clone();
         let token_address = self.token.address();
         let relay_address = self.relay.address();
         let network_type = self.network_type;
-        let web3 = self.web3.clone();
+        let web3 = Rc::new(Box::new(self.web3.clone()));
         let future = interval
             .for_each(move |_| {
                 let handle = h.clone();
                 let tx = tx.clone();
                 let web3 = web3.clone();
-                let w3 = web3.clone();
                 web3.clone()
                     .eth()
                     .block_number()
@@ -461,77 +459,81 @@ impl<T: DuplexTransport + 'static> Network<T> {
                                 Some(vec![relay_address.into()]),
                                 None,
                             ).build();
-                        web3.eth().logs(filter)
-                    }).and_then(move |logs| {
-                        let tx = tx.clone();
-                        let web3 = w3.clone();
-                        let handle = handle.clone();
-                        info!("found {} log(s)", &logs.len());
-                        logs.iter().for_each(|log| {
-                            if Some(true) == log.removed {
-                                warn!("found removed log");
-                                return;
-                            }
-
-                            log.transaction_hash.map_or_else(
-                                || {
-                                    warn!("log missing transaction hash");
+                        let web3 = web3.clone();
+                        web3.clone().eth().logs(filter).and_then(move |logs| {
+                            let tx = tx.clone();
+                            let web3 = web3.clone();
+                            let handle = handle.clone();
+                            info!("found {} log(s)", &logs.len());
+                            logs.iter().for_each(|log| {
+                                if Some(true) == log.removed {
+                                    warn!("found removed log");
                                     return;
-                                },
-                                |tx_hash| {
-                                    let tx = tx.clone();
-                                    let destination: Address = log.topics[1].into();
-                                    let amount: U256 = log.data.0[..32].into();
-                                    info!("found transfer event in tx hash {:?}, checking for approval", &tx_hash);
+                                }
 
-                                    handle.spawn(
-                                        web3.eth()
-                                            .transaction_receipt(tx_hash)
-                                            .and_then(move |transaction_receipt| {
-                                                let tx_hash = tx_hash;
-                                                transaction_receipt.map_or_else(
-                                                    || {
-                                                        error!("no receipt found for transaction hash {}", &tx_hash);
-                                                        Ok(())
-                                                    },
-                                                    |receipt| {
-                                                        if receipt.block_number.is_none() {
-                                                            warn!("no block number in transfer receipt");
-                                                            return Ok(());
-                                                        }
+                                log.transaction_hash.map_or_else(
+                                    || {
+                                        warn!("log missing transaction hash");
+                                        return;
+                                    },
+                                    |tx_hash| {
+                                        let tx = tx.clone();
+                                        let destination: Address = log.topics[1].into();
+                                        let amount: U256 = log.data.0[..32].into();
+                                        info!("found transfer event in tx hash {:?}, checking for approval", &tx_hash);
 
-                                                        if receipt.block_hash.is_none() {
-                                                            warn!("no block hash in transfer receipt");
-                                                            return Ok(());
-                                                        }
+                                        handle.spawn(
+                                            web3.eth()
+                                                .transaction_receipt(tx_hash)
+                                                .and_then(move |transaction_receipt| {
+                                                    let tx_hash = tx_hash;
+                                                    transaction_receipt.map_or_else(
+                                                        || {
+                                                            error!(
+                                                                "no receipt found for transaction hash {}",
+                                                                &tx_hash
+                                                            );
+                                                            Ok(())
+                                                        },
+                                                        |receipt| {
+                                                            if receipt.block_number.is_none() {
+                                                                warn!("no block number in transfer receipt");
+                                                                return Ok(());
+                                                            }
 
-                                                        let block_hash = receipt.block_hash.unwrap();
-                                                        let block_number = receipt.block_number.unwrap();
+                                                            if receipt.block_hash.is_none() {
+                                                                warn!("no block hash in transfer receipt");
+                                                                return Ok(());
+                                                            }
 
-                                                        let transfer = Transfer {
-                                                            destination,
-                                                            amount,
-                                                            tx_hash,
-                                                            block_hash,
-                                                            block_number,
-                                                        };
-                                                        info!(
-                                                            "transfer event not yet approved, approving {}",
-                                                            &transfer
-                                                        );
-                                                        tx.unbounded_send(transfer).unwrap();
-                                                        Ok(())
-                                                    },
-                                                )
-                                            }).or_else(|e| {
-                                                error!("error approving transaction: {}", e);
-                                                Ok(())
-                                            }),
-                                    );
-                                },
-                            );
-                        });
-                        Ok(())
+                                                            let block_hash = receipt.block_hash.unwrap();
+                                                            let block_number = receipt.block_number.unwrap();
+
+                                                            let transfer = Transfer {
+                                                                destination,
+                                                                amount,
+                                                                tx_hash,
+                                                                block_hash,
+                                                                block_number,
+                                                            };
+                                                            info!(
+                                                                "transfer event not yet approved, approving {}",
+                                                                &transfer
+                                                            );
+                                                            tx.unbounded_send(transfer).unwrap();
+                                                            Ok(())
+                                                        },
+                                                    )
+                                                }).or_else(|e| {
+                                                    error!("error approving transaction: {}", e);
+                                                    Ok(())
+                                                }),
+                                        );
+                                    },
+                                );
+                            });
+                            Ok(())
+                        })
                     }).or_else(move |e| {
                         error!("error in {:?} transfer logs: {}", network_type, e);
                         Ok(())

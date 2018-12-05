@@ -259,6 +259,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
     /// * `relay` - Address of the ERC20Relay contract to use
     /// * `confirmations` - Number of blocks to wait for confirmation
     /// * `anchor_frequency` - Frequency of sidechain anchor blocks
+    /// * `interval` - Number of seconds between each lookback attempt
     pub fn new(
         network_type: NetworkType,
         transport: T,
@@ -427,6 +428,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
     ///
     /// # Arguments
     ///
+    /// * `interval` - Interval future to periodically trigger a scan of old logs
     /// * `handle` - Handle to the event loop to spawn additional futures
     pub fn missed_transfer_stream(
         &self,

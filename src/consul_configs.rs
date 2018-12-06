@@ -3,8 +3,9 @@ use consul::Client;
 use errors::OperationError;
 use failure::Error;
 use serde_json;
-use std::{thread, time};
+use std::{process, thread, time};
 
+#[derive(Debug, Clone)]
 pub struct ConsulConfig {
     consul_url: String,
     consul_token: String,
@@ -74,6 +75,23 @@ impl ConsulConfig {
                 print_err();
                 thread::sleep(one_sec);
                 continue;
+            }
+        }
+    }
+
+    pub fn watch_for_config_deletion(&self, chain: &str) {
+        let client = Client::new(&self.consul_url, &self.consul_token);
+        let keystore = client.keystore;
+        let one_sec = time::Duration::from_secs(1);
+
+        loop {
+            let keyname = format!("chain/{}/{}", &self.sidechain_name, &chain);
+
+            if keystore.get_key(keyname).is_ok() {
+                thread::sleep(one_sec);
+            } else {
+                info!("Config change detected, exiting...");
+                process::exit(1);
             }
         }
     }

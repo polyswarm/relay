@@ -23,6 +23,7 @@ extern crate ethcore_transaction;
 extern crate ethkey;
 extern crate ethstore;
 extern crate rlp;
+use consul_configs::ConsulConfig;
 use std::sync::atomic::AtomicUsize;
 
 use clap::{App, Arg};
@@ -48,6 +49,7 @@ use settings::Settings;
 use web3::futures::Future;
 
 use errors::OperationError;
+use std::thread;
 use tokio_core::reactor;
 use web3::Web3;
 
@@ -113,8 +115,19 @@ fn main() -> Result<(), Error> {
     let side_ws = web3::transports::WebSocket::with_event_loop(&settings.relay.sidechain.wsuri, &handle)
         .map_err(SyncFailure::new)?;
 
+    let consul_config = consul_configs::ConsulConfig::new(
+        &settings.relay.consul,
+        &settings.relay.consul_token,
+        &settings.relay.community,
+    );
+
     // Run the relay
-    handle.spawn(run(handle.clone(), settings, home_ws, side_ws));
+    handle.spawn(run(handle.clone(), settings, home_ws, side_ws, consul_config.clone()));
+
+    thread::spawn(move || {
+        consul_config.watch_for_config_deletion("homechain");
+    });
+
     while running.load(Ordering::SeqCst) {
         eloop.turn(Some(Duration::from_secs(1)));
     }
@@ -127,6 +140,7 @@ fn run(
     settings: Settings,
     home_ws: web3::transports::WebSocket,
     side_ws: web3::transports::WebSocket,
+    consul_config: ConsulConfig,
 ) -> impl Future<Item = (), Error = ()> {
     let account = utils::clean_0x(&settings.relay.account)
         .parse()
@@ -135,11 +149,6 @@ fn run(
 
     let home_web3 = Web3::new(home_ws.clone());
     let side_web3 = Web3::new(side_ws.clone());
-    let consul_config = consul_configs::ConsulConfig::new(
-        &settings.relay.consul,
-        &settings.relay.consul_token,
-        &settings.relay.community,
-    );
 
     home_web3
         .eth()

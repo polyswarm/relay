@@ -105,7 +105,10 @@ impl Settings {
     }
 
     fn validated(self) -> Result<Self, ConfigError> {
+<<<<<<< HEAD
         let lookback_combined = LOOKBACK_RANGE + LOOKBACK_LEEWAY;
+=======
+>>>>>>> error msg for side and home chain nonce
         if self.relay.anchor_frequency == 0 {
             Err(ConfigError::InvalidAnchorFrequency)
         } else if self.relay.confirmations >= self.relay.anchor_frequency {
@@ -114,6 +117,8 @@ impl Settings {
             || self.relay.sidechain.interval >= lookback_combined
         {
             Err(ConfigError::InvalidLookbackInterval(lookback_combined))
+        } else if !Path::new(&self.relay.keydir).exists() {
+            Err(ConfigError::InvalidKeydir)
         } else {
             Ok(self)
         }

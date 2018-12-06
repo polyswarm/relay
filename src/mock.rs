@@ -136,6 +136,8 @@ mod tests {
 
     #[test]
     fn should_build_network_with_mock() {
+        let tx_count = Arc::new(Mutex::new(U256::from(0)));
+
         let mock_abi = format!(
             r#"[
             {{
@@ -174,7 +176,8 @@ mod tests {
             30,
             1338,
             "../",
-            "password"
+            "password",
+            Arc::clone(&tx_count),
         ).unwrap();
     }
 
@@ -327,4 +330,5 @@ mod tests {
         let headers = eloop.run(stream).unwrap();
         assert_eq!(value, *headers.get(0).unwrap());
     }
+
 }

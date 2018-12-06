@@ -1,3 +1,6 @@
+use super::relay::Network;
+use super::utils::{build_transaction, get_store_for_keyfiles};
+use rlp::RlpStream;
 use std::fmt;
 use std::rc::Rc;
 use tokio_core::reactor;
@@ -8,8 +11,6 @@ use web3::futures::sync::mpsc;
 use web3::futures::try_ready;
 use web3::types::{BlockId, BlockNumber, TransactionReceipt, H256, U256};
 use web3::DuplexTransport;
-
-use super::relay::Network;
 
 /// Represents a block on the sidechain to be anchored to the homechain
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -187,19 +188,36 @@ impl ProcessAnchor {
     /// * `target` - Network where the block headers are anchored
     /// * `handle` - Handle to spawn new futures
     pub fn new<T: DuplexTransport + 'static>(anchor: &Anchor, target: &Rc<Network<T>>) -> Self {
+        info!("anchoring block {}", anchor);
         let anchor = *anchor;
         let target = target.clone();
-        info!("anchoring block {}", anchor);
-        let future = target.relay.call_with_confirmations(
-            "anchor",
-            (anchor.block_hash, anchor.block_number),
-            target.account,
-            Options::with(|options| {
-                options.gas = Some(target.get_gas_limit());
-                options.gas_price = Some(target.get_gas_price());
-            }),
-            target.confirmations as usize,
+        let store = get_store_for_keyfiles(&target.keydir);
+        let mut nonce = target.nonce.lock();
+        let mut s = RlpStream::new();
+        let fn_data = target
+            .relay
+            .get_function_data("anchor".into(), (anchor.block_hash, anchor.block_number))
+            .unwrap();
+        let options = Options::with(|options| {
+            options.gas = Some(target.get_gas_limit());
+            options.gas_price = Some(target.get_gas_price());
+            options.value = Some(0.into());
+            options.nonce = Some(*nonce);
+            *nonce += U256::from(1);
+        });
+        build_transaction(
+            &mut s,
+            &fn_data,
+            &target.relay.address(),
+            &target.account,
+            &store,
+            &options,
+            &target.password,
+            &target.chain_id,
         );
+        let future = target
+            .relay
+            .send_raw_call_with_confirmations(s.as_raw().into(), target.confirmations as usize);
         ProcessAnchor(Box::new(future))
     }
 }

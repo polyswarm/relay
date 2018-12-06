@@ -1,3 +1,4 @@
+use rlp::RlpStream;
 use std::fmt;
 use std::rc::Rc;
 use std::time;
@@ -13,6 +14,7 @@ use web3::DuplexTransport;
 
 use super::contracts::TRANSFER_EVENT_SIGNATURE;
 use super::relay::Network;
+use super::utils::{build_transaction, get_store_for_keyfiles};
 use super::withdrawal::GetWithdrawal;
 
 /// Represents a token transfer between two networks
@@ -65,23 +67,44 @@ impl ApproveWithdrawal {
     ///
     /// * `target` - Network where the withdrawal will be posted to the contract
     pub fn new<T: DuplexTransport + 'static>(target: &Rc<Network<T>>, transfer: Transfer) -> Self {
+        info!("approving withdrawal {}", transfer);
         let target = target.clone();
-        let future = target.clone().relay.call_with_confirmations(
-            "approveWithdrawal",
-            (
-                transfer.destination,
-                transfer.amount,
-                transfer.tx_hash,
-                transfer.block_hash,
-                transfer.block_number,
-            ),
-            target.account,
-            Options::with(|options| {
-                options.gas = Some(target.get_gas_limit());
-                options.gas_price = Some(target.get_gas_price());
-            }),
-            target.confirmations as usize,
+        let store = get_store_for_keyfiles(&target.keydir);
+        let mut nonce = target.nonce.lock();
+        let mut s = RlpStream::new();
+        let fn_data = target
+            .relay
+            .get_function_data(
+                "approveWithdrawal".into(),
+                (
+                    transfer.destination,
+                    transfer.amount,
+                    transfer.tx_hash,
+                    transfer.block_hash,
+                    transfer.block_number,
+                ),
+            ).unwrap();
+        let options = Options::with(|options| {
+            options.gas = Some(target.get_gas_limit());
+            options.gas_price = Some(target.get_gas_price());
+            options.value = Some(0.into());
+            options.nonce = Some(*nonce);
+            *nonce += U256::from(1);
+        });
+        build_transaction(
+            &mut s,
+            &fn_data,
+            &target.relay.address(),
+            &target.account,
+            &store,
+            &options,
+            &target.password,
+            &target.chain_id,
         );
+        let future = target
+            .clone()
+            .relay
+            .send_raw_call_with_confirmations(s.as_raw().into(), target.confirmations as usize);
         ApproveWithdrawal(Box::new(future))
     }
 }

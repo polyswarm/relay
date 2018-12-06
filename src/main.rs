@@ -4,10 +4,10 @@ extern crate config;
 extern crate consul;
 extern crate ctrlc;
 extern crate ethabi;
+extern crate failure;
 extern crate tiny_keccak;
 extern crate tokio_core;
 extern crate web3;
-extern crate failure;
 #[macro_use]
 extern crate failure_derive;
 #[macro_use]
@@ -18,6 +18,11 @@ extern crate parking_lot;
 extern crate serde_derive;
 #[macro_use]
 extern crate serde_json;
+
+extern crate ethcore_transaction;
+extern crate ethkey;
+extern crate ethstore;
+extern crate rlp;
 
 use clap::{App, Arg};
 
@@ -30,14 +35,21 @@ pub mod missed_transfer;
 pub mod relay;
 pub mod settings;
 pub mod transfer;
+pub mod utils;
 pub mod withdrawal;
 
 #[cfg(test)]
 mod mock;
 
 use failure::{Error, SyncFailure};
+use parking_lot::Mutex;
 use relay::{Network, Relay};
 use settings::Settings;
+use web3::futures::Future;
+
+use errors::OperationError;
+use tokio_core::reactor;
+use web3::Web3;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -94,95 +106,137 @@ fn main() -> Result<(), Error> {
     // Set up our two websocket connections on the same event loop
     let mut eloop = tokio_core::reactor::Core::new()?;
     let handle = eloop.handle();
+
     let home_ws = web3::transports::WebSocket::with_event_loop(&settings.relay.homechain.wsuri, &handle)
-        .map_err(SyncFailure::new)?;
+        .map_err(SyncFailure::new)
+        .unwrap();
+
     let side_ws = web3::transports::WebSocket::with_event_loop(&settings.relay.sidechain.wsuri, &handle)
-        .map_err(SyncFailure::new)?;
-
-
-
-    let relay = Relay::new(
-        Network::homechain(
-            home_ws.clone(),
-            &settings.relay.account,
-            &*consul_configs::wait_or_get(
-                "homechain",
-                "nectar_token_address",
-                &settings.relay.consul,
-                &settings.relay.consul_token,
-                &settings.relay.community,
-            )?,
-            &*consul_configs::create_contract_abi(
-                "NectarToken",
-                &settings.relay.consul,
-                &settings.relay.consul_token,
-                &settings.relay.community,
-            )?,
-            &*consul_configs::wait_or_get(
-                "homechain",
-                "erc20_relay_address",
-                &settings.relay.consul,
-                &settings.relay.consul_token,
-                &settings.relay.community,
-            )?,
-            &*consul_configs::create_contract_abi(
-                "ERC20Relay",
-                &settings.relay.consul,
-                &settings.relay.consul_token,
-                &settings.relay.community,
-            )?,
-            settings.relay.homechain.free,
-            settings.relay.confirmations,
-            settings.relay.homechain.interval,
-            settings.relay.homechain.chain_id,
-            &settings.relay.keydir,
-            &settings.relay.password,
-        )?,
-        Network::sidechain(
-            side_ws.clone(),
-            &settings.relay.account,
-            &*consul_configs::wait_or_get(
-                "sidechain",
-                "nectar_token_address",
-                &settings.relay.consul,
-                &settings.relay.consul_token,
-                &settings.relay.community,
-            )?,
-            &*consul_configs::create_contract_abi(
-                "NectarToken",
-                &settings.relay.consul,
-                &settings.relay.consul_token,
-                &settings.relay.community,
-            )?,
-            &*consul_configs::wait_or_get(
-                "sidechain",
-                "erc20_relay_address",
-                &settings.relay.consul,
-                &settings.relay.consul_token,
-                &settings.relay.community,
-            )?,
-            &*consul_configs::create_contract_abi(
-                "ERC20Relay",
-                &settings.relay.consul,
-                &settings.relay.consul_token,
-                &settings.relay.community,
-            )?,
-            settings.relay.sidechain.free,
-            settings.relay.confirmations,
-            settings.relay.anchor_frequency,
-            settings.relay.sidechain.interval,
-            settings.relay.sidechain.chain_id,
-            &settings.relay.keydir,
-            &settings.relay.password,
-
-        )?,
-    );
+        .map_err(SyncFailure::new)
+        .unwrap();
 
     // Run the relay
-    handle.spawn(relay.run(&handle));
+    handle.spawn(run(handle.clone(), settings, home_ws, side_ws));
     while running.load(Ordering::SeqCst) {
         eloop.turn(Some(Duration::from_secs(1)));
     }
 
     Ok(())
+}
+
+fn run(
+    handle: reactor::Handle,
+    settings: Settings,
+    home_ws: web3::transports::WebSocket,
+    side_ws: web3::transports::WebSocket,
+) -> impl Future<Item = (), Error = ()> {
+    let account = utils::clean_0x(&settings.relay.account)
+        .parse()
+        .or_else(|_| Err(OperationError::InvalidAddress(settings.relay.account.clone())))
+        .unwrap();
+
+    let home_web3 = Web3::new(home_ws.clone());
+    let side_web3 = Web3::new(side_ws.clone());
+
+    home_web3
+        .eth()
+        .transaction_count(account, None)
+        .and_then(move |home_nonce| {
+            side_web3
+                .eth()
+                .transaction_count(account, None)
+                .and_then(move |side_nonce| {
+                    let _home_nonce = Arc::new(Mutex::new(home_nonce));
+                    let _side_nonce = Arc::new(Mutex::new(side_nonce));
+
+                    let relay = Relay::new(
+                        Network::homechain(
+                            home_ws.clone(),
+                            &settings.relay.account,
+                            &consul_configs::wait_or_get(
+                                "homechain",
+                                "nectar_token_address",
+                                &settings.relay.consul,
+                                &settings.relay.consul_token,
+                                &settings.relay.community,
+                            ).unwrap(),
+                            &consul_configs::create_contract_abi(
+                                "NectarToken",
+                                &settings.relay.consul,
+                                &settings.relay.consul_token,
+                                &settings.relay.community,
+                            ).unwrap(),
+                            &consul_configs::wait_or_get(
+                                "homechain",
+                                "erc20_relay_address",
+                                &settings.relay.consul,
+                                &settings.relay.consul_token,
+                                &settings.relay.community,
+                            ).unwrap(),
+                            &consul_configs::create_contract_abi(
+                                "ERC20Relay",
+                                &settings.relay.consul,
+                                &settings.relay.consul_token,
+                                &settings.relay.community,
+                            ).unwrap(),
+                            settings.relay.homechain.free,
+                            settings.relay.confirmations,
+                            settings.relay.sidechain.interval,
+                            settings.relay.homechain.chain_id,
+                            &settings.relay.keydir,
+                            &settings.relay.password,
+                            Arc::clone(&_home_nonce),
+                        ).unwrap(),
+                        Network::sidechain(
+                            side_ws.clone(),
+                            &settings.relay.account,
+                            &consul_configs::wait_or_get(
+                                "sidechain",
+                                "nectar_token_address",
+                                &settings.relay.consul,
+                                &settings.relay.consul_token,
+                                &settings.relay.community,
+                            ).unwrap(),
+                            &consul_configs::create_contract_abi(
+                                "NectarToken",
+                                &settings.relay.consul,
+                                &settings.relay.consul_token,
+                                &settings.relay.community,
+                            ).unwrap(),
+                            &consul_configs::wait_or_get(
+                                "sidechain",
+                                "erc20_relay_address",
+                                &settings.relay.consul,
+                                &settings.relay.consul_token,
+                                &settings.relay.community,
+                            ).unwrap(),
+                            &consul_configs::create_contract_abi(
+                                "ERC20Relay",
+                                &settings.relay.consul,
+                                &settings.relay.consul_token,
+                                &settings.relay.community,
+                            ).unwrap(),
+                            settings.relay.sidechain.free,
+                            settings.relay.confirmations,
+                            settings.relay.anchor_frequency,
+                            settings.relay.sidechain.interval,
+                            settings.relay.sidechain.chain_id,
+                            &settings.relay.keydir,
+                            &settings.relay.password,
+                            Arc::clone(&_side_nonce),
+                        ).unwrap(),
+                    );
+                    handle.spawn(relay.run(&handle));
+
+                    Ok(())
+                }).or_else(|e| {
+                    error!("{:?}", e);
+                    error!("Error getting transaction count on sidechain. Are you connected to geth?");
+                    Ok(())
+                })
+        }).or_else(|e| {
+            error!("{:?}", e);
+            error!("Error getting transaction count on homechain. Are you connected to geth?");
+            Ok(())
+        })
 }

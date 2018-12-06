@@ -1,4 +1,6 @@
+use parking_lot::Mutex;
 use std::rc::Rc;
+use std::sync::Arc;
 use tokio_core::reactor;
 
 use web3::contract::Contract;
@@ -6,11 +8,11 @@ use web3::futures::Future;
 use web3::types::{Address, U256};
 use web3::{DuplexTransport, Web3};
 
-use failure::{Error, SyncFailure};
 use super::anchor::HandleAnchors;
 use super::errors::OperationError;
 use super::missed_transfer::HandleMissedTransfers;
 use super::transfer::HandleTransfers;
+use failure::{Error, SyncFailure};
 
 const DEFAULT_GAS_PRICE: u64 = 20_000_000_000;
 const FREE_GAS_PRICE: u64 = 0;
@@ -94,6 +96,7 @@ pub struct Network<T: DuplexTransport> {
     pub chain_id: u64,
     pub keydir: String,
     pub password: String,
+    pub nonce: Arc<Mutex<U256>>,
 }
 
 impl<T: DuplexTransport + 'static> Network<T> {
@@ -123,6 +126,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
         chain_id: u64,
         keydir: &str,
         password: &str,
+        nonce: Arc<Mutex<U256>>,
     ) -> Result<Self, OperationError> {
         let web3 = Web3::new(transport);
         let account = clean_0x(account)
@@ -156,6 +160,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
             chain_id,
             keydir: keydir.to_string(),
             password: password.to_string(),
+            nonce,
         })
     }
 
@@ -180,6 +185,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
         chain_id: u64,
         keydir: &str,
         password: &str,
+        nonce: Arc<Mutex<U256>>,
     ) -> Result<Self, OperationError> {
         Self::new(
             NetworkType::Home,
@@ -196,6 +202,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
             chain_id,
             keydir,
             password,
+            nonce,
         )
     }
 
@@ -222,6 +229,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
         chain_id: u64,
         keydir: &str,
         password: &str,
+        nonce: Arc<Mutex<U256>>,
     ) -> Result<Self, OperationError> {
         Self::new(
             NetworkType::Side,
@@ -238,6 +246,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
             chain_id,
             keydir,
             password,
+            nonce,
         )
     }
 

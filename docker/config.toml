@@ -7,7 +7,7 @@
 [relay.homechain]
     wsuri = "ws://homechain:8546"
     free = false
-    interval = 300
+    interval = 30
 
 [relay.sidechain]
     wsuri = "ws://sidechain:8546"

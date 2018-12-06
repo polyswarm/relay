@@ -1,12 +1,8 @@
-use ethabi::Token;
 use std::fmt;
 use std::rc::Rc;
 use std::time;
-use tiny_keccak::keccak256;
 use tokio_core::reactor;
 use web3::confirm::wait_for_transaction_confirmation;
-use web3::contract;
-use web3::contract::tokens::Detokenize;
 use web3::contract::{Contract, Options};
 use web3::futures::sync::mpsc;
 use web3::futures::{Future, Stream};
@@ -17,6 +13,7 @@ use failure::{Error, SyncFailure};
 
 use super::contracts::TRANSFER_EVENT_SIGNATURE;
 use super::errors::OperationError;
+use super::withdrawal::GetWithdrawalFuture;
 
 const GAS_LIMIT: u64 = 200_000;
 const DEFAULT_GAS_PRICE: u64 = 20_000_000_000;
@@ -29,43 +26,6 @@ fn clean_0x(s: &str) -> &str {
         &s[2..]
     } else {
         s
-    }
-}
-
-/// Withdrawal event added to contract after a transfer
-#[derive(Debug, Clone)]
-pub struct Withdrawal {
-    destination: Address,
-    amount: U256,
-    processed: bool,
-}
-
-impl Detokenize for Withdrawal {
-    /// Creates a new instance from parsed ABI tokens.
-    fn from_tokens(tokens: Vec<Token>) -> Result<Self, contract::Error>
-    where
-        Self: Sized,
-    {
-        let destination = tokens[0].clone().to_address().ok_or_else(|| {
-            contract::Error::from_kind(contract::ErrorKind::Msg(
-                "cannot parse destination address from contract response".to_string(),
-            ))
-        })?;
-        let amount = tokens[1].clone().to_uint().ok_or_else(|| {
-            contract::Error::from_kind(contract::ErrorKind::Msg(
-                "cannot parse amount uint from contract response".to_string(),
-            ))
-        })?;
-        let processed = tokens[2].clone().to_bool().ok_or_else(|| {
-            contract::Error::from_kind(contract::ErrorKind::Msg(
-                "cannot parse processed bool from contract response".to_string(),
-            ))
-        })?;
-        Ok(Withdrawal {
-            destination,
-            amount,
-            processed,
-        })
     }
 }
 
@@ -112,8 +72,7 @@ impl<T: DuplexTransport + 'static> Relay<T> {
         chain_a.missed_transfer_stream(&handle).for_each(move |transfer| {
             let chain_b = chain_b.clone();
             let handle = handle.clone();
-            chain_b
-                .get_withdrawal_future(&transfer)
+            transfer.get_withdrawal(&chain_b)
                 .and_then(move |withdrawal| {
                     info!("Found withdrawal: {:?}", &withdrawal);
                     if withdrawal.processed {
@@ -179,11 +138,17 @@ impl<T: DuplexTransport + 'static> Relay<T> {
 /// Represents a token transfer between two networks
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Transfer {
-    destination: Address,
-    amount: U256,
-    tx_hash: H256,
-    block_hash: H256,
-    block_number: U256,
+    pub destination: Address,
+    pub amount: U256,
+    pub tx_hash: H256,
+    pub block_hash: H256,
+    pub block_number: U256,
+}
+
+impl Transfer {
+    pub fn get_withdrawal<T: DuplexTransport>(&self, chain:  &Rc<Network<T>>) -> GetWithdrawalFuture {
+        GetWithdrawalFuture::new(chain, self)
+    }
 }
 
 impl fmt::Display for Transfer {
@@ -221,15 +186,15 @@ pub enum NetworkType {
 
 /// Represents an Ethereum network with a deployed ERC20Relay contract
 pub struct Network<T: DuplexTransport> {
-    network_type: NetworkType,
-    web3: Web3<T>,
-    account: Address,
-    token: Contract<T>,
-    relay: Contract<T>,
-    free: bool,
-    confirmations: u64,
-    anchor_frequency: u64,
-    interval: u64,
+    pub network_type: NetworkType,
+    pub web3: Web3<T>,
+    pub account: Address,
+    pub token: Contract<T>,
+    pub relay: Contract<T>,
+    pub free: bool,
+    pub confirmations: u64,
+    pub anchor_frequency: u64,
+    pub interval: u64,
 }
 
 impl<T: DuplexTransport + 'static> Network<T> {
@@ -376,47 +341,6 @@ impl<T: DuplexTransport + 'static> Network<T> {
                     return Err(OperationError::CouldNotUnlockAccount(format!("{:?}", &account)))?;
                 }
                 Ok(())
-            })
-    }
-
-    /// Returns a Future to retrieve the withdrawal event for this transaction
-    ///
-    /// # Arguments
-    ///
-    /// * `transfer` - A Transfer struct with the tx_hash, block_hash, and block_number we need to retrieve the withdrawal
-    pub fn get_withdrawal_future(&self, transfer: &Transfer) -> impl Future<Item = Withdrawal, Error = ()> {
-        let tx_hash = transfer.tx_hash;
-        let block_hash = transfer.block_hash;
-        let transfer = transfer.clone();
-        let block_number: &mut [u8] = &mut [0; 32];
-        transfer.block_number.to_big_endian(block_number);
-        let mut grouped: Vec<u8> = Vec::new();
-        grouped.extend_from_slice(&tx_hash[..]);
-        grouped.extend_from_slice(&block_hash[..]);
-        grouped.extend_from_slice(block_number);
-        let hash = H256(keccak256(&grouped[..]));
-        let account = self.account;
-        self.relay
-            .query::<Withdrawal, Address, BlockNumber, H256>(
-                "withdrawals",
-                hash,
-                account,
-                Options::default(),
-                BlockNumber::Latest,
-            ).and_then(move |withdrawal| {
-                if withdrawal.destination == Address::zero() && withdrawal.amount.as_u64() == 0 {
-                    info!("Found transfer that was never approved");
-                    Ok(withdrawal)
-                } else if withdrawal.destination == transfer.destination && withdrawal.amount == transfer.amount {
-                    Ok(withdrawal)
-                } else {
-                    Err(contract::Error::from_kind(contract::ErrorKind::Msg(
-                        "Withdrawal from contract did not match transfer".to_string(),
-                    )))
-                }
-            }).or_else(|e| {
-                error!("error getting withdrawal: {}", e);
-                Err(())
             })
     }
 

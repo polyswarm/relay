@@ -59,10 +59,9 @@ pub struct GetWithdrawalFuture {
 }
 
 impl GetWithdrawalFuture {
-    pub fn new<T: DuplexTransport>(network: &Rc<Network<T>>, transfer: &Transfer) -> Self {
-        let hash = Self::get_withdrawal_hash(transfer);
+    pub fn new<T: DuplexTransport + 'static>(network: &Rc<Network<T>>, transfer: Transfer) -> Self {
+        let hash = Self::get_withdrawal_hash(&transfer);
         let account = network.account;
-        let network = network.clone();
         let future = Box::new(network.relay
             .query::<Withdrawal, Address, BlockNumber, H256>(
                 "withdrawals",
@@ -72,10 +71,9 @@ impl GetWithdrawalFuture {
                 BlockNumber::Latest,
             ).map_err(|e| {
                 error!("error getting withdrawal: {:?}", e);
-                ()
             }));
         GetWithdrawalFuture {
-            transfer: transfer.clone(),
+            transfer,
             future,
         }
     }

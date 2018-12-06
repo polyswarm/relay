@@ -146,8 +146,8 @@ pub struct Transfer {
 }
 
 impl Transfer {
-    pub fn get_withdrawal<T: DuplexTransport>(&self, chain:  &Rc<Network<T>>) -> GetWithdrawalFuture {
-        GetWithdrawalFuture::new(chain, self)
+    pub fn get_withdrawal<T: DuplexTransport + 'static>(&self, chain:  &Rc<Network<T>>) -> GetWithdrawalFuture {
+        GetWithdrawalFuture::new(chain, *self)
     }
 }
 

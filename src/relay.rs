@@ -241,7 +241,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
             })
     }
 
-    pub fn handle_transfers(&self, target: &Rc<Network<T>>, handle: &reactor::Handle) -> HandleTransfers {
+    pub fn handle_transfers(&self, target: &Rc<Network<T>>, handle: &reactor::Handle) -> HandleTransfers<T> {
         HandleTransfers::new(self, target, handle)
     }
 

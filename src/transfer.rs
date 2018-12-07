@@ -4,9 +4,11 @@ use std::time;
 use tokio_core::reactor;
 use web3::confirm::wait_for_transaction_confirmation;
 use web3::contract::Options;
+use web3;
 use web3::futures::prelude::*;
+use web3::futures::try_ready;
 use web3::futures::sync::mpsc;
-use web3::types::{Address, FilterBuilder, H256, U256};
+use web3::types::{Address, FilterBuilder, H256, U256, TransactionReceipt};
 use web3::DuplexTransport;
 
 use super::contracts::TRANSFER_EVENT_SIGNATURE;
@@ -24,10 +26,20 @@ pub struct Transfer {
 }
 
 impl Transfer {
+    /// Returns a Future that will get the Withdrawal from the contract
+    ///
+    /// # Arguments
+    ///
+    /// * `target` - Network that withdrawals are posted to
     pub fn get_withdrawal<T: DuplexTransport + 'static>(&self, target: &Rc<Network<T>>) -> GetWithdrawal {
         GetWithdrawal::new(target, *self)
     }
 
+    /// Returns a Future that will transaction with "approve_withdrawal" on the ERC20Relay contract
+    ///
+    /// # Arguments
+    ///
+    /// * `target` - Network where the withdrawals is performed
     pub fn approve_withdrawal<T: DuplexTransport + 'static>(&self, target: &Rc<Network<T>>) -> ApproveWithdrawal {
         ApproveWithdrawal::new(target, *self)
     }
@@ -44,12 +56,17 @@ impl fmt::Display for Transfer {
 }
 
 /// Future that calls the ERC20RelayContract to approve a transfer across the relay
-pub struct ApproveWithdrawal(Box<Future<Item = (), Error = ()>>);
+pub struct ApproveWithdrawal(Box<Future<Item = TransactionReceipt, Error = web3::Error>>);
 
 impl ApproveWithdrawal {
-    pub fn new<T: DuplexTransport + 'static>(network: &Rc<Network<T>>, transfer: Transfer) -> Self {
-        let network = network.clone();
-        let future = network
+    /// Returns a newly created ApproveWithdrawal Future
+    ///
+    /// # Arguments
+    ///
+    /// * `target` - Network where the withdrawal will be posted to the contract
+    pub fn new<T: DuplexTransport + 'static>(target: &Rc<Network<T>>, transfer: Transfer) -> Self {
+        let target = target.clone();
+        let future = target
             .clone()
             .relay
             .call_with_confirmations(
@@ -61,19 +78,13 @@ impl ApproveWithdrawal {
                     transfer.block_hash,
                     transfer.block_number,
                 ),
-                network.account,
+                target.account,
                 Options::with(|options| {
-                    options.gas = Some(network.get_gas_limit());
-                    options.gas_price = Some(network.get_gas_price());
+                    options.gas = Some(target.get_gas_limit());
+                    options.gas_price = Some(target.get_gas_price());
                 }),
-                network.confirmations as usize,
-            ).and_then(|receipt| {
-                info!("withdrawal approved: {:?}", receipt);
-                Ok(())
-            }).map_err(|e| {
-                error!("error approving withdrawal: {:?}", e);
-                ()
-            });
+                target.confirmations as usize,
+            );
         ApproveWithdrawal(Box::new(future))
     }
 }
@@ -82,35 +93,63 @@ impl Future for ApproveWithdrawal {
     type Item = ();
     type Error = ();
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        self.0.poll()
+        match self.0.poll() {
+            Ok(Async::Ready(receipt)) => {
+                info!("withdrawal approved: {:?}", receipt);
+                Ok(Async::Ready(()))
+            },
+            Ok(Async::NotReady) => {
+                Ok(Async::NotReady)
+            },
+            Err(e) => {
+                error!("error approving withdrawal: {:?}", e);
+                Err(())
+            }
+        }
     }
 }
 
 /// Future to start up and process a stream of transfers
-pub struct HandleTransfers(Box<Future<Item = (), Error = ()>>);
+pub struct HandleTransfers<T: DuplexTransport + 'static> {
+    target: Rc<Network<T>>,
+    stream: WatchTransfers,
+    handle: reactor::Handle,
+}
 
-impl HandleTransfers {
-    pub fn new<T: DuplexTransport + 'static>(
+impl<T: DuplexTransport + 'static> HandleTransfers<T> {
+    /// Returns a newly created HandleTransfers Future
+    ///
+    /// # Arguments
+    ///
+    /// * `source` - Network where the transfers are performed
+    /// * `target` - Network where the withdrawal will be posted to the contract
+    /// * `handle` - Handle to spawn new futures
+    pub fn new(
         source: &Network<T>,
         target: &Rc<Network<T>>,
         handle: &reactor::Handle,
     ) -> Self {
         let handle = handle.clone();
         let target = target.clone();
-        let future = WatchTransfers::new(source, &handle).for_each(move |transfer: Transfer| {
-            let target = target.clone();
-            handle.spawn(transfer.approve_withdrawal(&target));
-            Ok(())
-        });
-        HandleTransfers(Box::new(future))
+        let stream = WatchTransfers::new(source, &handle);
+        HandleTransfers {
+            target,
+            stream,
+            handle,
+        }
     }
 }
 
-impl Future for HandleTransfers {
+impl<T: DuplexTransport + 'static> Future for HandleTransfers<T> {
     type Item = ();
     type Error = ();
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        self.0.poll()
+        loop {
+            let transfer = try_ready!(self.stream.poll());
+            if let Some(t) = transfer {
+                self.handle.spawn(t.approve_withdrawal(&self.target))
+            }
+        }
     }
 }
 
@@ -119,6 +158,12 @@ impl Future for HandleTransfers {
 struct WatchTransfers(mpsc::UnboundedReceiver<Transfer>);
 
 impl WatchTransfers {
+    /// Returns a newly created WatchTransfers Stream
+    ///
+    /// # Arguments
+    ///
+    /// * `source` - Network where the transfers are performed
+    /// * `handle` - Handle to spawn new futures
     fn new<T: DuplexTransport + 'static>(source: &Network<T>, handle: &reactor::Handle) -> Self {
         let (tx, rx) = mpsc::unbounded();
         let filter = FilterBuilder::default()

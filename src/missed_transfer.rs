@@ -10,6 +10,7 @@ use super::relay::Network;
 use super::transfer::Transfer;
 
 const LOOKBACK_RANGE: u64 = 100;
+const LOOKBACK_LEEWAY: u64 = 5;
 
 /// Stream of Transfer that were missed, either from downtime, or failed approvals
 pub struct FindMissedTransfers(mpsc::UnboundedReceiver<Transfer>);
@@ -51,7 +52,11 @@ impl FindMissedTransfers {
                                 } else {
                                     block.as_u64() - confirmations - LOOKBACK_RANGE
                                 };
-                                let to = block.as_u64() - confirmations;
+                                let to = if block.as_u64() < confirmations + LOOKBACK_LEEWAY {
+                                    from + 1
+                                } else {
+                                     block.as_u64() - confirmations - LOOKBACK_LEEWAY
+                                };
                                 let filter = FilterBuilder::default()
                                     .address(vec![token_address])
                                     .from_block(BlockNumber::from(from))
@@ -90,7 +95,7 @@ impl FindMissedTransfers {
                                                 let destination: Address = log.topics[1].into();
                                                 let amount: U256 = log.data.0[..32].into();
                                                 if destination == Address::zero() {
-                                                    info!("Found mint. Skipping");
+                                                    info!("found mint. Skipping");
                                                     return;
                                                 }
                                                 info!("found transfer event in tx hash {:?}", &tx_hash);
@@ -129,7 +134,7 @@ impl FindMissedTransfers {
                                                                         block_number,
                                                                     };
                                                                     info!(
-                                                                        "transfer event not yet approved, approving {}",
+                                                                        "transfer event found, checking for approval {}",
                                                                         &transfer
                                                                     );
                                                                     tx.unbounded_send(transfer).unwrap();
@@ -195,9 +200,9 @@ impl HandleMissedTransfers {
             transfer
                 .get_withdrawal(&target)
                 .and_then(move |withdrawal| {
-                    info!("Found withdrawal: {:?}", &withdrawal);
+                    info!("found withdrawal: {:?}", &withdrawal);
                     if withdrawal.processed {
-                        info!("skipping already processed transaction {:?}", &transfer.tx_hash);
+                        info!("skipping already processed transfer: {:?}", &transfer.tx_hash);
                         Ok(None)
                     } else {
                         Ok(Some(transfer))
@@ -206,6 +211,7 @@ impl HandleMissedTransfers {
                     let target = target.clone();
                     let handle = handle.clone();
                     if let Some(transfer) = transfer_option {
+                        info!("approving missed transfer: {:?}", transfer);
                         handle.spawn(transfer.approve_withdrawal(&target))
                     }
                     Ok(())

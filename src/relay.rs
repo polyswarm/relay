@@ -8,7 +8,7 @@ use web3::{DuplexTransport, Web3};
 
 use failure::{Error, SyncFailure};
 
-use super::anchor::AnchorHeads;
+use super::anchor::HandleAnchors;
 use super::errors::OperationError;
 use super::missed_transfer::HandleMissedTransfers;
 use super::transfer::HandleTransfers;
@@ -62,7 +62,7 @@ impl<T: DuplexTransport + 'static> Relay<T> {
     /// * `handle` - Handle to the event loop to spawn additional futures
     pub fn run(&self, handle: &reactor::Handle) -> impl Future<Item = (), Error = ()> {
         self.sidechain
-            .anchor_heads(&self.homechain, handle)
+            .handle_anchors(&self.homechain, handle)
             .join(self.homechain.handle_transfers(&self.sidechain, handle))
             .join(self.sidechain.handle_transfers(&self.homechain, handle))
             .join(self.homechain.handle_missed_transfers(&self.sidechain, handle))
@@ -249,8 +249,8 @@ impl<T: DuplexTransport + 'static> Network<T> {
         HandleMissedTransfers::new(self, target, handle)
     }
 
-    pub fn anchor_heads(&self, target: &Rc<Network<T>>, handle: &reactor::Handle) -> AnchorHeads {
-        AnchorHeads::new(self, target, handle)
+    pub fn handle_anchors(&self, target: &Rc<Network<T>>, handle: &reactor::Handle) -> HandleAnchors {
+        HandleAnchors::new(self, target, handle)
     }
 
     pub fn get_gas_limit(&self) -> U256 {

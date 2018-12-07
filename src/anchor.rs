@@ -28,9 +28,9 @@ impl fmt::Display for Anchor {
     }
 }
 
-pub struct AnchorHeads(Box<Future<Item = (), Error = ()>>);
+pub struct HandleAnchors(Box<Future<Item = (), Error = ()>>);
 
-impl AnchorHeads {
+impl HandleAnchors {
     pub fn new<T: DuplexTransport + 'static>(
         source: &Network<T>,
         target: &Rc<Network<T>>,
@@ -38,15 +38,15 @@ impl AnchorHeads {
     ) -> Self {
         let handle = handle.clone();
         let target = target.clone();
-        let future = Anchors::new(source, &handle).for_each(move |anchor| {
+        let future = FindAnchors::new(source, &handle).for_each(move |anchor| {
             handle.spawn(anchor.post(&target));
             Ok(())
         });
-        AnchorHeads(Box::new(future))
+        HandleAnchors(Box::new(future))
     }
 }
 
-impl Future for AnchorHeads {
+impl Future for HandleAnchors {
     type Item = ();
     type Error = ();
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
@@ -54,47 +54,9 @@ impl Future for AnchorHeads {
     }
 }
 
-/// Anchor a sidechain block and return a future which resolves when the transaction completes
-pub struct PostAnchor(Box<Future<Item = (), Error = ()>>);
+pub struct FindAnchors(mpsc::UnboundedReceiver<Anchor>);
 
-impl PostAnchor {
-    pub fn new<T: DuplexTransport + 'static>(anchor: &Anchor, target: &Rc<Network<T>>) -> Self {
-        let anchor = *anchor;
-        let target = target.clone();
-        info!("anchoring block {}", anchor);
-        let future = target
-            .relay
-            .call_with_confirmations(
-                "anchor",
-                (anchor.block_hash, anchor.block_number),
-                target.account,
-                Options::with(|options| {
-                    options.gas = Some(target.get_gas_limit());
-                    options.gas_price = Some(target.get_gas_price());
-                }),
-                target.confirmations as usize,
-            ).and_then(|receipt| {
-                info!("anchor processed: {:?}", receipt);
-                Ok(())
-            }).or_else(|e| {
-                error!("error anchoring block: {}", e);
-                Ok(())
-            });
-        PostAnchor(Box::new(future))
-    }
-}
-
-impl Future for PostAnchor {
-    type Item = ();
-    type Error = ();
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        self.0.poll()
-    }
-}
-
-pub struct Anchors(mpsc::UnboundedReceiver<Anchor>);
-
-impl Anchors {
+impl FindAnchors {
     pub fn new<T: DuplexTransport + 'static>(source: &Network<T>, handle: &reactor::Handle) -> Self {
         let (tx, rx) = mpsc::unbounded();
         let future = {
@@ -176,14 +138,52 @@ impl Anchors {
         };
 
         handle.spawn(future);
-        Anchors(rx)
+        FindAnchors(rx)
     }
 }
 
-impl Stream for Anchors {
+impl Stream for FindAnchors {
     type Item = Anchor;
     type Error = ();
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
+        self.0.poll()
+    }
+}
+
+/// Anchor a sidechain block and return a future which resolves when the transaction completes
+pub struct PostAnchor(Box<Future<Item = (), Error = ()>>);
+
+impl PostAnchor {
+    pub fn new<T: DuplexTransport + 'static>(anchor: &Anchor, target: &Rc<Network<T>>) -> Self {
+        let anchor = *anchor;
+        let target = target.clone();
+        info!("anchoring block {}", anchor);
+        let future = target
+            .relay
+            .call_with_confirmations(
+                "anchor",
+                (anchor.block_hash, anchor.block_number),
+                target.account,
+                Options::with(|options| {
+                    options.gas = Some(target.get_gas_limit());
+                    options.gas_price = Some(target.get_gas_price());
+                }),
+                target.confirmations as usize,
+            ).and_then(|receipt| {
+                info!("anchor processed: {:?}", receipt);
+                Ok(())
+            }).or_else(|e| {
+                error!("error anchoring block: {}", e);
+                Ok(())
+            });
+        PostAnchor(Box::new(future))
+    }
+}
+
+impl Future for PostAnchor {
+    type Item = ();
+    type Error = ();
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         self.0.poll()
     }
 }

@@ -28,7 +28,7 @@ impl Transfer {
         GetWithdrawal::new(target, *self)
     }
 
-    pub fn approve<T: DuplexTransport + 'static>(&self, target: &Rc<Network<T>>) -> ApproveWithdrawal {
+    pub fn approve_withdrawal<T: DuplexTransport + 'static>(&self, target: &Rc<Network<T>>) -> ApproveWithdrawal {
         ApproveWithdrawal::new(target, *self)
     }
 }
@@ -97,9 +97,9 @@ impl HandleTransfers {
     ) -> Self {
         let handle = handle.clone();
         let target = target.clone();
-        let future = TransferStream::new(source, &handle).for_each(move |transfer: Transfer| {
+        let future = WatchTransfers::new(source, &handle).for_each(move |transfer: Transfer| {
             let target = target.clone();
-            handle.spawn(transfer.approve(&target));
+            handle.spawn(transfer.approve_withdrawal(&target));
             Ok(())
         });
         HandleTransfers(Box::new(future))
@@ -116,9 +116,9 @@ impl Future for HandleTransfers {
 
 ///Stream of transfer events that have been on the main chain for N blocks.
 ///N is confirmations per settings.
-struct TransferStream(mpsc::UnboundedReceiver<Transfer>);
+struct WatchTransfers(mpsc::UnboundedReceiver<Transfer>);
 
-impl TransferStream {
+impl WatchTransfers {
     fn new<T: DuplexTransport + 'static>(source: &Network<T>, handle: &reactor::Handle) -> Self {
         let (tx, rx) = mpsc::unbounded();
         let filter = FilterBuilder::default()
@@ -210,11 +210,11 @@ impl TransferStream {
 
         handle.spawn(future);
 
-        TransferStream(rx)
+        WatchTransfers(rx)
     }
 }
 
-impl Stream for TransferStream {
+impl Stream for WatchTransfers {
     type Item = Transfer;
     type Error = ();
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {

@@ -11,58 +11,14 @@ use super::transfer::Transfer;
 
 const LOOKBACK_RANGE: u64 = 100;
 
-pub struct HandleMissedTransfers(Box<Future<Item = (), Error = ()>>);
-
-impl HandleMissedTransfers {
-    pub fn new<T: DuplexTransport + 'static>(
-        source: &Network<T>,
-        target: &Rc<Network<T>>,
-        handle: &reactor::Handle,
-    ) -> Self {
-        let handle = handle.clone();
-        let target = target.clone();
-        let future = MissedTransfers::new(source, &handle).for_each(move |transfer| {
-            let target = target.clone();
-            let handle = handle.clone();
-            transfer
-                .get_withdrawal(&target)
-                .and_then(move |withdrawal| {
-                    info!("Found withdrawal: {:?}", &withdrawal);
-                    if withdrawal.processed {
-                        info!("skipping already processed transaction {:?}", &transfer.tx_hash);
-                        Ok(None)
-                    } else {
-                        Ok(Some(transfer))
-                    }
-                }).and_then(move |transfer_option| {
-                    let target = target.clone();
-                    let handle = handle.clone();
-                    if let Some(transfer) = transfer_option {
-                        handle.spawn(transfer.approve(&target))
-                    }
-                    Ok(())
-                })
-        });
-        HandleMissedTransfers(Box::new(future))
-    }
-}
-
-impl Future for HandleMissedTransfers {
-    type Item = ();
-    type Error = ();
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        self.0.poll()
-    }
-}
-
 /// Returns a Stream of Transfer that were missed, either from downtime, or failed approvals
 ///
 /// # Arguments
 ///
 /// * `handle` - Handle to the event loop to spawn additional futures
-pub struct MissedTransfers(mpsc::UnboundedReceiver<Transfer>);
+pub struct FindMissedTransfers(mpsc::UnboundedReceiver<Transfer>);
 
-impl MissedTransfers {
+impl FindMissedTransfers {
     pub fn new<T: DuplexTransport + 'static>(source: &Network<T>, handle: &reactor::Handle) -> Self {
         let (tx, rx) = mpsc::unbounded();
         let h = handle.clone();
@@ -201,14 +157,58 @@ impl MissedTransfers {
                 Ok(())
             });
         handle.spawn(future);
-        MissedTransfers(rx)
+        FindMissedTransfers(rx)
     }
 }
 
-impl Stream for MissedTransfers {
+impl Stream for FindMissedTransfers {
     type Item = Transfer;
     type Error = ();
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
+        self.0.poll()
+    }
+}
+
+pub struct HandleMissedTransfers(Box<Future<Item = (), Error = ()>>);
+
+impl HandleMissedTransfers {
+    pub fn new<T: DuplexTransport + 'static>(
+        source: &Network<T>,
+        target: &Rc<Network<T>>,
+        handle: &reactor::Handle,
+    ) -> Self {
+        let handle = handle.clone();
+        let target = target.clone();
+        let future = FindMissedTransfers::new(source, &handle).for_each(move |transfer| {
+            let target = target.clone();
+            let handle = handle.clone();
+            transfer
+                .get_withdrawal(&target)
+                .and_then(move |withdrawal| {
+                    info!("Found withdrawal: {:?}", &withdrawal);
+                    if withdrawal.processed {
+                        info!("skipping already processed transaction {:?}", &transfer.tx_hash);
+                        Ok(None)
+                    } else {
+                        Ok(Some(transfer))
+                    }
+                }).and_then(move |transfer_option| {
+                    let target = target.clone();
+                    let handle = handle.clone();
+                    if let Some(transfer) = transfer_option {
+                        handle.spawn(transfer.approve_withdrawal(&target))
+                    }
+                    Ok(())
+                })
+        });
+        HandleMissedTransfers(Box::new(future))
+    }
+}
+
+impl Future for HandleMissedTransfers {
+    type Item = ();
+    type Error = ();
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         self.0.poll()
     }
 }

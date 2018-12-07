@@ -2,13 +2,13 @@ use std::fmt;
 use std::rc::Rc;
 use std::time;
 use tokio_core::reactor;
+use web3;
 use web3::confirm::wait_for_transaction_confirmation;
 use web3::contract::Options;
-use web3;
 use web3::futures::prelude::*;
-use web3::futures::try_ready;
 use web3::futures::sync::mpsc;
-use web3::types::{Address, FilterBuilder, H256, U256, TransactionReceipt};
+use web3::futures::try_ready;
+use web3::types::{Address, FilterBuilder, TransactionReceipt, H256, U256};
 use web3::DuplexTransport;
 
 use super::contracts::TRANSFER_EVENT_SIGNATURE;
@@ -66,25 +66,22 @@ impl ApproveWithdrawal {
     /// * `target` - Network where the withdrawal will be posted to the contract
     pub fn new<T: DuplexTransport + 'static>(target: &Rc<Network<T>>, transfer: Transfer) -> Self {
         let target = target.clone();
-        let future = target
-            .clone()
-            .relay
-            .call_with_confirmations(
-                "approveWithdrawal",
-                (
-                    transfer.destination,
-                    transfer.amount,
-                    transfer.tx_hash,
-                    transfer.block_hash,
-                    transfer.block_number,
-                ),
-                target.account,
-                Options::with(|options| {
-                    options.gas = Some(target.get_gas_limit());
-                    options.gas_price = Some(target.get_gas_price());
-                }),
-                target.confirmations as usize,
-            );
+        let future = target.clone().relay.call_with_confirmations(
+            "approveWithdrawal",
+            (
+                transfer.destination,
+                transfer.amount,
+                transfer.tx_hash,
+                transfer.block_hash,
+                transfer.block_number,
+            ),
+            target.account,
+            Options::with(|options| {
+                options.gas = Some(target.get_gas_limit());
+                options.gas_price = Some(target.get_gas_price());
+            }),
+            target.confirmations as usize,
+        );
         ApproveWithdrawal(Box::new(future))
     }
 }
@@ -97,10 +94,8 @@ impl Future for ApproveWithdrawal {
             Ok(Async::Ready(receipt)) => {
                 info!("withdrawal approved: {:?}", receipt);
                 Ok(Async::Ready(()))
-            },
-            Ok(Async::NotReady) => {
-                Ok(Async::NotReady)
-            },
+            }
+            Ok(Async::NotReady) => Ok(Async::NotReady),
             Err(e) => {
                 error!("error approving withdrawal: {:?}", e);
                 Err(())
@@ -124,19 +119,11 @@ impl<T: DuplexTransport + 'static> HandleTransfers<T> {
     /// * `source` - Network where the transfers are performed
     /// * `target` - Network where the withdrawal will be posted to the contract
     /// * `handle` - Handle to spawn new futures
-    pub fn new(
-        source: &Network<T>,
-        target: &Rc<Network<T>>,
-        handle: &reactor::Handle,
-    ) -> Self {
+    pub fn new(source: &Network<T>, target: &Rc<Network<T>>, handle: &reactor::Handle) -> Self {
         let handle = handle.clone();
         let target = target.clone();
         let stream = WatchTransfers::new(source, &handle);
-        HandleTransfers {
-            target,
-            stream,
-            handle,
-        }
+        HandleTransfers { target, stream, handle }
     }
 }
 

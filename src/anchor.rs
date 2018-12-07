@@ -1,12 +1,12 @@
 use std::fmt;
 use std::rc::Rc;
 use tokio_core::reactor;
+use web3;
 use web3::contract::Options;
 use web3::futures::prelude::*;
 use web3::futures::sync::mpsc;
 use web3::futures::try_ready;
-use web3::types::{BlockId, BlockNumber, H256, U256, TransactionReceipt};
-use web3;
+use web3::types::{BlockId, BlockNumber, TransactionReceipt, H256, U256};
 use web3::DuplexTransport;
 
 use super::relay::Network;
@@ -50,19 +50,11 @@ impl<T: DuplexTransport + 'static> HandleAnchors<T> {
     /// * `source` - Network where the block headers are captured
     /// * `target` - Network where the headers will be anchored
     /// * `handle` - Handle to spawn new futures
-    pub fn new(
-        source: &Network<T>,
-        target: &Rc<Network<T>>,
-        handle: &reactor::Handle,
-    ) -> Self {
+    pub fn new(source: &Network<T>, target: &Rc<Network<T>>, handle: &reactor::Handle) -> Self {
         let handle = handle.clone();
         let target = target.clone();
         let stream = FindAnchors::new(source, &handle);
-        HandleAnchors {
-            target,
-            stream,
-            handle,
-        }
+        HandleAnchors { target, stream, handle }
     }
 }
 
@@ -76,7 +68,6 @@ impl<T: DuplexTransport + 'static> Future for HandleAnchors<T> {
                 self.handle.spawn(a.process(&self.target))
             }
         }
-
     }
 }
 
@@ -197,18 +188,16 @@ impl ProcessAnchor {
         let anchor = *anchor;
         let target = target.clone();
         info!("anchoring block {}", anchor);
-        let future = target
-            .relay
-            .call_with_confirmations(
-                "anchor",
-                (anchor.block_hash, anchor.block_number),
-                target.account,
-                Options::with(|options| {
-                    options.gas = Some(target.get_gas_limit());
-                    options.gas_price = Some(target.get_gas_price());
-                }),
-                target.confirmations as usize,
-            );
+        let future = target.relay.call_with_confirmations(
+            "anchor",
+            (anchor.block_hash, anchor.block_number),
+            target.account,
+            Options::with(|options| {
+                options.gas = Some(target.get_gas_limit());
+                options.gas_price = Some(target.get_gas_price());
+            }),
+            target.confirmations as usize,
+        );
         ProcessAnchor(Box::new(future))
     }
 }
@@ -222,10 +211,8 @@ impl Future for ProcessAnchor {
             Ok(Async::Ready(receipt)) => {
                 info!("anchor processed: {:?}", receipt);
                 Ok(Async::Ready(()))
-            },
-            Ok(Async::NotReady) => {
-                Ok(Async::NotReady)
-            },
+            }
+            Ok(Async::NotReady) => Ok(Async::NotReady),
             Err(e) => {
                 error!("error anchoring block: {:?}", e);
                 Err(())

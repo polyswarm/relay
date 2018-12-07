@@ -1,13 +1,13 @@
-use std::rc::Rc;
 use std::fmt;
+use std::rc::Rc;
 use std::time;
-use web3::confirm::wait_for_transaction_confirmation;
-use web3::futures::sync::mpsc;
-use web3::futures::prelude::*;
 use tokio_core::reactor;
+use web3::confirm::wait_for_transaction_confirmation;
+use web3::contract::Options;
+use web3::futures::prelude::*;
+use web3::futures::sync::mpsc;
 use web3::types::{Address, FilterBuilder, H256, U256};
 use web3::DuplexTransport;
-use web3::contract::Options;
 
 use super::contracts::TRANSFER_EVENT_SIGNATURE;
 use super::relay::Network;
@@ -24,11 +24,11 @@ pub struct Transfer {
 }
 
 impl Transfer {
-    pub fn get_withdrawal<T: DuplexTransport + 'static>(&self, target:  &Rc<Network<T>>) -> GetWithdrawal {
+    pub fn get_withdrawal<T: DuplexTransport + 'static>(&self, target: &Rc<Network<T>>) -> GetWithdrawal {
         GetWithdrawal::new(target, *self)
     }
 
-    pub fn approve<T:DuplexTransport + 'static>(&self, target: &Rc<Network<T>>) -> ApproveWithdrawal {
+    pub fn approve<T: DuplexTransport + 'static>(&self, target: &Rc<Network<T>>) -> ApproveWithdrawal {
         ApproveWithdrawal::new(target, *self)
     }
 }
@@ -49,7 +49,9 @@ pub struct ApproveWithdrawal(Box<Future<Item = (), Error = ()>>);
 impl ApproveWithdrawal {
     pub fn new<T: DuplexTransport + 'static>(network: &Rc<Network<T>>, transfer: Transfer) -> Self {
         let network = network.clone();
-        let future = network.clone().relay
+        let future = network
+            .clone()
+            .relay
             .call_with_confirmations(
                 "approveWithdrawal",
                 (
@@ -69,7 +71,7 @@ impl ApproveWithdrawal {
                 info!("withdrawal approved: {:?}", receipt);
                 Ok(())
             }).map_err(|e| {
-                error!("error approving withdrawal: {:?}",e );
+                error!("error approving withdrawal: {:?}", e);
                 ()
             });
         ApproveWithdrawal(Box::new(future))
@@ -88,11 +90,14 @@ impl Future for ApproveWithdrawal {
 pub struct HandleTransfers(Box<Future<Item = (), Error = ()>>);
 
 impl HandleTransfers {
-    pub fn new<T: DuplexTransport + 'static>(source: &Network<T>, target: &Rc<Network<T>>, handle: &reactor::Handle) -> Self {
+    pub fn new<T: DuplexTransport + 'static>(
+        source: &Network<T>,
+        target: &Rc<Network<T>>,
+        handle: &reactor::Handle,
+    ) -> Self {
         let handle = handle.clone();
         let target = target.clone();
-        let future = TransferStream::new(source, &handle)
-        .for_each(move |transfer: Transfer| {
+        let future = TransferStream::new(source, &handle).for_each(move |transfer: Transfer| {
             let target = target.clone();
             handle.spawn(transfer.approve(&target));
             Ok(())
@@ -125,12 +130,13 @@ impl TransferStream {
                 None,
             ).build();
 
-            let future = {
-                let network_type = source.network_type;
-                let confirmations = source.confirmations as usize;
-                let handle = handle.clone();
-                let transport = source.web3.transport().clone();
-                source.web3
+        let future = {
+            let network_type = source.network_type;
+            let confirmations = source.confirmations as usize;
+            let handle = handle.clone();
+            let transport = source.web3.transport().clone();
+            source
+                .web3
                 .eth_subscribe()
                 .subscribe_logs(filter)
                 .and_then(move |sub| {

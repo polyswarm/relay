@@ -1,26 +1,31 @@
 use std::rc::Rc;
 use tokio_core::reactor;
 use web3::futures::prelude::*;
+use web3::futures::sync::mpsc;
 use web3::types::{Address, BlockNumber, FilterBuilder, U256};
 use web3::DuplexTransport;
-use web3::futures::sync::mpsc;
 
 use super::contracts::TRANSFER_EVENT_SIGNATURE;
-use super::transfer::Transfer;
 use super::relay::Network;
+use super::transfer::Transfer;
 
 const LOOKBACK_RANGE: u64 = 100;
 
-pub struct HandleMissedTransfers(Box<Future<Item = (), Error=()>>);
+pub struct HandleMissedTransfers(Box<Future<Item = (), Error = ()>>);
 
 impl HandleMissedTransfers {
-    pub fn new<T: DuplexTransport + 'static>(source: &Network<T>, target: &Rc<Network<T>>, handle: &reactor::Handle) -> Self {
+    pub fn new<T: DuplexTransport + 'static>(
+        source: &Network<T>,
+        target: &Rc<Network<T>>,
+        handle: &reactor::Handle,
+    ) -> Self {
         let handle = handle.clone();
         let target = target.clone();
         let future = MissedTransfers::new(source, &handle).for_each(move |transfer| {
             let target = target.clone();
             let handle = handle.clone();
-            transfer.get_withdrawal(&target)
+            transfer
+                .get_withdrawal(&target)
                 .and_then(move |withdrawal| {
                     info!("Found withdrawal: {:?}", &withdrawal);
                     if withdrawal.processed {
@@ -58,7 +63,7 @@ impl Future for HandleMissedTransfers {
 pub struct MissedTransfers(mpsc::UnboundedReceiver<Transfer>);
 
 impl MissedTransfers {
-    pub fn new<T: DuplexTransport +'static>(source: &Network<T>, handle: &reactor::Handle) -> Self {
+    pub fn new<T: DuplexTransport + 'static>(source: &Network<T>, handle: &reactor::Handle) -> Self {
         let (tx, rx) = mpsc::unbounded();
         let h = handle.clone();
         let token_address = source.token.address();

@@ -8,10 +8,10 @@ use web3::{DuplexTransport, Web3};
 
 use failure::{Error, SyncFailure};
 
-use super::errors::OperationError;
 use super::anchor::AnchorHeads;
-use super::transfer::HandleTransfers;
+use super::errors::OperationError;
 use super::missed_transfer::HandleMissedTransfers;
+use super::transfer::HandleTransfers;
 
 const DEFAULT_GAS_PRICE: u64 = 20_000_000_000;
 const FREE_GAS_PRICE: u64 = 0;
@@ -61,7 +61,8 @@ impl<T: DuplexTransport + 'static> Relay<T> {
     ///
     /// * `handle` - Handle to the event loop to spawn additional futures
     pub fn run(&self, handle: &reactor::Handle) -> impl Future<Item = (), Error = ()> {
-        self.sidechain.anchor_heads(&self.homechain, handle)
+        self.sidechain
+            .anchor_heads(&self.homechain, handle)
             .join(self.homechain.handle_transfers(&self.sidechain, handle))
             .join(self.sidechain.handle_transfers(&self.homechain, handle))
             .join(self.homechain.handle_missed_transfers(&self.sidechain, handle))

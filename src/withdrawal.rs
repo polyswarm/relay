@@ -1,13 +1,13 @@
+use ethabi::Token;
 use std::rc::Rc;
 use tiny_keccak::keccak256;
-use ethabi::Token;
-use web3::contract::tokens::Detokenize;
 use web3::contract;
+use web3::contract::tokens::Detokenize;
+use web3::contract::Options;
 use web3::futures::prelude::*;
 use web3::futures::try_ready;
 use web3::types::{Address, BlockNumber, H256, U256};
 use web3::DuplexTransport;
-use web3::contract::Options;
 
 use super::relay::Network;
 use super::transfer::Transfer;
@@ -63,20 +63,20 @@ impl GetWithdrawal {
     pub fn new<T: DuplexTransport + 'static>(network: &Rc<Network<T>>, transfer: Transfer) -> Self {
         let hash = Self::get_withdrawal_hash(&transfer);
         let account = network.account;
-        let future = Box::new(network.relay
-            .query::<Withdrawal, Address, BlockNumber, H256>(
-                "withdrawals",
-                hash,
-                account,
-                Options::default(),
-                BlockNumber::Latest,
-            ).map_err(|e| {
-                error!("error getting withdrawal: {:?}", e);
-            }));
-        GetWithdrawal {
-            transfer,
-            future,
-        }
+        let future = Box::new(
+            network
+                .relay
+                .query::<Withdrawal, Address, BlockNumber, H256>(
+                    "withdrawals",
+                    hash,
+                    account,
+                    Options::default(),
+                    BlockNumber::Latest,
+                ).map_err(|e| {
+                    error!("error getting withdrawal: {:?}", e);
+                }),
+        );
+        GetWithdrawal { transfer, future }
     }
 
     fn get_withdrawal_hash(transfer: &Transfer) -> H256 {

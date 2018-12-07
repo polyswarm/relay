@@ -1,11 +1,11 @@
-use std::rc::Rc;
 use std::fmt;
+use std::rc::Rc;
 use tokio_core::reactor;
-use web3::futures::prelude::*;
-use web3::types::{BlockNumber, BlockId, H256, U256};
-use web3::DuplexTransport;
-use web3::futures::sync::mpsc;
 use web3::contract::Options;
+use web3::futures::prelude::*;
+use web3::futures::sync::mpsc;
+use web3::types::{BlockId, BlockNumber, H256, U256};
+use web3::DuplexTransport;
 
 use super::relay::Network;
 
@@ -28,10 +28,14 @@ impl fmt::Display for Anchor {
     }
 }
 
-pub struct AnchorHeads(Box<Future<Item=(), Error=()>>);
+pub struct AnchorHeads(Box<Future<Item = (), Error = ()>>);
 
 impl AnchorHeads {
-    pub fn new<T: DuplexTransport + 'static>(source: &Network<T>, target: &Rc<Network<T>>, handle: &reactor::Handle) -> Self {
+    pub fn new<T: DuplexTransport + 'static>(
+        source: &Network<T>,
+        target: &Rc<Network<T>>,
+        handle: &reactor::Handle,
+    ) -> Self {
         let handle = handle.clone();
         let target = target.clone();
         let future = Anchors::new(source, &handle).for_each(move |anchor| {
@@ -51,14 +55,15 @@ impl Future for AnchorHeads {
 }
 
 /// Anchor a sidechain block and return a future which resolves when the transaction completes
-pub struct PostAnchor(Box<Future<Item=(), Error=()>>);
+pub struct PostAnchor(Box<Future<Item = (), Error = ()>>);
 
 impl PostAnchor {
-    pub fn new<T: DuplexTransport + 'static>(anchor: &Anchor, target:&Rc<Network<T>>) -> Self {
-        let anchor = anchor.clone();
+    pub fn new<T: DuplexTransport + 'static>(anchor: &Anchor, target: &Rc<Network<T>>) -> Self {
+        let anchor = *anchor;
         let target = target.clone();
         info!("anchoring block {}", anchor);
-        let future = target.relay
+        let future = target
+            .relay
             .call_with_confirmations(
                 "anchor",
                 (anchor.block_hash, anchor.block_number),
@@ -99,7 +104,8 @@ impl Anchors {
             let handle = handle.clone();
             let web3 = source.web3.clone();
 
-            source.web3
+            source
+                .web3
                 .eth_subscribe()
                 .subscribe_new_heads()
                 .and_then(move |sub| {

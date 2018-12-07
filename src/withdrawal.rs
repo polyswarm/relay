@@ -9,7 +9,8 @@ use web3::types::{Address, BlockNumber, H256, U256};
 use web3::DuplexTransport;
 use web3::contract::Options;
 
-use super::relay::{Transfer, Network};
+use super::relay::Network;
+use super::transfer::Transfer;
 
 /// Withdrawal event added to contract after a transfer
 #[derive(Debug, Clone)]
@@ -53,12 +54,12 @@ impl Detokenize for Withdrawal {
 /// # Arguments
 ///
 /// * `transfer` - A Transfer struct with the tx_hash, block_hash, and block_number we need to retrieve the withdrawal
-pub struct GetWithdrawalFuture {
+pub struct GetWithdrawal {
     transfer: Transfer,
     future: Box<Future<Item = Withdrawal, Error = ()>>,
 }
 
-impl GetWithdrawalFuture {
+impl GetWithdrawal {
     pub fn new<T: DuplexTransport + 'static>(network: &Rc<Network<T>>, transfer: Transfer) -> Self {
         let hash = Self::get_withdrawal_hash(&transfer);
         let account = network.account;
@@ -72,7 +73,7 @@ impl GetWithdrawalFuture {
             ).map_err(|e| {
                 error!("error getting withdrawal: {:?}", e);
             }));
-        GetWithdrawalFuture {
+        GetWithdrawal {
             transfer,
             future,
         }
@@ -91,7 +92,7 @@ impl GetWithdrawalFuture {
     }
 }
 
-impl Future for GetWithdrawalFuture {
+impl Future for GetWithdrawal {
     /// The type of the value returned when the future completes.
     type Item = Withdrawal;
 

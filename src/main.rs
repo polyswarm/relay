@@ -22,12 +22,15 @@ extern crate serde_json;
 
 use clap::{App, Arg};
 
+pub mod anchor;
 pub mod consul_configs;
 pub mod contracts;
 pub mod errors;
 pub mod logger;
+pub mod missed_transfer;
 pub mod relay;
 pub mod settings;
+pub mod transfer;
 pub mod withdrawal;
 
 #[cfg(test)]

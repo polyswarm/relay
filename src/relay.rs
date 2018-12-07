@@ -241,22 +241,46 @@ impl<T: DuplexTransport + 'static> Network<T> {
             })
     }
 
+    /// Returns a HandleTransfers Future for this chain.
+    /// Will anchor to the given target
+    ///
+    /// # Arguments
+    ///
+    /// * `target` - Network where to anchor the block headers
+    /// * `handle` - Handle to spawn new tasks
     pub fn handle_transfers(&self, target: &Rc<Network<T>>, handle: &reactor::Handle) -> HandleTransfers<T> {
         HandleTransfers::new(self, target, handle)
     }
 
+    /// Returns a HandleMissedTransfers Future for this chain.
+    /// Will approve Transfers found in this network, to the target network.
+    ///
+    /// # Arguments
+    ///
+    /// * `target` - Network where to anchor the block headers
+    /// * `handle` - Handle to spawn new tasks
     pub fn handle_missed_transfers(&self, target: &Rc<Network<T>>, handle: &reactor::Handle) -> HandleMissedTransfers {
         HandleMissedTransfers::new(self, target, handle)
     }
 
+    /// Returns a HandleAnchors Future for this chain.
+    /// Will anchor block headers from this network to the target network.
+    ///
+    /// # Arguments
+    ///
+    /// * `target` - Network where to anchor the block headers
+    /// * `handle` - Handle to spawn new tasks
     pub fn handle_anchors(&self, target: &Rc<Network<T>>, handle: &reactor::Handle) -> HandleAnchors<T> {
         HandleAnchors::new(self, target, handle)
     }
 
+    /// Returns the gas limit for the network as a U256
     pub fn get_gas_limit(&self) -> U256 {
         GAS_LIMIT.into()
     }
 
+    /// Returns the gas price for the network as a U256
+    /// Change the price by setting or unsetting free in the config.toml
     pub fn get_gas_price(&self) -> U256 {
         if self.free {
             return FREE_GAS_PRICE.into();

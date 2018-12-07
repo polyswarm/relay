@@ -49,11 +49,7 @@ impl Detokenize for Withdrawal {
     }
 }
 
-/// Returns a Future to retrieve the withdrawal event for this transaction
-///
-/// # Arguments
-///
-/// * `transfer` - A Transfer struct with the tx_hash, block_hash, and block_number we need to retrieve the withdrawal
+/// Future to retrieve the withdrawal struct from the contract for a given transfer
 pub struct GetWithdrawal {
     transfer: Transfer,
     future: Box<Future<Item = Withdrawal, Error = ()>>,
@@ -93,14 +89,9 @@ impl GetWithdrawal {
 }
 
 impl Future for GetWithdrawal {
-    /// The type of the value returned when the future completes.
     type Item = Withdrawal;
-
-    /// The type representing errors that occurred while processing the computation.
     type Error = ();
 
-    /// The function that will be repeatedly called to see if the future is
-    /// has completed or not
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         let withdrawal = try_ready!(self.future.poll());
         if withdrawal.destination == Address::zero() && withdrawal.amount.as_u64() == 0 {
@@ -109,8 +100,6 @@ impl Future for GetWithdrawal {
         } else if withdrawal.destination == self.transfer.destination && withdrawal.amount == self.transfer.amount {
             Ok(Async::Ready(withdrawal))
         } else {
-            // let error = contract::Error::from_kind(contract::ErrorKind::Msg("Withdrawal from contract did not match transfer".to_string()));
-            // Err(error)
             error!("Withdrawal from contract did not match transfer");
             Err(())
         }

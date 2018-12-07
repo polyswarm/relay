@@ -28,6 +28,7 @@ impl fmt::Display for Anchor {
     }
 }
 
+/// Future to handle the Stream of anchors & post them to the chain
 pub struct HandleAnchors(Box<Future<Item = (), Error = ()>>);
 
 impl HandleAnchors {
@@ -54,6 +55,7 @@ impl Future for HandleAnchors {
     }
 }
 
+/// Stream of block headers on one chain to be posted to the other
 pub struct FindAnchors(mpsc::UnboundedReceiver<Anchor>);
 
 impl FindAnchors {
@@ -150,7 +152,7 @@ impl Stream for FindAnchors {
     }
 }
 
-/// Anchor a sidechain block and return a future which resolves when the transaction completes
+/// Future that transacts with the ERC20Relay contract to permanently anchor a block
 pub struct PostAnchor(Box<Future<Item = (), Error = ()>>);
 
 impl PostAnchor {

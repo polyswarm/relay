@@ -86,7 +86,7 @@ impl Future for ApproveWithdrawal {
     }
 }
 
-///Future to start up and process a stream of transfers
+/// Future to start up and process a stream of transfers
 pub struct HandleTransfers(Box<Future<Item = (), Error = ()>>);
 
 impl HandleTransfers {
@@ -114,8 +114,8 @@ impl Future for HandleTransfers {
     }
 }
 
-///Stream of transfer events that have been on the main chain for N blocks.
-///N is confirmations per settings.
+/// Stream of transfer events that have been on the main chain for N blocks.
+/// N is confirmations per settings.
 struct WatchTransfers(mpsc::UnboundedReceiver<Transfer>);
 
 impl WatchTransfers {

@@ -11,11 +11,7 @@ use super::transfer::Transfer;
 
 const LOOKBACK_RANGE: u64 = 100;
 
-/// Returns a Stream of Transfer that were missed, either from downtime, or failed approvals
-///
-/// # Arguments
-///
-/// * `handle` - Handle to the event loop to spawn additional futures
+/// Stream of Transfer that were missed, either from downtime, or failed approvals
 pub struct FindMissedTransfers(mpsc::UnboundedReceiver<Transfer>);
 
 impl FindMissedTransfers {
@@ -169,6 +165,7 @@ impl Stream for FindMissedTransfers {
     }
 }
 
+/// Future to handle the Stream of missed transfers by checking them, and approving them
 pub struct HandleMissedTransfers(Box<Future<Item = (), Error = ()>>);
 
 impl HandleMissedTransfers {

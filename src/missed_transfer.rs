@@ -15,6 +15,12 @@ const LOOKBACK_RANGE: u64 = 100;
 pub struct FindMissedTransfers(mpsc::UnboundedReceiver<Transfer>);
 
 impl FindMissedTransfers {
+    /// Returns a newly created FindMissedTransfers Stream
+    ///
+    /// # Arguments
+    ///
+    /// * `source` - Network where the missed transfers are found
+    /// * `handle` - Handle to spawn new futures
     pub fn new<T: DuplexTransport + 'static>(source: &Network<T>, handle: &reactor::Handle) -> Self {
         let (tx, rx) = mpsc::unbounded();
         let h = handle.clone();
@@ -169,6 +175,13 @@ impl Stream for FindMissedTransfers {
 pub struct HandleMissedTransfers(Box<Future<Item = (), Error = ()>>);
 
 impl HandleMissedTransfers {
+    /// Returns a newly created HandleMissedTransfers Future
+    ///
+    /// # Arguments
+    ///
+    /// * `source` - Network where the missed transfers are captured
+    /// * `target` - Network where the transfer will be approved for a withdrawal
+    /// * `handle` - Handle to spawn new futures
     pub fn new<T: DuplexTransport + 'static>(
         source: &Network<T>,
         target: &Rc<Network<T>>,

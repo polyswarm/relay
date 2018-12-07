@@ -4,7 +4,9 @@ use tokio_core::reactor;
 use web3::contract::Options;
 use web3::futures::prelude::*;
 use web3::futures::sync::mpsc;
-use web3::types::{BlockId, BlockNumber, H256, U256};
+use web3::futures::try_ready;
+use web3::types::{BlockId, BlockNumber, H256, U256, TransactionReceipt};
+use web3;
 use web3::DuplexTransport;
 
 use super::relay::Network;
@@ -17,8 +19,13 @@ pub struct Anchor {
 }
 
 impl Anchor {
-    fn post<T: DuplexTransport + 'static>(&self, target: &Rc<Network<T>>) -> PostAnchor {
-        PostAnchor::new(self, target)
+    ///Returns a ProcessAnchor Future to post the anchor to the ERC20Relay contract
+    ///
+    /// # Arguments
+    ///
+    /// * `target` - Network to post the anchor
+    fn process<T: DuplexTransport + 'static>(&self, target: &Rc<Network<T>>) -> ProcessAnchor {
+        ProcessAnchor::new(self, target)
     }
 }
 
@@ -29,29 +36,47 @@ impl fmt::Display for Anchor {
 }
 
 /// Future to handle the Stream of anchors & post them to the chain
-pub struct HandleAnchors(Box<Future<Item = (), Error = ()>>);
+pub struct HandleAnchors<T: DuplexTransport + 'static> {
+    target: Rc<Network<T>>,
+    stream: FindAnchors,
+    handle: reactor::Handle,
+}
 
-impl HandleAnchors {
-    pub fn new<T: DuplexTransport + 'static>(
+impl<T: DuplexTransport + 'static> HandleAnchors<T> {
+    /// Returns a newly created HandleAnchors Future
+    ///
+    /// # Arguments
+    ///
+    /// * `source` - Network where the block headers are captured
+    /// * `target` - Network where the headers will be anchored
+    /// * `handle` - Handle to spawn new futures
+    pub fn new(
         source: &Network<T>,
         target: &Rc<Network<T>>,
         handle: &reactor::Handle,
     ) -> Self {
         let handle = handle.clone();
         let target = target.clone();
-        let future = FindAnchors::new(source, &handle).for_each(move |anchor| {
-            handle.spawn(anchor.post(&target));
-            Ok(())
-        });
-        HandleAnchors(Box::new(future))
+        let stream = FindAnchors::new(source, &handle);
+        HandleAnchors {
+            target,
+            stream,
+            handle,
+        }
     }
 }
 
-impl Future for HandleAnchors {
+impl<T: DuplexTransport + 'static> Future for HandleAnchors<T> {
     type Item = ();
     type Error = ();
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        self.0.poll()
+        loop {
+            let anchor = try_ready!(self.stream.poll());
+            if let Some(a) = anchor {
+                self.handle.spawn(a.process(&self.target))
+            }
+        }
+
     }
 }
 
@@ -59,6 +84,12 @@ impl Future for HandleAnchors {
 pub struct FindAnchors(mpsc::UnboundedReceiver<Anchor>);
 
 impl FindAnchors {
+    /// Returns a newly created FindAnchors Future
+    ///
+    /// # Arguments
+    ///
+    /// * `source` - Network where the block headers are found
+    /// * `handle` - Handle to spawn new futures
     pub fn new<T: DuplexTransport + 'static>(source: &Network<T>, handle: &reactor::Handle) -> Self {
         let (tx, rx) = mpsc::unbounded();
         let future = {
@@ -153,9 +184,15 @@ impl Stream for FindAnchors {
 }
 
 /// Future that transacts with the ERC20Relay contract to permanently anchor a block
-pub struct PostAnchor(Box<Future<Item = (), Error = ()>>);
+pub struct ProcessAnchor(Box<Future<Item = TransactionReceipt, Error = web3::Error>>);
 
-impl PostAnchor {
+impl ProcessAnchor {
+    /// Returns a newly created ProcessAnchor Future
+    ///
+    /// # Arguments
+    ///
+    /// * `target` - Network where the block headers are anchored
+    /// * `handle` - Handle to spawn new futures
     pub fn new<T: DuplexTransport + 'static>(anchor: &Anchor, target: &Rc<Network<T>>) -> Self {
         let anchor = *anchor;
         let target = target.clone();
@@ -171,21 +208,28 @@ impl PostAnchor {
                     options.gas_price = Some(target.get_gas_price());
                 }),
                 target.confirmations as usize,
-            ).and_then(|receipt| {
-                info!("anchor processed: {:?}", receipt);
-                Ok(())
-            }).or_else(|e| {
-                error!("error anchoring block: {}", e);
-                Ok(())
-            });
-        PostAnchor(Box::new(future))
+            );
+        ProcessAnchor(Box::new(future))
     }
 }
 
-impl Future for PostAnchor {
+impl Future for ProcessAnchor {
     type Item = ();
     type Error = ();
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        self.0.poll()
+        // Not using try_ready so the result can be logged easily
+        match self.0.poll() {
+            Ok(Async::Ready(receipt)) => {
+                info!("anchor processed: {:?}", receipt);
+                Ok(Async::Ready(()))
+            },
+            Ok(Async::NotReady) => {
+                Ok(Async::NotReady)
+            },
+            Err(e) => {
+                error!("error anchoring block: {:?}", e);
+                Err(())
+            }
+        }
     }
 }

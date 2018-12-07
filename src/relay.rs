@@ -249,7 +249,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
         HandleMissedTransfers::new(self, target, handle)
     }
 
-    pub fn handle_anchors(&self, target: &Rc<Network<T>>, handle: &reactor::Handle) -> HandleAnchors {
+    pub fn handle_anchors(&self, target: &Rc<Network<T>>, handle: &reactor::Handle) -> HandleAnchors<T> {
         HandleAnchors::new(self, target, handle)
     }
 

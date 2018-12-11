@@ -20,7 +20,7 @@ pub fn wait_or_get(
         }
     })?;
 
-    info!("chain for {:?} config availible in consol now", chain);
+    info!("chain for {:?} config availible in consul now", chain);
 
     json[&key]
         .as_str()

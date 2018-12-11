@@ -16,11 +16,11 @@ pub fn wait_or_get(
     let first = Box::new(true);
     let json = consul_select(keyname.as_ref(), consul_url, consul_token, || {
         if *first {
-            info!("chain for config not availible in consol yet");
+            info!("chain for config not available in consul yet");
         }
     })?;
 
-    info!("chain for {:?} config availible in consul now", chain);
+    info!("chain for {:?} config available in consul now", chain);
 
     json[&key]
         .as_str()
@@ -37,7 +37,7 @@ pub fn create_contract_abi(
 ) -> Result<String, Error> {
     let keyname = format!("chain/{}/{}", &sidechain_name, &contract_name);
     let json = consul_select(keyname.as_ref(), consul_url, consul_token, || {
-        info!("chain for config not availible in consol yet")
+        info!("chain for config not available in consul yet")
     })?;
 
     Ok(

@@ -121,11 +121,12 @@ fn main() -> Result<(), Error> {
         &settings.relay.community,
     );
 
+    let chains_to_watch = vec!["homechain", "sidechain"];
     // Run the relay
     handle.spawn(run(handle.clone(), settings, home_ws, side_ws, consul_config.clone()));
 
     thread::spawn(move || {
-        consul_config.watch_for_config_deletion("homechain");
+        consul_config.watch_for_config_deletion(&chains_to_watch);
     });
 
     while running.load(Ordering::SeqCst) {

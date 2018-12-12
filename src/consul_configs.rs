@@ -3,6 +3,7 @@ use consul::Client;
 use errors::OperationError;
 use failure::Error;
 use serde_json;
+use std::collections::HashMap;
 use std::{process, thread, time};
 
 #[derive(Debug, Clone)]
@@ -79,19 +80,30 @@ impl ConsulConfig {
         }
     }
 
-    pub fn watch_for_config_deletion(&self, chain: &str) {
+    pub fn watch_for_config_deletion(&self, chains: &[&str]) {
         let client = Client::new(&self.consul_url, &self.consul_token);
         let keystore = client.keystore;
         let one_sec = time::Duration::from_secs(1);
+        let mut contract_addresses = HashMap::new();
 
         loop {
-            let keyname = format!("chain/{}/{}", &self.sidechain_name, &chain);
+            for chain in chains.iter() {
+                let keyname = format!("chain/{}/{}", &self.sidechain_name, &chain);
 
-            if keystore.get_key(keyname).is_ok() {
-                thread::sleep(one_sec);
-            } else {
-                info!("Config change detected, exiting...");
-                process::exit(1);
+                if let Ok(json) = keystore.get_key(keyname) {
+                    contract_addresses.entry(chain).or_insert_with(|| json.clone());
+                    let val = &contract_addresses[chain];
+
+                    if &json != val {
+                        info!("Config change detected, exiting...");
+                        process::exit(1);
+                    } else {
+                        thread::sleep(one_sec);
+                    }
+                } else {
+                    info!("Config change detected, exiting...");
+                    process::exit(1);
+                }
             }
         }
     }

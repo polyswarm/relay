@@ -3,6 +3,8 @@ extern crate clap;
 extern crate config;
 extern crate consul;
 extern crate ctrlc;
+extern crate ethabi;
+extern crate tiny_keccak;
 extern crate tokio_core;
 extern crate web3;
 
@@ -20,12 +22,16 @@ extern crate serde_json;
 
 use clap::{App, Arg};
 
+pub mod anchor;
 pub mod consul_configs;
 pub mod contracts;
 pub mod errors;
 pub mod logger;
+pub mod missed_transfer;
 pub mod relay;
 pub mod settings;
+pub mod transfer;
+pub mod withdrawal;
 
 #[cfg(test)]
 mod mock;
@@ -63,15 +69,13 @@ fn main() -> Result<(), Error> {
                 .help("Configures the two networks we will relay between")
                 .required(true)
                 .takes_value(true),
-        )
-        .arg(
+        ).arg(
             Arg::with_name("log")
                 .long("log")
                 .value_name("Log level")
                 .help("Specifies the logging severity level")
                 .takes_value(true),
-        )
-        .get_matches();
+        ).get_matches();
 
     let settings = Settings::new(matches.value_of("config"))?;
 
@@ -81,7 +85,7 @@ fn main() -> Result<(), Error> {
         "info" => Level::Info,
         "warn" => Level::Warn,
         "error" => Level::Error,
-        _ => Level::Info
+        _ => Level::Info,
     };
 
     logger::init_logger(&settings.logging, "relay", log_severity).expect("problem initializing relay logger");
@@ -126,6 +130,7 @@ fn main() -> Result<(), Error> {
             )?,
             settings.relay.homechain.free,
             settings.relay.confirmations,
+            settings.relay.homechain.interval,
         )?,
         Network::sidechain(
             side_ws.clone(),
@@ -159,6 +164,7 @@ fn main() -> Result<(), Error> {
             settings.relay.sidechain.free,
             settings.relay.confirmations,
             settings.relay.anchor_frequency,
+            settings.relay.sidechain.interval,
         )?,
     );
 

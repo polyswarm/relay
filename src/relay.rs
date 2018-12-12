@@ -1,22 +1,21 @@
-use std::fmt;
 use std::rc::Rc;
-use std::time;
 use tokio_core::reactor;
-use web3::confirm::wait_for_transaction_confirmation;
-use web3::contract::{Contract, Options};
-use web3::futures::sync::mpsc;
-use web3::futures::{Future, Stream};
-use web3::types::{Address, BlockId, BlockNumber, FilterBuilder, H256, U256};
+
+use web3::contract::Contract;
+use web3::futures::Future;
+use web3::types::{Address, U256};
 use web3::{DuplexTransport, Web3};
 
 use failure::{Error, SyncFailure};
 
-use super::contracts::TRANSFER_EVENT_SIGNATURE;
+use super::anchor::HandleAnchors;
 use super::errors::OperationError;
+use super::missed_transfer::HandleMissedTransfers;
+use super::transfer::HandleTransfers;
 
-const GAS_LIMIT: u64 = 200_000;
 const DEFAULT_GAS_PRICE: u64 = 20_000_000_000;
 const FREE_GAS_PRICE: u64 = 0;
+const GAS_LIMIT: u64 = 200_000;
 
 // From ethereum_types but not reexported by web3
 fn clean_0x(s: &str) -> &str {
@@ -28,7 +27,7 @@ fn clean_0x(s: &str) -> &str {
 }
 
 /// Token relay between two Ethereum networks
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Relay<T: DuplexTransport> {
     homechain: Rc<Network<T>>,
     sidechain: Rc<Network<T>>,
@@ -48,30 +47,6 @@ impl<T: DuplexTransport + 'static> Relay<T> {
         }
     }
 
-    fn transfer_future(
-        chain_a: &Rc<Network<T>>,
-        chain_b: Rc<Network<T>>,
-        handle: &reactor::Handle,
-    ) -> impl Future<Item = (), Error = ()> {
-        let h = handle.clone();
-        chain_a.transfer_stream(handle).for_each(move |transfer| {
-            h.spawn(chain_b.approve_withdrawal(&transfer));
-            Ok(())
-        })
-    }
-
-    fn anchor_future(
-        sidechain: &Rc<Network<T>>,
-        homechain: Rc<Network<T>>,
-        handle: &reactor::Handle,
-    ) -> impl Future<Item = (), Error = ()> {
-        let h = handle.clone();
-        sidechain.anchor_stream(handle).for_each(move |anchor| {
-            h.spawn(homechain.anchor(&anchor));
-            Ok(())
-        })
-    }
-
     pub fn unlock(&self, password: &str) -> impl Future<Item = (), Error = Error> {
         self.homechain
             .unlock(password)
@@ -86,47 +61,13 @@ impl<T: DuplexTransport + 'static> Relay<T> {
     ///
     /// * `handle` - Handle to the event loop to spawn additional futures
     pub fn run(&self, handle: &reactor::Handle) -> impl Future<Item = (), Error = ()> {
-        Self::anchor_future(&self.sidechain, self.homechain.clone(), handle)
-            .join(
-                Self::transfer_future(&self.homechain, self.sidechain.clone(), handle).join(Self::transfer_future(
-                    &self.sidechain,
-                    self.homechain.clone(),
-                    handle,
-                )),
-            ).and_then(|_| Ok(()))
-    }
-}
-
-/// Represents a token transfer between two networks
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct Transfer {
-    destination: Address,
-    amount: U256,
-    tx_hash: H256,
-    block_hash: H256,
-    block_number: U256,
-}
-
-impl fmt::Display for Transfer {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "({} -> {:?}, hash: {:?})",
-            self.amount, self.destination, self.tx_hash
-        )
-    }
-}
-
-/// Represents a block on the sidechain to be anchored to the homechain
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct Anchor {
-    block_hash: H256,
-    block_number: U256,
-}
-
-impl fmt::Display for Anchor {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "(#{}, hash: {:?})", self.block_number, self.block_hash)
+        self.sidechain
+            .handle_anchors(&self.homechain, handle)
+            .join(self.homechain.handle_transfers(&self.sidechain, handle))
+            .join(self.sidechain.handle_transfers(&self.homechain, handle))
+            .join(self.homechain.handle_missed_transfers(&self.sidechain, handle))
+            .join(self.sidechain.handle_missed_transfers(&self.homechain, handle))
+            .and_then(|_| Ok(()))
     }
 }
 
@@ -141,16 +82,16 @@ pub enum NetworkType {
 }
 
 /// Represents an Ethereum network with a deployed ERC20Relay contract
-#[derive(Debug)]
 pub struct Network<T: DuplexTransport> {
-    network_type: NetworkType,
-    web3: Web3<T>,
-    account: Address,
-    token: Contract<T>,
-    relay: Contract<T>,
-    free: bool,
-    confirmations: u64,
-    anchor_frequency: u64,
+    pub network_type: NetworkType,
+    pub web3: Web3<T>,
+    pub account: Address,
+    pub token: Contract<T>,
+    pub relay: Contract<T>,
+    pub free: bool,
+    pub confirmations: u64,
+    pub anchor_frequency: u64,
+    pub interval: u64,
 }
 
 impl<T: DuplexTransport + 'static> Network<T> {
@@ -164,6 +105,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
     /// * `relay` - Address of the ERC20Relay contract to use
     /// * `confirmations` - Number of blocks to wait for confirmation
     /// * `anchor_frequency` - Frequency of sidechain anchor blocks
+    /// * `interval` - Number of seconds between each lookback attempt
     pub fn new(
         network_type: NetworkType,
         transport: T,
@@ -175,6 +117,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
         free: bool,
         confirmations: u64,
         anchor_frequency: u64,
+        interval: u64,
     ) -> Result<Self, OperationError> {
         let web3 = Web3::new(transport);
         let account = clean_0x(account)
@@ -204,6 +147,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
             free,
             confirmations,
             anchor_frequency,
+            interval,
         })
     }
 
@@ -224,6 +168,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
         relay_abi: &str,
         free: bool,
         confirmations: u64,
+        interval: u64,
     ) -> Result<Self, OperationError> {
         Self::new(
             NetworkType::Home,
@@ -236,6 +181,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
             free,
             confirmations,
             0,
+            interval,
         )
     }
 
@@ -258,6 +204,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
         free: bool,
         confirmations: u64,
         anchor_frequency: u64,
+        interval: u64,
     ) -> Result<Self, OperationError> {
         Self::new(
             NetworkType::Side,
@@ -270,6 +217,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
             free,
             confirmations,
             anchor_frequency,
+            interval,
         )
     }
 
@@ -293,253 +241,47 @@ impl<T: DuplexTransport + 'static> Network<T> {
             })
     }
 
-    /// Returns a Stream of Transfer events from this network to the relay contract
+    /// Returns a HandleTransfers Future for this chain.
+    /// Will anchor to the given target
     ///
     /// # Arguments
     ///
-    /// * `handle` - Handle to the event loop to spawn additional futures
-    pub fn transfer_stream(&self, handle: &reactor::Handle) -> impl Stream<Item = Transfer, Error = ()> {
-        let (tx, rx) = mpsc::unbounded();
-        let filter = FilterBuilder::default()
-            .address(vec![self.token.address()])
-            .topics(
-                Some(vec![TRANSFER_EVENT_SIGNATURE.into()]),
-                None,
-                Some(vec![self.relay.address().into()]),
-                None,
-            ).build();
-
-        let future = {
-            let network_type = self.network_type;
-            let confirmations = self.confirmations as usize;
-            let handle = handle.clone();
-            let transport = self.web3.transport().clone();
-
-            self.web3
-                .eth_subscribe()
-                .subscribe_logs(filter)
-                .and_then(move |sub| {
-                    sub.for_each(move |log| {
-                        if Some(true) == log.removed {
-                            warn!("received removed log, revoke votes");
-                            return Ok(());
-                        }
-
-                        log.transaction_hash.map_or_else(
-                            || {
-                                warn!("log missing transaction hash");
-                                Ok(())
-                            },
-                            |tx_hash| {
-                                let tx = tx.clone();
-                                let destination: Address = log.topics[1].into();
-                                let amount: U256 = log.data.0[..32].into();
-
-                                info!(
-                                    "received transfer event in tx hash {:?}, waiting for confirmations",
-                                    &tx_hash
-                                );
-
-                                handle.spawn(
-                                    wait_for_transaction_confirmation(
-                                        transport.clone(),
-                                        tx_hash,
-                                        time::Duration::from_secs(1),
-                                        confirmations,
-                                    ).and_then(move |receipt| {
-                                        if receipt.block_number.is_none() {
-                                            warn!("no block number in transfer receipt");
-                                            return Ok(());
-                                        }
-
-                                        if receipt.block_hash.is_none() {
-                                            warn!("no block hash in transfer receipt");
-                                            return Ok(());
-                                        }
-
-                                        let block_hash = receipt.block_hash.unwrap();
-                                        let block_number = receipt.block_number.unwrap();
-
-                                        let transfer = Transfer {
-                                            destination,
-                                            amount,
-                                            tx_hash,
-                                            block_hash,
-                                            block_number,
-                                        };
-
-                                        info!("transfer event confirmed, approving {}", &transfer);
-                                        tx.unbounded_send(transfer).unwrap();
-                                        Ok(())
-                                    }).or_else(|e| {
-                                        error!("error waiting for transfer confirmations: {}", e);
-                                        Ok(())
-                                    }),
-                                );
-
-                                Ok(())
-                            },
-                        )
-                    })
-                }).or_else(move |e| {
-                    error!("error in {:?} transfer stream: {}", network_type, e);
-                    Ok(())
-                })
-        };
-
-        handle.spawn(future);
-        rx
+    /// * `target` - Network where to anchor the block headers
+    /// * `handle` - Handle to spawn new tasks
+    pub fn handle_transfers(&self, target: &Rc<Network<T>>, handle: &reactor::Handle) -> HandleTransfers<T> {
+        HandleTransfers::new(self, target, handle)
     }
 
-    /// Returns a Stream of anchor blocks from this network
+    /// Returns a HandleMissedTransfers Future for this chain.
+    /// Will approve Transfers found in this network, to the target network.
     ///
     /// # Arguments
     ///
-    /// * `handle` - Handle to the event loop to spawn additional futures
-    pub fn anchor_stream(&self, handle: &reactor::Handle) -> impl Stream<Item = Anchor, Error = ()> {
-        let (tx, rx) = mpsc::unbounded();
-
-        let future = {
-            let network_type = self.network_type;
-            let anchor_frequency = self.anchor_frequency;
-            let confirmations = self.confirmations;
-            let handle = handle.clone();
-            let web3 = self.web3.clone();
-
-            self.web3
-                .eth_subscribe()
-                .subscribe_new_heads()
-                .and_then(move |sub| {
-                    sub.for_each(move |head| {
-                        head.number.map_or_else(
-                            || {
-                                warn!("no block number in block head event");
-                                Ok(())
-                            },
-                            |block_number| {
-                                let tx = tx.clone();
-
-                                match block_number.checked_rem(anchor_frequency.into()).map(|u| u.low_u64()) {
-                                    Some(c) if c == confirmations => {
-                                        let block_id = BlockId::Number(BlockNumber::Number(
-                                            block_number.low_u64() - confirmations,
-                                        ));
-
-                                        handle.spawn(
-                                            web3.eth()
-                                                .block(block_id)
-                                                .and_then(move |block| match block {
-                                                    Some(b) => {
-                                                        if b.number.is_none() {
-                                                            warn!("no block number in anchor block");
-                                                            return Ok(());
-                                                        }
-
-                                                        if b.hash.is_none() {
-                                                            warn!("no block hash in anchor block");
-                                                            return Ok(());
-                                                        }
-
-                                                        let block_hash: H256 = b.hash.unwrap();
-                                                        let block_number: U256 = b.number.unwrap().into();
-
-                                                        let anchor = Anchor {
-                                                            block_hash,
-                                                            block_number,
-                                                        };
-
-                                                        info!("anchor block confirmed, anchoring: {}", &anchor);
-
-                                                        tx.unbounded_send(anchor).unwrap();
-                                                        Ok(())
-                                                    }
-                                                    None => {
-                                                        warn!("no block found for anchor confirmations");
-                                                        Ok(())
-                                                    }
-                                                }).or_else(|e| {
-                                                    error!("error waiting for anchor confirmations: {}", e);
-                                                    Ok(())
-                                                }),
-                                        );
-                                    }
-                                    _ => (),
-                                };
-
-                                Ok(())
-                            },
-                        )
-                    })
-                }).or_else(move |e| {
-                    error!("error in {:?} anchor stream: {}", network_type, e);
-                    Ok(())
-                })
-        };
-
-        handle.spawn(future);
-        rx
+    /// * `target` - Network where to anchor the block headers
+    /// * `handle` - Handle to spawn new tasks
+    pub fn handle_missed_transfers(&self, target: &Rc<Network<T>>, handle: &reactor::Handle) -> HandleMissedTransfers {
+        HandleMissedTransfers::new(self, target, handle)
     }
 
-    /// Approve a withdrawal request and return a future which resolves when the transaction
-    /// completes
+    /// Returns a HandleAnchors Future for this chain.
+    /// Will anchor block headers from this network to the target network.
     ///
     /// # Arguments
     ///
-    /// * `transfer` - The transfer to approve
-    pub fn approve_withdrawal(&self, transfer: &Transfer) -> impl Future<Item = (), Error = ()> {
-        info!("approving withdrawal {}", transfer);
-        self.relay
-            .call_with_confirmations(
-                "approveWithdrawal",
-                (
-                    transfer.destination,
-                    transfer.amount,
-                    transfer.tx_hash,
-                    transfer.block_hash,
-                    transfer.block_number,
-                ),
-                self.account,
-                Options::with(|options| {
-                    options.gas = Some(GAS_LIMIT.into());
-                    options.gas_price = Some(self.get_gas_price());
-                }),
-                self.confirmations as usize,
-            ).and_then(|receipt| {
-                info!("withdrawal approved: {:?}", receipt);
-                Ok(())
-            }).or_else(|e| {
-                error!("error approving withdrawal: {}", e);
-                Ok(())
-            })
+    /// * `target` - Network where to anchor the block headers
+    /// * `handle` - Handle to spawn new tasks
+    pub fn handle_anchors(&self, target: &Rc<Network<T>>, handle: &reactor::Handle) -> HandleAnchors<T> {
+        HandleAnchors::new(self, target, handle)
     }
 
-    /// Anchor a sidechain block and return a future which resolves when the transaction completes
-    ///
-    /// # Arguments
-    ///
-    /// * `anchor` - The block to anchor
-    pub fn anchor(&self, anchor: &Anchor) -> impl Future<Item = (), Error = ()> {
-        info!("anchoring block {}", anchor);
-        self.relay
-            .call_with_confirmations(
-                "anchor",
-                (anchor.block_hash, anchor.block_number),
-                self.account,
-                Options::with(|options| {
-                    options.gas = Some(GAS_LIMIT.into());
-                    options.gas_price = Some(self.get_gas_price());
-                }),
-                self.confirmations as usize,
-            ).and_then(|receipt| {
-                info!("anchor processed: {:?}", receipt);
-                Ok(())
-            }).or_else(|e| {
-                error!("error anchoring block: {}", e);
-                Ok(())
-            })
+    /// Returns the gas limit for the network as a U256
+    pub fn get_gas_limit(&self) -> U256 {
+        GAS_LIMIT.into()
     }
 
-    fn get_gas_price(&self) -> U256 {
+    /// Returns the gas price for the network as a U256
+    /// Change the price by setting or unsetting free in the config.toml
+    pub fn get_gas_price(&self) -> U256 {
         if self.free {
             return FREE_GAS_PRICE.into();
         }

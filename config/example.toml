@@ -23,6 +23,7 @@
     relay = "0x11c60f7c6a3b5d01fb051a81cdcbb144280da8e4"
     # Whether transactions on this chain use gasPrice = 0
     free = false
+    interval = 30
 
 [relay.sidechain]
     # Websocket RPC endpoint for the sidechain
@@ -33,3 +34,4 @@
     relay = "0x11c60f7c6a3b5d01fb051a81cdcbb144280da8e4"
     # Whether transactions on this chain use gasPrice = 0
     free = true
+    interval = 30

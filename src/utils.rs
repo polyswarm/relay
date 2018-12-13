@@ -21,14 +21,14 @@ pub fn clean_0x(s: &str) -> &str {
 /// * `keyfile_dir` - directory of keyfiles
 pub fn get_store_for_keyfiles(keyfile_dir: &str) -> EthStore {
     let path = match ::std::fs::metadata(keyfile_dir) {
-        Ok(_) => keyfile_dir.into(),
+        Ok(_) => keyfile_dir,
         Err(_) => "",
     };
     let dir = RootDiskDirectory::at(path);
     EthStore::open(Box::new(dir)).unwrap()
 }
 
-/// Mutates a RlpStream with ready to send transaction data 
+/// Mutates a RlpStream with ready to send transaction data
 ///
 /// # Arguments
 ///
@@ -42,13 +42,13 @@ pub fn get_store_for_keyfiles(keyfile_dir: &str) -> EthStore {
 /// * `chain_id` - The network chain id
 pub fn build_transaction(
     s: &mut RlpStream,
-    fn_data: &Vec<u8>,
+    fn_data: &[u8],
     recipient: &H160,
     account: &H160,
     store: &EthStore,
     options: &Options,
     password: &str,
-    chain_id: &u64,
+    chain_id: u64,
 ) {
     let transaction_request = RawTransactionRequest {
         action: Action::Call(*recipient),
@@ -58,10 +58,10 @@ pub fn build_transaction(
         nonce: options.nonce.unwrap(),
         data: fn_data.to_vec(),
     };
-    let raw_tx = transaction_request.hash(Some(*chain_id));
+    let raw_tx = transaction_request.hash(Some(chain_id));
     let signed_tx = store
         .sign(&StoreAccountRef::root(*account), &password.into(), &raw_tx)
         .unwrap();
-    let tx_with_sig = transaction_request.with_signature(signed_tx, Some(*chain_id));
+    let tx_with_sig = transaction_request.with_signature(signed_tx, Some(chain_id));
     tx_with_sig.rlp_append(s);
 }

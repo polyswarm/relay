@@ -1,6 +1,7 @@
 use rlp::RlpStream;
 use std::fmt;
 use std::rc::Rc;
+use std::sync::atomic::Ordering;
 use std::time;
 use tokio_core::reactor;
 use web3;
@@ -70,12 +71,11 @@ impl ApproveWithdrawal {
         info!("approving withdrawal {}", transfer);
         let target = target.clone();
         let store = get_store_for_keyfiles(&target.keydir);
-        let mut nonce = target.nonce.lock();
         let mut s = RlpStream::new();
         let fn_data = target
             .relay
             .get_function_data(
-                "approveWithdrawal".into(),
+                "approveWithdrawal",
                 (
                     transfer.destination,
                     transfer.amount,
@@ -83,13 +83,14 @@ impl ApproveWithdrawal {
                     transfer.block_hash,
                     transfer.block_number,
                 ),
-            ).unwrap();
+            )
+            .unwrap();
         let options = Options::with(|options| {
             options.gas = Some(target.get_gas_limit());
             options.gas_price = Some(target.get_gas_price());
             options.value = Some(0.into());
-            options.nonce = Some(*nonce);
-            *nonce += U256::from(1);
+            options.nonce = Some(U256::from(target.nonce.load(Ordering::SeqCst)));
+            target.nonce.fetch_add(1, Ordering::SeqCst);
         });
         build_transaction(
             &mut s,
@@ -99,7 +100,7 @@ impl ApproveWithdrawal {
             &store,
             &options,
             &target.password,
-            &target.chain_id,
+            target.chain_id,
         );
         let future = target
             .clone()

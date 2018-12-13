@@ -3,6 +3,7 @@ use super::utils::{build_transaction, get_store_for_keyfiles};
 use rlp::RlpStream;
 use std::fmt;
 use std::rc::Rc;
+use std::sync::atomic::Ordering;
 use tokio_core::reactor;
 use web3;
 use web3::contract::Options;
@@ -192,18 +193,17 @@ impl ProcessAnchor {
         let anchor = *anchor;
         let target = target.clone();
         let store = get_store_for_keyfiles(&target.keydir);
-        let mut nonce = target.nonce.lock();
         let mut s = RlpStream::new();
         let fn_data = target
             .relay
-            .get_function_data("anchor".into(), (anchor.block_hash, anchor.block_number))
+            .get_function_data("anchor", (anchor.block_hash, anchor.block_number))
             .unwrap();
         let options = Options::with(|options| {
             options.gas = Some(target.get_gas_limit());
             options.gas_price = Some(target.get_gas_price());
             options.value = Some(0.into());
-            options.nonce = Some(*nonce);
-            *nonce += U256::from(1);
+            options.nonce = Some(U256::from(target.nonce.load(Ordering::SeqCst)));
+            target.nonce.fetch_add(1, Ordering::SeqCst);
         });
         build_transaction(
             &mut s,
@@ -213,7 +213,7 @@ impl ProcessAnchor {
             &store,
             &options,
             &target.password,
-            &target.chain_id,
+            target.chain_id,
         );
         let future = target
             .relay

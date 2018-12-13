@@ -23,9 +23,9 @@ extern crate ethcore_transaction;
 extern crate ethkey;
 extern crate ethstore;
 extern crate rlp;
+use std::sync::atomic::AtomicUsize;
 
 use clap::{App, Arg};
-
 pub mod anchor;
 pub mod consul_configs;
 pub mod contracts;
@@ -42,7 +42,6 @@ pub mod withdrawal;
 mod mock;
 
 use failure::{Error, SyncFailure};
-use parking_lot::Mutex;
 use relay::{Network, Relay};
 use settings::Settings;
 use web3::futures::Future;
@@ -108,12 +107,10 @@ fn main() -> Result<(), Error> {
     let handle = eloop.handle();
 
     let home_ws = web3::transports::WebSocket::with_event_loop(&settings.relay.homechain.wsuri, &handle)
-        .map_err(SyncFailure::new)
-        .unwrap();
+        .map_err(SyncFailure::new)?;
 
     let side_ws = web3::transports::WebSocket::with_event_loop(&settings.relay.sidechain.wsuri, &handle)
-        .map_err(SyncFailure::new)
-        .unwrap();
+        .map_err(SyncFailure::new)?;
 
     // Run the relay
     handle.spawn(run(handle.clone(), settings, home_ws, side_ws));
@@ -146,8 +143,8 @@ fn run(
                 .eth()
                 .transaction_count(account, None)
                 .and_then(move |side_nonce| {
-                    let _home_nonce = Arc::new(Mutex::new(home_nonce));
-                    let _side_nonce = Arc::new(Mutex::new(side_nonce));
+                    let mut _home_nonce = AtomicUsize::new(home_nonce.as_u64() as usize);
+                    let mut _side_nonce = AtomicUsize::new(side_nonce.as_u64() as usize);
 
                     let relay = Relay::new(
                         Network::homechain(
@@ -159,34 +156,39 @@ fn run(
                                 &settings.relay.consul,
                                 &settings.relay.consul_token,
                                 &settings.relay.community,
-                            ).unwrap(),
+                            )
+                            .map_err(|e| e.to_string())?,
                             &consul_configs::create_contract_abi(
                                 "NectarToken",
                                 &settings.relay.consul,
                                 &settings.relay.consul_token,
                                 &settings.relay.community,
-                            ).unwrap(),
+                            )
+                            .map_err(|e| e.to_string())?,
                             &consul_configs::wait_or_get(
                                 "homechain",
                                 "erc20_relay_address",
                                 &settings.relay.consul,
                                 &settings.relay.consul_token,
                                 &settings.relay.community,
-                            ).unwrap(),
+                            )
+                            .map_err(|e| e.to_string())?,
                             &consul_configs::create_contract_abi(
                                 "ERC20Relay",
                                 &settings.relay.consul,
                                 &settings.relay.consul_token,
                                 &settings.relay.community,
-                            ).unwrap(),
+                            )
+                            .map_err(|e| e.to_string())?,
                             settings.relay.homechain.free,
                             settings.relay.confirmations,
                             settings.relay.sidechain.interval,
                             settings.relay.homechain.chain_id,
                             &settings.relay.keydir,
                             &settings.relay.password,
-                            Arc::clone(&_home_nonce),
-                        ).unwrap(),
+                            _home_nonce,
+                        )
+                        .map_err(|e| format!("error initializing homechain {}", e))?,
                         Network::sidechain(
                             side_ws.clone(),
                             &settings.relay.account,
@@ -196,26 +198,30 @@ fn run(
                                 &settings.relay.consul,
                                 &settings.relay.consul_token,
                                 &settings.relay.community,
-                            ).unwrap(),
+                            )
+                            .map_err(|e| e.to_string())?,
                             &consul_configs::create_contract_abi(
                                 "NectarToken",
                                 &settings.relay.consul,
                                 &settings.relay.consul_token,
                                 &settings.relay.community,
-                            ).unwrap(),
+                            )
+                            .map_err(|e| e.to_string())?,
                             &consul_configs::wait_or_get(
                                 "sidechain",
                                 "erc20_relay_address",
                                 &settings.relay.consul,
                                 &settings.relay.consul_token,
                                 &settings.relay.community,
-                            ).unwrap(),
+                            )
+                            .map_err(|e| e.to_string())?,
                             &consul_configs::create_contract_abi(
                                 "ERC20Relay",
                                 &settings.relay.consul,
                                 &settings.relay.consul_token,
                                 &settings.relay.community,
-                            ).unwrap(),
+                            )
+                            .map_err(|e| e.to_string())?,
                             settings.relay.sidechain.free,
                             settings.relay.confirmations,
                             settings.relay.anchor_frequency,
@@ -223,18 +229,21 @@ fn run(
                             settings.relay.sidechain.chain_id,
                             &settings.relay.keydir,
                             &settings.relay.password,
-                            Arc::clone(&_side_nonce),
-                        ).unwrap(),
+                            _side_nonce,
+                        )
+                        .map_err(|e| format!("error initializing sidechain {}", e))?,
                     );
                     handle.spawn(relay.run(&handle));
 
                     Ok(())
-                }).or_else(|e| {
+                })
+                .or_else(|e| {
                     error!("{:?}", e);
                     error!("Error getting transaction count on sidechain. Are you connected to geth?");
                     Ok(())
                 })
-        }).or_else(|e| {
+        })
+        .or_else(|e| {
             error!("{:?}", e);
             error!("Error getting transaction count on homechain. Are you connected to geth?");
             Ok(())

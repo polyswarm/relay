@@ -68,7 +68,8 @@ impl GetWithdrawal {
                     account,
                     Options::default(),
                     BlockNumber::Latest,
-                ).map_err(|e| {
+                )
+                .map_err(|e| {
                     error!("error getting withdrawal: {:?}", e);
                 }),
         );

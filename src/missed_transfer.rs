@@ -47,7 +47,6 @@ impl FindMissedTransfers {
                         web3.eth()
                             .block_number()
                             .and_then(move |block| {
-                                let network_type = network_type.clone();
                                 let from = if block.as_u64() < confirmations + LOOKBACK_RANGE  {
                                     0
                                 } else {
@@ -212,7 +211,8 @@ impl HandleMissedTransfers {
                     } else {
                         Ok(Some(transfer))
                     }
-                }).and_then(move |transfer_option| {
+                })
+                .and_then(move |transfer_option| {
                     let target = target.clone();
                     let handle = handle.clone();
                     if let Some(transfer) = transfer_option {

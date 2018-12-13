@@ -4,6 +4,7 @@ use std::env;
 use std::ffi::OsString;
 use std::path::Path;
 
+use super::missed_transfer::{LOOKBACK_LEEWAY, LOOKBACK_RANGE};
 use super::errors::ConfigError;
 
 /// Settings for the application
@@ -100,10 +101,15 @@ impl Settings {
     }
 
     fn validated(self) -> Result<Self, ConfigError> {
+        let lookback_combined = LOOKBACK_RANGE + LOOKBACK_LEEWAY;
         if self.relay.anchor_frequency == 0 {
             Err(ConfigError::InvalidAnchorFrequency)
         } else if self.relay.confirmations >= self.relay.anchor_frequency {
             Err(ConfigError::InvalidConfirmations)
+        } else if self.relay.homechain.interval >= lookback_combined {
+            Err(ConfigError::InvalidLookbackInterval(lookback_combined))
+        } else if self.relay.sidechain.interval >= lookback_combined {
+            Err(ConfigError::InvalidLookbackInterval(lookback_combined))
         } else {
             Ok(self)
         }

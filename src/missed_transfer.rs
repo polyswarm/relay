@@ -9,8 +9,8 @@ use super::contracts::TRANSFER_EVENT_SIGNATURE;
 use super::relay::Network;
 use super::transfer::Transfer;
 
-const LOOKBACK_RANGE: u64 = 100;
-const LOOKBACK_LEEWAY: u64 = 5;
+pub const LOOKBACK_RANGE: u64 = 100;
+pub const LOOKBACK_LEEWAY: u64 = 5;
 
 /// Stream of Transfer that were missed, either from downtime, or failed approvals
 pub struct FindMissedTransfers(mpsc::UnboundedReceiver<Transfer>);
@@ -47,17 +47,23 @@ impl FindMissedTransfers {
                         web3.eth()
                             .block_number()
                             .and_then(move |block| {
-                                let from = if block.as_u64() < confirmations + LOOKBACK_RANGE {
+                                let network_type = network_type.clone();
+                                let from = if block.as_u64() < confirmations + LOOKBACK_RANGE  {
                                     0
                                 } else {
                                     block.as_u64() - confirmations - LOOKBACK_RANGE
                                 };
-                                let to = if block.as_u64() < confirmations + LOOKBACK_LEEWAY {
-                                    from + 1
-                                } else {
-                                     block.as_u64() - confirmations - LOOKBACK_LEEWAY
-                                };
-                                let filter = FilterBuilder::default()
+                                if block.as_u64() < confirmations + LOOKBACK_LEEWAY {
+                                    return Err(web3::Error::from_kind(web3::ErrorKind::Msg("Not enough blocks to look back".to_string())));
+                                }
+                                let to = block.as_u64() - confirmations - LOOKBACK_LEEWAY;
+                                info!(
+                                    "Looking for logs between {} and {} on {:?}",
+                                    from,
+                                    to,
+                                    network_type,
+                                );
+                                Ok(FilterBuilder::default()
                                     .address(vec![token_address])
                                     .from_block(BlockNumber::from(from))
                                     .to_block(BlockNumber::from(to))
@@ -66,17 +72,16 @@ impl FindMissedTransfers {
                                         None,
                                         Some(vec![relay_address.into()]),
                                         None,
-                                    ).build();
+                                    ).build())
+                            }).and_then(move |filter| {
                                 let web3 = web3.clone();
                                 web3.clone().eth().logs(filter).and_then(move |logs| {
                                     let tx = tx.clone();
                                     let web3 = web3.clone();
                                     let handle = handle.clone();
                                     info!(
-                                        "Found {} transfers between {} and {} on {:?}",
+                                        "Found {} transfers on {:?}",
                                         logs.len(),
-                                        from,
-                                        to,
                                         network_type
                                     );
                                     logs.iter().for_each(|log| {

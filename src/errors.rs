@@ -35,4 +35,7 @@ pub enum ConfigError {
 
     #[fail(display = "invalid anchor frequency, must be non-zero")]
     InvalidAnchorFrequency,
+
+    #[fail(display = "invalid lookback interval, must be below {}", _0)]
+    InvalidLookbackInterval(u64),
 }

@@ -69,13 +69,15 @@ fn main() -> Result<(), Error> {
                 .help("Configures the two networks we will relay between")
                 .required(true)
                 .takes_value(true),
-        ).arg(
+        )
+        .arg(
             Arg::with_name("log")
                 .long("log")
                 .value_name("Log level")
                 .help("Specifies the logging severity level")
                 .takes_value(true),
-        ).get_matches();
+        )
+        .get_matches();
 
     let settings = Settings::new(matches.value_of("config"))?;
 

@@ -160,7 +160,8 @@ impl WatchTransfers {
                 None,
                 Some(vec![source.relay.address().into()]),
                 None,
-            ).build();
+            )
+            .build();
 
         let future = {
             let network_type = source.network_type;
@@ -199,7 +200,8 @@ impl WatchTransfers {
                                         tx_hash,
                                         time::Duration::from_secs(1),
                                         confirmations,
-                                    ).and_then(move |receipt| {
+                                    )
+                                    .and_then(move |receipt| {
                                         if receipt.block_number.is_none() {
                                             warn!("no block number in transfer receipt");
                                             return Ok(());
@@ -224,7 +226,8 @@ impl WatchTransfers {
                                         info!("transfer event confirmed, approving {}", &transfer);
                                         tx.unbounded_send(transfer).unwrap();
                                         Ok(())
-                                    }).or_else(|e| {
+                                    })
+                                    .or_else(|e| {
                                         error!("error waiting for transfer confirmations: {}", e);
                                         Ok(())
                                     }),
@@ -234,7 +237,8 @@ impl WatchTransfers {
                             },
                         )
                     })
-                }).or_else(move |e| {
+                })
+                .or_else(move |e| {
                     error!("error in {:?} transfer stream: {}", network_type, e);
                     Ok(())
                 })

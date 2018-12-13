@@ -172,7 +172,8 @@ mod tests {
             0,
             0,
             30,
-        ).unwrap();
+        )
+        .unwrap();
     }
 
     #[test]

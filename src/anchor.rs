@@ -142,7 +142,8 @@ impl FindAnchors {
                                                         warn!("no block found for anchor confirmations");
                                                         Ok(())
                                                     }
-                                                }).or_else(|e| {
+                                                })
+                                                .or_else(|e| {
                                                     error!("error waiting for anchor confirmations: {}", e);
                                                     Ok(())
                                                 }),
@@ -155,7 +156,8 @@ impl FindAnchors {
                             },
                         )
                     })
-                }).or_else(move |e| {
+                })
+                .or_else(move |e| {
                     error!("error in {:?} anchor stream: {}", network_type, e);
                     Ok(())
                 })

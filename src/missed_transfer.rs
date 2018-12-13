@@ -60,7 +60,7 @@ impl FindMissedTransfers {
                                 let filter = FilterBuilder::default()
                                     .address(vec![token_address])
                                     .from_block(BlockNumber::from(from))
-                                    .to_block(BlockNumber::from(block.as_u64()))
+                                    .to_block(BlockNumber::from(to))
                                     .topics(
                                         Some(vec![TRANSFER_EVENT_SIGNATURE.into()]),
                                         None,

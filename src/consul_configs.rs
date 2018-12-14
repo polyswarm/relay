@@ -19,14 +19,21 @@ pub fn wait_or_get(
             info!("chain for config not available in consul yet");
         }
     })?;
-
     info!("chain for {:?} config available in consul now", chain);
 
-    json[&key]
-        .as_str()
-        .map_or(Err(OperationError::CouldNotGetConsulKey(key.to_string()).into()), |v| {
-            Ok(v.to_string())
-        })
+    if json[&key].is_u64() {
+        json[&key]
+            .as_u64()
+            .map_or(Err(OperationError::CouldNotGetConsulKey(key.to_string()).into()), |v| {
+                Ok(v.to_string())
+            })
+    } else {
+        json[&key]
+            .as_str()
+            .map_or(Err(OperationError::CouldNotGetConsulKey(key.to_string()).into()), |v| {
+                Ok(v.to_string())
+            })
+    }
 }
 
 pub fn create_contract_abi(

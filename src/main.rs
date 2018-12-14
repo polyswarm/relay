@@ -145,6 +145,26 @@ fn run(
                 .and_then(move |side_nonce| {
                     let mut _home_nonce = AtomicUsize::new(home_nonce.as_u64() as usize);
                     let mut _side_nonce = AtomicUsize::new(side_nonce.as_u64() as usize);
+                    let home_chain_id = consul_configs::wait_or_get(
+                        "homechain",
+                        "chain_id",
+                        &settings.relay.consul,
+                        &settings.relay.consul_token,
+                        &settings.relay.community,
+                    )
+                    .map_err(|e| e.to_string())?
+                    .parse::<u64>()
+                    .map_err(|e| e.to_string())?;
+                    let side_chain_id = consul_configs::wait_or_get(
+                        "sidechain",
+                        "chain_id",
+                        &settings.relay.consul,
+                        &settings.relay.consul_token,
+                        &settings.relay.community,
+                    )
+                    .map_err(|e| e.to_string())?
+                    .parse::<u64>()
+                    .map_err(|e| e.to_string())?;
 
                     let relay = Relay::new(
                         Network::homechain(
@@ -183,7 +203,7 @@ fn run(
                             settings.relay.homechain.free,
                             settings.relay.confirmations,
                             settings.relay.sidechain.interval,
-                            settings.relay.homechain.chain_id,
+                            home_chain_id,
                             &settings.relay.keydir,
                             &settings.relay.password,
                             _home_nonce,
@@ -226,7 +246,7 @@ fn run(
                             settings.relay.confirmations,
                             settings.relay.anchor_frequency,
                             settings.relay.sidechain.interval,
-                            settings.relay.sidechain.chain_id,
+                            side_chain_id,
                             &settings.relay.keydir,
                             &settings.relay.password,
                             _side_nonce,

@@ -221,6 +221,10 @@ impl HandleMissedTransfers {
                     }
                     Ok(())
                 })
+                .or_else(move |e| {
+                    error!("Error searching for and approving missed transfers: {:?}", e);
+                    Ok(())
+                })
         });
         HandleMissedTransfers(Box::new(future))
     }

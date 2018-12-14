@@ -75,7 +75,7 @@ impl Settings {
         c.set_default("relay.confirmations", 12)?;
         c.set_default("relay.anchor_frequency", 100)?;
         c.set_default("relay.community", "")?;
-        c.set_default("relay.homechain.interval", 300)?;
+        c.set_default("relay.homechain.interval", 30)?;
         c.set_default("relay.sidechain.interval", 30)?;
 
         // XXX: Get default from the CONSUL_TOKEN environment variable, look into naming such that

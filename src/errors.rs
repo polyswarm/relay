@@ -38,4 +38,7 @@ pub enum ConfigError {
 
     #[fail(display = "invalid lookback interval, must be below {}", _0)]
     InvalidLookbackInterval(u64),
+
+    #[fail(display = "not such keyfiles directory exists")]
+    InvalidKeydir,
 }

@@ -13,6 +13,10 @@
     consul = "http://consul:8500"
     # What community the sidechain is a part of
     community = "gamma"
+    # The directory that contains keyfile for your account
+    keyfile_dir = "./keyfiles"
+    # Password to decrypt keyfile
+    password = "password"
 
 [relay.homechain]
     # Websocket RPC endpoint for the homechain
@@ -23,7 +27,11 @@
     relay = "0x11c60f7c6a3b5d01fb051a81cdcbb144280da8e4"
     # Whether transactions on this chain use gasPrice = 0
     free = false
+    # Number of seconds between each lookback attempt
     interval = 30
+    # The chain id for the homechain Ethereum client
+    chain_id = 1337
+
 
 [relay.sidechain]
     # Websocket RPC endpoint for the sidechain
@@ -34,4 +42,7 @@
     relay = "0x11c60f7c6a3b5d01fb051a81cdcbb144280da8e4"
     # Whether transactions on this chain use gasPrice = 0
     free = true
+    # Number of seconds between each lookback attempt
     interval = 30
+    # The chain id for the sidechain Ethereum client
+    chain_id = 1338

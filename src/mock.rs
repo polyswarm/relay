@@ -3,6 +3,7 @@ use relay::{Network, NetworkType};
 use rpc;
 use serde_json;
 use std::collections::BTreeMap;
+use std::sync::atomic::AtomicUsize;
 use std::sync::{atomic, Arc};
 use web3::api::SubscriptionId;
 use web3::futures::sync::mpsc;
@@ -136,6 +137,8 @@ mod tests {
 
     #[test]
     fn should_build_network_with_mock() {
+        let tx_count = AtomicUsize::new(0);
+
         let mock_abi = format!(
             r#"[
             {{
@@ -172,6 +175,10 @@ mod tests {
             0,
             0,
             30,
+            1338,
+            "../",
+            "password",
+            tx_count,
         )
         .unwrap();
     }
@@ -325,4 +332,5 @@ mod tests {
         let headers = eloop.run(stream).unwrap();
         assert_eq!(value, *headers.get(0).unwrap());
     }
+
 }

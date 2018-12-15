@@ -134,6 +134,11 @@ fn run(
 
     let home_web3 = Web3::new(home_ws.clone());
     let side_web3 = Web3::new(side_ws.clone());
+    let consul_config = consul_configs::ConsulConfig::new(
+        &settings.relay.consul,
+        &settings.relay.consul_token,
+        &settings.relay.community,
+    );
 
     home_web3
         .eth()
@@ -145,61 +150,50 @@ fn run(
                 .and_then(move |side_nonce| {
                     let mut _home_nonce = AtomicUsize::new(home_nonce.as_u64() as usize);
                     let mut _side_nonce = AtomicUsize::new(side_nonce.as_u64() as usize);
-                    let home_chain_id = consul_configs::wait_or_get(
-                        "homechain",
-                        "chain_id",
-                        &settings.relay.consul,
-                        &settings.relay.consul_token,
-                        &settings.relay.community,
-                    )
-                    .map_err(|e| e.to_string())?
-                    .parse::<u64>()
-                    .map_err(|e| e.to_string())?;
-                    let side_chain_id = consul_configs::wait_or_get(
-                        "sidechain",
-                        "chain_id",
-                        &settings.relay.consul,
-                        &settings.relay.consul_token,
-                        &settings.relay.community,
-                    )
-                    .map_err(|e| e.to_string())?
-                    .parse::<u64>()
-                    .map_err(|e| e.to_string())?;
+                    let home_chain_id = consul_config
+                        .wait_or_get("homechain", "chain_id")
+                        .map_err(|e| e.to_string())?
+                        .parse::<u64>()
+                        .map_err(|e| e.to_string())?;
+
+                    let side_chain_id = consul_config
+                        .wait_or_get("sidechain", "chain_id")
+                        .map_err(|e| e.to_string())?
+                        .parse::<u64>()
+                        .map_err(|e| e.to_string())?;
+
+                    let homechain_nectar_token_address = consul_config
+                        .wait_or_get("homechain", "nectar_token_address")
+                        .map_err(|e| e.to_string())?;
+
+                    let homechain_erc20_relay_address = consul_config
+                        .wait_or_get("homechain", "erc20_relay_address")
+                        .map_err(|e| e.to_string())?;
+
+                    let sidechain_nectar_token_address = consul_config
+                        .wait_or_get("sidechain", "nectar_token_address")
+                        .map_err(|e| e.to_string())?;
+
+                    let sidechain_erc20_relay_address = consul_config
+                        .wait_or_get("sidechain", "erc20_relay_address")
+                        .map_err(|e| e.to_string())?;
+
+                    let nectar_token_abi = consul_config
+                        .create_contract_abi("NectarToken")
+                        .map_err(|e| e.to_string())?;
+
+                    let erc20_relay_abi = consul_config
+                        .create_contract_abi("ERC20Relay")
+                        .map_err(|e| e.to_string())?;
 
                     let relay = Relay::new(
                         Network::homechain(
                             home_ws.clone(),
                             &settings.relay.account,
-                            &consul_configs::wait_or_get(
-                                "homechain",
-                                "nectar_token_address",
-                                &settings.relay.consul,
-                                &settings.relay.consul_token,
-                                &settings.relay.community,
-                            )
-                            .map_err(|e| e.to_string())?,
-                            &consul_configs::create_contract_abi(
-                                "NectarToken",
-                                &settings.relay.consul,
-                                &settings.relay.consul_token,
-                                &settings.relay.community,
-                            )
-                            .map_err(|e| e.to_string())?,
-                            &consul_configs::wait_or_get(
-                                "homechain",
-                                "erc20_relay_address",
-                                &settings.relay.consul,
-                                &settings.relay.consul_token,
-                                &settings.relay.community,
-                            )
-                            .map_err(|e| e.to_string())?,
-                            &consul_configs::create_contract_abi(
-                                "ERC20Relay",
-                                &settings.relay.consul,
-                                &settings.relay.consul_token,
-                                &settings.relay.community,
-                            )
-                            .map_err(|e| e.to_string())?,
+                            &homechain_nectar_token_address,
+                            &nectar_token_abi,
+                            &homechain_erc20_relay_address,
+                            &erc20_relay_abi,
                             settings.relay.homechain.free,
                             settings.relay.confirmations,
                             settings.relay.sidechain.interval,
@@ -212,36 +206,10 @@ fn run(
                         Network::sidechain(
                             side_ws.clone(),
                             &settings.relay.account,
-                            &consul_configs::wait_or_get(
-                                "sidechain",
-                                "nectar_token_address",
-                                &settings.relay.consul,
-                                &settings.relay.consul_token,
-                                &settings.relay.community,
-                            )
-                            .map_err(|e| e.to_string())?,
-                            &consul_configs::create_contract_abi(
-                                "NectarToken",
-                                &settings.relay.consul,
-                                &settings.relay.consul_token,
-                                &settings.relay.community,
-                            )
-                            .map_err(|e| e.to_string())?,
-                            &consul_configs::wait_or_get(
-                                "sidechain",
-                                "erc20_relay_address",
-                                &settings.relay.consul,
-                                &settings.relay.consul_token,
-                                &settings.relay.community,
-                            )
-                            .map_err(|e| e.to_string())?,
-                            &consul_configs::create_contract_abi(
-                                "ERC20Relay",
-                                &settings.relay.consul,
-                                &settings.relay.consul_token,
-                                &settings.relay.community,
-                            )
-                            .map_err(|e| e.to_string())?,
+                            &sidechain_nectar_token_address,
+                            &nectar_token_abi,
+                            &sidechain_erc20_relay_address,
+                            &erc20_relay_abi,
                             settings.relay.sidechain.free,
                             settings.relay.confirmations,
                             settings.relay.anchor_frequency,

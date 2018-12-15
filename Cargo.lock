@@ -1184,7 +1184,7 @@ dependencies = [
  "serde_json 1.0.33 (registry+https://github.com/rust-lang/crates.io-index)",
  "tiny-keccak 1.4.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "tokio-core 0.1.17 (registry+https://github.com/rust-lang/crates.io-index)",
- "web3 0.4.0 (git+https://github.com/polyswarm/rust-web3?branch=feature/keyfile-tx-signing)",
+ "web3 0.4.0 (git+https://github.com/polyswarm/rust-web3?branch=relay)",
 ]
 
 [[package]]
@@ -2071,7 +2071,7 @@ dependencies = [
 [[package]]
 name = "web3"
 version = "0.4.0"
-source = "git+https://github.com/polyswarm/rust-web3?branch=feature/keyfile-tx-signing#53dca5994c56fe4c3239ef67d4a837440d7b1cc1"
+source = "git+https://github.com/polyswarm/rust-web3?branch=relay#fce5ffc36676cab87969340cd31034a0d9be4d89"
 dependencies = [
  "arrayvec 0.4.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "error-chain 0.12.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -2397,7 +2397,7 @@ dependencies = [
 "checksum vm 0.1.0 (git+https://github.com/paritytech/parity-ethereum)" = "<none>"
 "checksum void 1.0.2 (registry+https://github.com/rust-lang/crates.io-index)" = "6a02e4885ed3bc0f2de90ea6dd45ebcbb66dacffe03547fadbb0eeae2770887d"
 "checksum want 0.0.4 (registry+https://github.com/rust-lang/crates.io-index)" = "a05d9d966753fa4b5c8db73fcab5eed4549cfe0e1e4e66911e5564a0085c35d1"
-"checksum web3 0.4.0 (git+https://github.com/polyswarm/rust-web3?branch=feature/keyfile-tx-signing)" = "<none>"
+"checksum web3 0.4.0 (git+https://github.com/polyswarm/rust-web3?branch=relay)" = "<none>"
 "checksum websocket 0.20.4 (registry+https://github.com/rust-lang/crates.io-index)" = "07a36936fac8ea6224c2be9ac26702b62d1bc8682d89c5d73116469a98b33458"
 "checksum winapi 0.2.8 (registry+https://github.com/rust-lang/crates.io-index)" = "167dc9d6949a9b857f3451275e911c3f44255842c1f7a76f33c55103a909087a"
 "checksum winapi 0.3.6 (registry+https://github.com/rust-lang/crates.io-index)" = "92c1eb33641e276cfa214a0522acad57be5c56b10cb348b3c5117db75f3ac4b0"

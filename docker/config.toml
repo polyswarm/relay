@@ -9,15 +9,11 @@
     wsuri = "ws://homechain:8546"
     free = false
     interval = 30
-    chain_id = 1337
-
 
 [relay.sidechain]
     wsuri = "ws://sidechain:8546"
     free = true
     interval = 30
-    chain_id = 1338
-
 
 [logging]
     format = "raw"

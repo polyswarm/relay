@@ -60,8 +60,6 @@ pub struct Network {
     pub free: bool,
     /// seconds between checks for missed transactions
     pub interval: u64,
-    /// Chain id for an Ethereum client
-    pub chain_id: u64,
 }
 
 impl Settings {

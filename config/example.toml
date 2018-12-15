@@ -29,8 +29,6 @@
     free = false
     # Number of seconds between each lookback attempt
     interval = 30
-    # The chain id for the homechain Ethereum client
-    chain_id = 1337
 
 
 [relay.sidechain]
@@ -44,5 +42,3 @@
     free = true
     # Number of seconds between each lookback attempt
     interval = 30
-    # The chain id for the sidechain Ethereum client
-    chain_id = 1338

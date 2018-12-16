@@ -10,20 +10,20 @@ use std::{process, thread, time};
 pub struct ConsulConfig {
     consul_url: String,
     consul_token: String,
-    sidechain_name: String,
+    community: String,
 }
 
 impl ConsulConfig {
-    pub fn new(consul_url: &str, consul_token: &str, sidechain_name: &str) -> Self {
+    pub fn new(consul_url: &str, consul_token: &str, community: &str) -> Self {
         Self {
             consul_url: consul_url.to_string(),
             consul_token: consul_token.to_string(),
-            sidechain_name: sidechain_name.to_string(),
+            community: community.to_string(),
         }
     }
 
     pub fn wait_or_get(&self, chain: &str, key: &str) -> Result<String, Error> {
-        let keyname = format!("chain/{}/{}", &self.sidechain_name, &chain);
+        let keyname = format!("chain/{}/{}", &self.community, &chain);
         let first = Box::new(true);
         let json = self.consul_select(keyname.as_ref(), || {
             if *first {
@@ -48,7 +48,7 @@ impl ConsulConfig {
     }
 
     pub fn create_contract_abi(&self, contract_name: &str) -> Result<String, Error> {
-        let keyname = format!("chain/{}/{}", &self.sidechain_name, contract_name);
+        let keyname = format!("chain/{}/{}", &self.community, contract_name);
         let json = self.consul_select(keyname.as_ref(), || {
             info!("chain for config not available in consul yet")
         })?;
@@ -88,7 +88,7 @@ impl ConsulConfig {
 
         loop {
             for chain in chains.iter() {
-                let keyname = format!("chain/{}/{}", &self.sidechain_name, &chain);
+                let keyname = format!("chain/{}/{}", &self.community, &chain);
 
                 if let Ok(json) = keystore.get_key(keyname) {
                     contract_addresses.entry(chain).or_insert_with(|| json.clone());

@@ -9,7 +9,7 @@ use super::contracts::TRANSFER_EVENT_SIGNATURE;
 use super::relay::Network;
 use super::transfer::Transfer;
 
-pub const LOOKBACK_RANGE: u64 = 100;
+pub const LOOKBACK_RANGE: u64 = 1_000;
 pub const LOOKBACK_LEEWAY: u64 = 5;
 
 /// Stream of Transfer that were missed, either from downtime, or failed approvals

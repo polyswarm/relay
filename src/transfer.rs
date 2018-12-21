@@ -13,7 +13,7 @@ use web3::DuplexTransport;
 
 use super::contracts::TRANSFER_EVENT_SIGNATURE;
 use super::relay::Network;
-use super::transaction::{BuildTransaction, TransactionState};
+use super::transaction::SendTransaction;
 use super::withdrawal::GetWithdrawal;
 
 /// Represents a token transfer between two networks
@@ -41,8 +41,12 @@ impl Transfer {
     /// # Arguments
     ///
     /// * `target` - Network where the withdrawals is performed
-    pub fn approve_withdrawal<T: DuplexTransport + 'static>(&self, target: &Rc<Network<T>>) -> ApproveWithdrawal<T> {
-        ApproveWithdrawal::new(target, *self)
+    pub fn approve_withdrawal<T: DuplexTransport + 'static>(
+        &self,
+        target: &Rc<Network<T>>,
+    ) -> SendTransaction<T, Self> {
+        info!("approving withdrawal {}", self);
+        SendTransaction::new(target, "approveWithdrawal", self)
     }
 }
 
@@ -65,58 +69,6 @@ impl fmt::Display for Transfer {
             "({} -> {:?}, hash: {:?})",
             self.amount, self.destination, self.tx_hash
         )
-    }
-}
-
-/// Future that calls the ERC20RelayContract to approve a transfer across the relay
-pub struct ApproveWithdrawal<T: DuplexTransport + 'static> {
-    target: Rc<Network<T>>,
-    state: TransactionState<T, Transfer>,
-}
-
-impl<T: DuplexTransport + 'static> ApproveWithdrawal<T> {
-    /// Returns a newly created ApproveWithdrawal Future
-    ///
-    /// # Arguments
-    ///
-    /// * `target` - Network where the withdrawal will be posted to the contract
-    pub fn new(target: &Rc<Network<T>>, transfer: Transfer) -> Self {
-        info!("approving withdrawal {}", transfer);
-        let target = target.clone();
-        let future = BuildTransaction::new(&target, "approveWithdrawal", transfer);
-        let state = TransactionState::Build(future);
-        ApproveWithdrawal { target, state }
-    }
-}
-
-impl<T: DuplexTransport + 'static> Future for ApproveWithdrawal<T> {
-    type Item = ();
-    type Error = ();
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        let next = match self.state {
-            TransactionState::Build(ref mut future) => {
-                let rlp_stream = try_ready!(future.poll());
-                let send_future = self
-                    .target
-                    .relay
-                    .send_raw_call_with_confirmations(rlp_stream.as_raw().into(), self.target.confirmations as usize)
-                    .map_err(move |e| {
-                        error!("error approving withdrawal: {}", e);
-                    });
-                TransactionState::Send(Box::new(send_future))
-            }
-            TransactionState::Send(ref mut future) => {
-                let receipt = try_ready!(future.poll());
-                info!("withdrawal approved: {:?}", receipt);
-                TransactionState::Done
-            }
-            TransactionState::Done => TransactionState::Done,
-        };
-        if let TransactionState::Done = next {
-            return Ok(Async::Ready(()));
-        }
-        self.state = next;
-        Ok(Async::NotReady)
     }
 }
 

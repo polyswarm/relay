@@ -142,3 +142,74 @@ where
         }
     }
 }
+
+/// Future that calls the ERC20RelayContract to approve a transfer across the relay
+pub struct SendTransaction<T, P>
+where
+    T: DuplexTransport + 'static,
+    P: Tokenize + Clone,
+{
+    function: String,
+    target: Rc<Network<T>>,
+    state: TransactionState<T, P>,
+}
+
+impl<T, P> SendTransaction<T, P>
+where
+    T: DuplexTransport + 'static,
+    P: Tokenize + Clone,
+{
+    /// Returns a newly created ApproveWithdrawal Future
+    ///
+    /// # Arguments
+    ///
+    /// * `target` - Network where the withdrawal will be posted to the contract
+    /// * `function` - Name of the function to call
+    /// * `params` - Vec of Tokens corresponsind to the params for the contract function parameters
+    pub fn new(target: &Rc<Network<T>>, function: &str, params: &P) -> Self {
+        let target = target.clone();
+        let future = BuildTransaction::new(&target, function, params.clone());
+        let state = TransactionState::Build(future);
+        SendTransaction {
+            function: function.to_string(),
+            target,
+            state,
+        }
+    }
+}
+
+impl<T, P> Future for SendTransaction<T, P>
+where
+    T: DuplexTransport + 'static,
+    P: Tokenize + Clone,
+{
+    type Item = ();
+    type Error = ();
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        let function = self.function.clone();
+        let next = match self.state {
+            TransactionState::Build(ref mut future) => {
+                let rlp_stream = try_ready!(future.poll());
+                let send_future = self
+                    .target
+                    .relay
+                    .send_raw_call_with_confirmations(rlp_stream.as_raw().into(), self.target.confirmations as usize)
+                    .map_err(move |e| {
+                        error!("error completing {} transaction: {}", function, e);
+                    });
+                TransactionState::Send(Box::new(send_future))
+            }
+            TransactionState::Send(ref mut future) => {
+                let receipt = try_ready!(future.poll());
+                info!("{} successful: {:?}", function, receipt);
+                TransactionState::Done
+            }
+            TransactionState::Done => TransactionState::Done,
+        };
+        if let TransactionState::Done = next {
+            return Ok(Async::Ready(()));
+        }
+        self.state = next;
+        Ok(Async::NotReady)
+    }
+}

@@ -21,6 +21,9 @@ pub enum OperationError {
 
     #[fail(display = "Could not create contract ABI: consul keystore did not contain key \"abi\"")]
     CouldNotCreateContractABI,
+
+    #[fail(display = "Unable to build transaction: {}", _0)]
+    CouldNotBuildTransaction(String),
 }
 
 /// ConfigError defines errors arising from an application misconfiguration,

@@ -13,7 +13,6 @@ use super::missed_transfer::HandleMissedTransfers;
 use super::transfer::HandleTransfers;
 use failure::{Error, SyncFailure};
 
-const DEFAULT_GAS_PRICE: u64 = 20_000_000_000;
 const FREE_GAS_PRICE: u64 = 0;
 const GAS_LIMIT: u64 = 200_000;
 
@@ -309,10 +308,10 @@ impl<T: DuplexTransport + 'static> Network<T> {
 
     /// Returns the gas price for the network as a U256
     /// Change the price by setting or unsetting free in the config.toml
-    pub fn get_gas_price(&self) -> U256 {
+    pub fn get_gas_price(&self, gas_price: U256) -> U256 {
         if self.free {
             return FREE_GAS_PRICE.into();
         }
-        DEFAULT_GAS_PRICE.into()
+        gas_price
     }
 }

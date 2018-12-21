@@ -1,16 +1,14 @@
 use super::relay::Network;
-use super::utils::{build_transaction, get_store_for_keyfiles};
-use rlp::RlpStream;
+use super::transaction::{BuildTransaction, TransactionState};
+use ethabi::Token;
 use std::fmt;
 use std::rc::Rc;
-use std::sync::atomic::Ordering;
 use tokio_core::reactor;
-use web3;
-use web3::contract::Options;
+use web3::contract::tokens::Tokenize;
 use web3::futures::prelude::*;
 use web3::futures::sync::mpsc;
 use web3::futures::try_ready;
-use web3::types::{BlockId, BlockNumber, TransactionReceipt, H256, U256};
+use web3::types::{BlockId, BlockNumber, H256, U256};
 use web3::DuplexTransport;
 
 /// Represents a block on the sidechain to be anchored to the homechain
@@ -26,8 +24,17 @@ impl Anchor {
     /// # Arguments
     ///
     /// * `target` - Network to post the anchor
-    fn process<T: DuplexTransport + 'static>(&self, target: &Rc<Network<T>>) -> ProcessAnchor {
+    fn process<T: DuplexTransport + 'static>(&self, target: &Rc<Network<T>>) -> ProcessAnchor<T> {
         ProcessAnchor::new(self, target)
+    }
+}
+
+impl Tokenize for Anchor {
+    fn into_tokens(self) -> Vec<Token> {
+        vec![
+            Token::FixedBytes(self.block_hash.to_vec()),
+            Token::Uint(self.block_number),
+        ]
     }
 }
 
@@ -179,64 +186,56 @@ impl Stream for FindAnchors {
 }
 
 /// Future that transacts with the ERC20Relay contract to permanently anchor a block
-pub struct ProcessAnchor(Box<Future<Item = TransactionReceipt, Error = web3::Error>>);
+pub struct ProcessAnchor<T: DuplexTransport + 'static> {
+    target: Rc<Network<T>>,
+    state: TransactionState<T, Anchor>,
+}
 
-impl ProcessAnchor {
+impl<T: DuplexTransport + 'static> ProcessAnchor<T> {
     /// Returns a newly created ProcessAnchor Future
     ///
     /// # Arguments
     ///
+    /// * `anchor` - Anchor to be pushed to the target
     /// * `target` - Network where the block headers are anchored
-    /// * `handle` - Handle to spawn new futures
-    pub fn new<T: DuplexTransport + 'static>(anchor: &Anchor, target: &Rc<Network<T>>) -> Self {
+    pub fn new(anchor: &Anchor, target: &Rc<Network<T>>) -> Self {
         info!("anchoring block {}", anchor);
         let anchor = *anchor;
         let target = target.clone();
-        let store = get_store_for_keyfiles(&target.keydir);
-        let mut s = RlpStream::new();
-        let fn_data = target
-            .relay
-            .get_function_data("anchor", (anchor.block_hash, anchor.block_number))
-            .unwrap();
-        let options = Options::with(|options| {
-            options.gas = Some(target.get_gas_limit());
-            options.gas_price = Some(target.get_gas_price());
-            options.value = Some(0.into());
-            options.nonce = Some(U256::from(target.nonce.load(Ordering::SeqCst)));
-            target.nonce.fetch_add(1, Ordering::SeqCst);
-        });
-        build_transaction(
-            &mut s,
-            &fn_data,
-            &target.relay.address(),
-            &target.account,
-            &store,
-            &options,
-            &target.password,
-            target.chain_id,
-        );
-        let future = target
-            .relay
-            .send_raw_call_with_confirmations(s.as_raw().into(), target.confirmations as usize);
-        ProcessAnchor(Box::new(future))
+
+        let future = BuildTransaction::new(&target, "anchor", anchor);
+        let state = TransactionState::Build(future);
+        ProcessAnchor { target, state }
     }
 }
 
-impl Future for ProcessAnchor {
+impl<T: DuplexTransport + 'static> Future for ProcessAnchor<T> {
     type Item = ();
     type Error = ();
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        // Not using try_ready so the result can be logged easily
-        match self.0.poll() {
-            Ok(Async::Ready(receipt)) => {
+        let next = match self.state {
+            TransactionState::Build(ref mut future) => {
+                let rlp_stream = try_ready!(future.poll());
+                let send_future = self
+                    .target
+                    .relay
+                    .send_raw_call_with_confirmations(rlp_stream.as_raw().into(), self.target.confirmations as usize)
+                    .map_err(move |e| {
+                        error!("error processing anchor: {}", e);
+                    });
+                TransactionState::Send(Box::new(send_future))
+            }
+            TransactionState::Send(ref mut future) => {
+                let receipt = try_ready!(future.poll());
                 info!("anchor processed: {:?}", receipt);
-                Ok(Async::Ready(()))
+                TransactionState::Done
             }
-            Ok(Async::NotReady) => Ok(Async::NotReady),
-            Err(e) => {
-                error!("error anchoring block: {:?}", e);
-                Err(())
-            }
+            TransactionState::Done => TransactionState::Done,
+        };
+        if let TransactionState::Done = next {
+            return Ok(Async::Ready(()));
         }
+        self.state = next;
+        Ok(Async::NotReady)
     }
 }

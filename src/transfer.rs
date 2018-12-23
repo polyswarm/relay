@@ -14,7 +14,7 @@ use web3::DuplexTransport;
 use super::contracts::TRANSFER_EVENT_SIGNATURE;
 use super::relay::Network;
 use super::transaction::SendTransaction;
-use super::withdrawal::GetWithdrawal;
+use super::withdrawal::DoesRequireApproval;
 
 /// Represents a token transfer between two networks
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -32,8 +32,8 @@ impl Transfer {
     /// # Arguments
     ///
     /// * `target` - Network that withdrawals are posted to
-    pub fn get_withdrawal<T: DuplexTransport + 'static>(&self, target: &Rc<Network<T>>) -> GetWithdrawal {
-        GetWithdrawal::new(target, *self)
+    pub fn check_withdrawal<T: DuplexTransport + 'static>(&self, target: &Rc<Network<T>>) -> DoesRequireApproval<T> {
+        DoesRequireApproval::new(target, self)
     }
 
     /// Returns a Future that will transaction with "approve_withdrawal" on the ERC20Relay contract

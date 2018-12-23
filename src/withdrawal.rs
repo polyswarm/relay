@@ -49,22 +49,54 @@ impl Detokenize for Withdrawal {
     }
 }
 
-/// Future to retrieve the withdrawal struct from the contract for a given transfer
-pub struct GetWithdrawal {
-    transfer: Transfer,
-    future: Box<Future<Item = Withdrawal, Error = ()>>,
+/// Withdrawal event added to contract after a transfer
+#[derive(Debug, Clone)]
+pub struct WithdrawalApprovals {
+    approvers: Vec<Address>,
 }
 
-impl GetWithdrawal {
-    pub fn new<T: DuplexTransport + 'static>(network: &Rc<Network<T>>, transfer: Transfer) -> Self {
-        let hash = Self::get_withdrawal_hash(&transfer);
-        let account = network.account;
+impl Detokenize for WithdrawalApprovals {
+    /// Creates a new instance from parsed ABI tokens.
+    fn from_tokens(tokens: Vec<Token>) -> Result<Self, contract::Error>
+    where
+        Self: Sized,
+    {
+        let approval_tokens = tokens[0].clone().to_array().ok_or_else(|| {
+            contract::Error::from_kind(contract::ErrorKind::Msg(
+                "cannot parse destination address from contract response".to_string(),
+            ))
+        })?;
+        let approvers = approval_tokens
+            .iter()
+            .filter_map(move |token| token.clone().to_address())
+            .collect();
+        Ok(WithdrawalApprovals { approvers })
+    }
+}
+
+pub enum CheckWithdrawalState {
+    GetWithdrawal(Box<Future<Item = Withdrawal, Error = ()>>),
+    GetWithdrawalApprovals(Box<Future<Item = WithdrawalApprovals, Error = ()>>),
+    RequiresApproval(bool),
+}
+
+/// Future to check whether or not a withdrawal needs approval
+pub struct DoesRequireApproval<T: DuplexTransport + 'static> {
+    target: Rc<Network<T>>,
+    transfer: Transfer,
+    state: CheckWithdrawalState,
+}
+
+impl<T: DuplexTransport + 'static> DoesRequireApproval<T> {
+    pub fn new(target: &Rc<Network<T>>, transfer: &Transfer) -> Self {
+        let approval_hash = Self::get_withdrawal_hash(transfer);
+        let account = target.account;
         let future = Box::new(
-            network
+            target
                 .relay
                 .query::<Withdrawal, Address, BlockNumber, H256>(
                     "withdrawals",
-                    hash,
+                    approval_hash,
                     account,
                     Options::default(),
                     BlockNumber::Latest,
@@ -73,7 +105,12 @@ impl GetWithdrawal {
                     error!("error getting withdrawal: {:?}", e);
                 }),
         );
-        GetWithdrawal { transfer, future }
+        let state = CheckWithdrawalState::GetWithdrawal(future);
+        DoesRequireApproval {
+            target: target.clone(),
+            transfer: *transfer,
+            state,
+        }
     }
 
     fn get_withdrawal_hash(transfer: &Transfer) -> H256 {
@@ -89,20 +126,59 @@ impl GetWithdrawal {
     }
 }
 
-impl Future for GetWithdrawal {
-    type Item = Withdrawal;
+impl<T: DuplexTransport + 'static> Future for DoesRequireApproval<T> {
+    type Item = bool;
     type Error = ();
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        let withdrawal = try_ready!(self.future.poll());
-        if withdrawal.destination == Address::zero() && withdrawal.amount.as_u64() == 0 {
-            info!("Found transfer that was never approved");
-            Ok(Async::Ready(withdrawal))
-        } else if withdrawal.destination == self.transfer.destination && withdrawal.amount == self.transfer.amount {
-            Ok(Async::Ready(withdrawal))
-        } else {
-            error!("Withdrawal from contract did not match transfer");
-            Err(())
+        let next = match self.state {
+            CheckWithdrawalState::GetWithdrawal(ref mut future) => {
+                let withdrawal = try_ready!(future.poll());
+                if (withdrawal.destination == Address::zero() && withdrawal.amount.as_u64() == 0)
+                    || (withdrawal.destination == self.transfer.destination
+                        && withdrawal.amount == self.transfer.amount)
+                {
+                    if withdrawal.processed {
+                        CheckWithdrawalState::RequiresApproval(false)
+                    } else {
+                        let target = self.target.clone();
+                        let account = target.account;
+                        let approval_hash = Self::get_withdrawal_hash(&self.transfer);
+                        let approval_future = Box::new(
+                            target
+                                .relay
+                                .query::<WithdrawalApprovals, Address, BlockNumber, H256>(
+                                    "withdrawalApprovals",
+                                    approval_hash,
+                                    account,
+                                    Options::default(),
+                                    BlockNumber::Latest,
+                                )
+                                .map_err(|e| {
+                                    error!("error getting withdrawal: {:?}", e);
+                                }),
+                        );
+                        CheckWithdrawalState::GetWithdrawalApprovals(approval_future)
+                    }
+                } else {
+                    error!("Withdrawal from contractt did not match transfer");
+                    CheckWithdrawalState::RequiresApproval(false)
+                }
+            }
+            CheckWithdrawalState::GetWithdrawalApprovals(ref mut future) => {
+                let withdrawal_approvals = try_ready!(future.poll());
+                let account = self.target.account;
+                withdrawal_approvals.approvers.iter().for_each(|approval| {
+                    info!("Found approver: {}", approval);
+                });
+                CheckWithdrawalState::RequiresApproval(!withdrawal_approvals.approvers.contains(&account))
+            }
+            CheckWithdrawalState::RequiresApproval(b) => CheckWithdrawalState::RequiresApproval(b),
+        };
+        if let CheckWithdrawalState::RequiresApproval(b) = next {
+            return Ok(Async::Ready(b));
         }
+        self.state = next;
+        Ok(Async::NotReady)
     }
 }

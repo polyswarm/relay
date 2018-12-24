@@ -2,7 +2,7 @@ use ethabi::Token;
 use std::rc::Rc;
 use tiny_keccak::keccak256;
 use web3::contract;
-use web3::contract::tokens::Detokenize;
+use web3::contract::tokens::{Detokenize, Tokenize};
 use web3::contract::Options;
 use web3::futures::prelude::*;
 use web3::futures::try_ready;
@@ -49,34 +49,49 @@ impl Detokenize for Withdrawal {
     }
 }
 
-/// Withdrawal event added to contract after a transfer
-#[derive(Debug, Clone)]
-pub struct WithdrawalApprovals {
-    approvers: Vec<Address>,
+pub struct ApprovalQuery {
+    approval_hash: H256,
+    index: U256,
 }
 
-impl Detokenize for WithdrawalApprovals {
+impl ApprovalQuery {
+    fn new(approval_hash: &H256, index: &U256) -> Self {
+        ApprovalQuery {
+            approval_hash: *approval_hash,
+            index: *index,
+        }
+    }
+}
+
+impl Tokenize for ApprovalQuery {
+    fn into_tokens(self) -> Vec<Token> {
+        vec![Token::FixedBytes(self.approval_hash.to_vec()), Token::Uint(self.index)]
+    }
+}
+
+/// Withdrawal event added to contract after a transfer
+#[derive(Debug, Clone)]
+pub struct WithdrawalApproval(Address);
+
+impl Detokenize for WithdrawalApproval {
     /// Creates a new instance from parsed ABI tokens.
     fn from_tokens(tokens: Vec<Token>) -> Result<Self, contract::Error>
     where
         Self: Sized,
     {
-        let approval_tokens = tokens[0].clone().to_array().ok_or_else(|| {
+        info!("withdrawal approvals: {:?}", tokens);
+        let approval = tokens[0].clone().to_address().ok_or_else(|| {
             contract::Error::from_kind(contract::ErrorKind::Msg(
-                "cannot parse destination address from contract response".to_string(),
+                "cannot parse approvers from contract response".to_string(),
             ))
         })?;
-        let approvers = approval_tokens
-            .iter()
-            .filter_map(move |token| token.clone().to_address())
-            .collect();
-        Ok(WithdrawalApprovals { approvers })
+        Ok(WithdrawalApproval(approval))
     }
 }
 
 pub enum CheckWithdrawalState {
     GetWithdrawal(Box<Future<Item = Withdrawal, Error = ()>>),
-    GetWithdrawalApprovals(Box<Future<Item = WithdrawalApprovals, Error = ()>>),
+    GetWithdrawalApprovals(usize, GetWithdrawalApproval),
     RequiresApproval(bool),
 }
 
@@ -131,6 +146,7 @@ impl<T: DuplexTransport + 'static> Future for DoesRequireApproval<T> {
     type Error = ();
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        info!("Polling!!!!");
         let next = match self.state {
             CheckWithdrawalState::GetWithdrawal(ref mut future) => {
                 let withdrawal = try_ready!(future.poll());
@@ -138,47 +154,95 @@ impl<T: DuplexTransport + 'static> Future for DoesRequireApproval<T> {
                     || (withdrawal.destination == self.transfer.destination
                         && withdrawal.amount == self.transfer.amount)
                 {
+                    info!("found withdrawal: {:?}", withdrawal);
                     if withdrawal.processed {
-                        CheckWithdrawalState::RequiresApproval(false)
+                        Some(CheckWithdrawalState::RequiresApproval(false))
                     } else {
-                        let target = self.target.clone();
-                        let account = target.account;
+                        info!("transaction not processed. Checking approvers");
                         let approval_hash = Self::get_withdrawal_hash(&self.transfer);
-                        let approval_future = Box::new(
-                            target
-                                .relay
-                                .query::<WithdrawalApprovals, Address, BlockNumber, H256>(
-                                    "withdrawalApprovals",
-                                    approval_hash,
-                                    account,
-                                    Options::default(),
-                                    BlockNumber::Latest,
-                                )
-                                .map_err(|e| {
-                                    error!("error getting withdrawal: {:?}", e);
-                                }),
-                        );
-                        CheckWithdrawalState::GetWithdrawalApprovals(approval_future)
+                        let approval_future = GetWithdrawalApproval::new(&self.target, &approval_hash, &0.into());
+                        Some(CheckWithdrawalState::GetWithdrawalApprovals(0, approval_future))
                     }
                 } else {
-                    error!("Withdrawal from contractt did not match transfer");
-                    CheckWithdrawalState::RequiresApproval(false)
+                    error!("withdrawal from contract did not match transfer");
+                    Some(CheckWithdrawalState::RequiresApproval(false))
                 }
-            }
-            CheckWithdrawalState::GetWithdrawalApprovals(ref mut future) => {
-                let withdrawal_approvals = try_ready!(future.poll());
-                let account = self.target.account;
-                withdrawal_approvals.approvers.iter().for_each(|approval| {
-                    info!("Found approver: {}", approval);
-                });
-                CheckWithdrawalState::RequiresApproval(!withdrawal_approvals.approvers.contains(&account))
-            }
-            CheckWithdrawalState::RequiresApproval(b) => CheckWithdrawalState::RequiresApproval(b),
+            },
+            CheckWithdrawalState::GetWithdrawalApprovals(index, ref mut future) => {
+                info!("polling approvals");
+                let polled = future.poll();
+                info!("polled approvals");
+                match polled {
+                    Ok(Async::Ready(approval)) => {
+                        info!("found {} as an approver", approval.0);
+                        let account = self.target.account;
+                        if approval.0 == account {
+                            info!("{} already approved transaction", self.target.account);
+                            Some(CheckWithdrawalState::RequiresApproval(false))
+                        } else {
+                            info!("checking next approver: {}", index + 1);
+                            let i = index + 1;
+                            let approval_hash = Self::get_withdrawal_hash(&self.transfer);
+                            let approval_future = GetWithdrawalApproval::new(&self.target, &approval_hash, &i.into());
+                            Some(CheckWithdrawalState::GetWithdrawalApprovals(i, approval_future))
+                        }
+                    },
+                    Ok(Async::NotReady) => {
+                        info!("we haven't gotten the approvers back yet...");
+                        None
+                    },
+                    Err(()) => {
+                        info!("{} had not approved transaction.", self.target.account);
+                        Some(CheckWithdrawalState::RequiresApproval(true))
+                    },
+                }
+            },
+            CheckWithdrawalState::RequiresApproval(b) => Some(CheckWithdrawalState::RequiresApproval(b)),
         };
-        if let CheckWithdrawalState::RequiresApproval(b) = next {
-            return Ok(Async::Ready(b));
+        match next {
+            None => Ok(Async::NotReady),
+            Some(state) => {
+                self.state = state;
+                if let CheckWithdrawalState::RequiresApproval(b) = self.state {
+                    info!("Final result: {}", b);
+                    return Ok(Async::Ready(b));
+                }
+                Ok(Async::NotReady)
+            }
         }
-        self.state = next;
-        Ok(Async::NotReady)
+    }
+}
+
+pub struct GetWithdrawalApproval(Box<Future<Item = WithdrawalApproval, Error = ()>>);
+
+impl GetWithdrawalApproval {
+    pub fn new<T: DuplexTransport + 'static>(target: &Rc<Network<T>>, approval_hash: &H256, index: &U256) -> Self {
+        let target = target.clone();
+        let account = target.account;
+        let approval_query = ApprovalQuery::new(&approval_hash, &index);
+        let future = Box::new(
+            target
+                .relay
+                .query::<WithdrawalApproval, Address, BlockNumber, ApprovalQuery>(
+                    "withdrawalApprovals",
+                    approval_query,
+                    account,
+                    Options::default(),
+                    BlockNumber::Latest,
+                )
+                .map_err(|e| {
+                    error!("error getting approvers: {:?}", e);
+                }),
+        );
+        GetWithdrawalApproval(future)
+    }
+}
+
+impl Future for GetWithdrawalApproval {
+    type Item = WithdrawalApproval;
+    type Error = ();
+
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        self.0.poll()
     }
 }

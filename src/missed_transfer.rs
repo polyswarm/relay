@@ -57,7 +57,7 @@ impl FindMissedTransfers {
                                 }
                                 let to = block.as_u64() - confirmations - LOOKBACK_LEEWAY;
                                 info!(
-                                    "Looking for logs between {} and {} on {:?}",
+                                    "looking for logs between {} and {} on {:?}",
                                     from,
                                     to,
                                     network_type,
@@ -79,7 +79,7 @@ impl FindMissedTransfers {
                                     let web3 = web3.clone();
                                     let handle = handle.clone();
                                     info!(
-                                        "Found {} transfers on {:?}",
+                                        "found {} transfers on {:?}",
                                         logs.len(),
                                         network_type
                                     );
@@ -213,15 +213,14 @@ impl HandleMissedTransfers {
                 })
                 .and_then(move |transfer_option| {
                     let target = target.clone();
-                    let handle = handle.clone();
                     if let Some(transfer) = transfer_option {
                         info!("approving missed transfer: {:?}", transfer);
-                        handle.spawn(transfer.approve_withdrawal(&target))
+                        handle.spawn(transfer.approve_withdrawal(&target));
                     }
                     Ok(())
                 })
                 .or_else(move |e| {
-                    error!("Error searching for and approving missed transfers: {:?}", e);
+                    error!("error searching for and approving missed transfers: {:?}", e);
                     Ok(())
                 })
         });

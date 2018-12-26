@@ -9,15 +9,24 @@ RUN wget https://github.com/mozilla/sccache/releases/download/$SCCACHE_VERSION/s
 
 ENV RUSTC_WRAPPER=sccache
 
-# # create a new empty shell project
+# These potentially contain secrets from CI but are included in intermediate
+# image so is fine
+ARG SCCACHE_BUCKET
+ENV SCCACHE_BUCET=$SCCACHE_BUCKET
+ARG AWS_ACCESS_KEY_ID
+ENV AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
+ARG AWS_SECRET_ACCESS_KEY
+ENV AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+
+# Create a new empty shell project
 RUN USER=root cargo new --bin polyswarm-relay
 WORKDIR /polyswarm-relay
 
-# copy over your manifests
+# Copy over your manifests
 COPY ./Cargo.lock ./Cargo.lock
 COPY ./Cargo.toml ./Cargo.toml
 
-# this build step will cache your dependencies
+# This build step will cache your dependencies
 RUN cargo build --release \
     && sccache --show-stats
 
@@ -27,6 +36,7 @@ COPY ./src ./src
 RUN find ./src -type f -exec touch {} \; && \
     cargo build --release
 
+# Final image
 FROM ubuntu:bionic
 
 RUN apt-get update && apt-get install -y \

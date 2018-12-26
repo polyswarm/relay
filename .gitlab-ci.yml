@@ -6,13 +6,13 @@ stages:
 
 lint:
   stage: lint
-  image: rust:1.30
+  image: rust:1.31.1
   allow_failure: true
   script:
-    - rustup component add rustfmt-preview
+    - rustup component add rustfmt
     - cargo fmt --all -- --check
-    - rustup component add clippy-preview
-    - cargo clippy -- --allow "clippy::redundant_field_names"
+    - rustup component add clippy
+    - cargo clippy
 
 test:
   stage: test
@@ -50,7 +50,7 @@ kick-e2e:
         --form "token=$CI_JOB_TOKEN"
         --form "variables[SOURCE_PROJECT]=$CI_PROJECT_NAMESPACE/$CI_PROJECT_NAME"
         --form "variables[SOURCE_BRANCH]=$CI_COMMIT_REF_NAME"
-        --form ref="master"
+        --form "ref=feature/sccache"
         "https://gitlab.polyswarm.io/api/v4/projects/${CI_CUSTOM_PROJECT_ID_E2E}/trigger/pipeline" | jq -r ".id"`
 
       # poll for it to finish

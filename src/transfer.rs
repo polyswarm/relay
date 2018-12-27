@@ -1,21 +1,19 @@
-use rlp::RlpStream;
+use ethabi::Token;
 use std::fmt;
 use std::rc::Rc;
-use std::sync::atomic::Ordering;
 use std::time;
 use tokio_core::reactor;
-use web3;
 use web3::confirm::wait_for_transaction_confirmation;
-use web3::contract::Options;
+use web3::contract::tokens::Tokenize;
 use web3::futures::prelude::*;
 use web3::futures::sync::mpsc;
 use web3::futures::try_ready;
-use web3::types::{Address, FilterBuilder, TransactionReceipt, H256, U256};
+use web3::types::{Address, FilterBuilder, H256, U256};
 use web3::DuplexTransport;
 
 use super::contracts::TRANSFER_EVENT_SIGNATURE;
 use super::relay::Network;
-use super::utils::{build_transaction, get_store_for_keyfiles};
+use super::transaction::SendTransaction;
 use super::withdrawal::GetWithdrawal;
 
 /// Represents a token transfer between two networks
@@ -43,8 +41,24 @@ impl Transfer {
     /// # Arguments
     ///
     /// * `target` - Network where the withdrawals is performed
-    pub fn approve_withdrawal<T: DuplexTransport + 'static>(&self, target: &Rc<Network<T>>) -> ApproveWithdrawal {
-        ApproveWithdrawal::new(target, *self)
+    pub fn approve_withdrawal<T: DuplexTransport + 'static>(
+        &self,
+        target: &Rc<Network<T>>,
+    ) -> SendTransaction<T, Self> {
+        info!("approving withdrawal {}", self);
+        SendTransaction::new(target, "approveWithdrawal", self)
+    }
+}
+
+impl Tokenize for Transfer {
+    fn into_tokens(self) -> Vec<Token> {
+        let mut tokens = Vec::new();
+        tokens.push(Token::Address(self.destination));
+        tokens.push(Token::Uint(self.amount));
+        tokens.push(Token::FixedBytes(self.tx_hash.to_vec()));
+        tokens.push(Token::FixedBytes(self.block_hash.to_vec()));
+        tokens.push(Token::Uint(self.block_number));
+        tokens
     }
 }
 
@@ -55,76 +69,6 @@ impl fmt::Display for Transfer {
             "({} -> {:?}, hash: {:?})",
             self.amount, self.destination, self.tx_hash
         )
-    }
-}
-
-/// Future that calls the ERC20RelayContract to approve a transfer across the relay
-pub struct ApproveWithdrawal(Box<Future<Item = TransactionReceipt, Error = web3::Error>>);
-
-impl ApproveWithdrawal {
-    /// Returns a newly created ApproveWithdrawal Future
-    ///
-    /// # Arguments
-    ///
-    /// * `target` - Network where the withdrawal will be posted to the contract
-    pub fn new<T: DuplexTransport + 'static>(target: &Rc<Network<T>>, transfer: Transfer) -> Self {
-        info!("approving withdrawal {}", transfer);
-        let target = target.clone();
-        let store = get_store_for_keyfiles(&target.keydir);
-        let mut s = RlpStream::new();
-        let fn_data = target
-            .relay
-            .get_function_data(
-                "approveWithdrawal",
-                (
-                    transfer.destination,
-                    transfer.amount,
-                    transfer.tx_hash,
-                    transfer.block_hash,
-                    transfer.block_number,
-                ),
-            )
-            .unwrap();
-        let options = Options::with(|options| {
-            options.gas = Some(target.get_gas_limit());
-            options.gas_price = Some(target.get_gas_price());
-            options.value = Some(0.into());
-            options.nonce = Some(U256::from(target.nonce.load(Ordering::SeqCst)));
-            target.nonce.fetch_add(1, Ordering::SeqCst);
-        });
-        build_transaction(
-            &mut s,
-            &fn_data,
-            &target.relay.address(),
-            &target.account,
-            &store,
-            &options,
-            &target.password,
-            target.chain_id,
-        );
-        let future = target
-            .clone()
-            .relay
-            .send_raw_call_with_confirmations(s.as_raw().into(), target.confirmations as usize);
-        ApproveWithdrawal(Box::new(future))
-    }
-}
-
-impl Future for ApproveWithdrawal {
-    type Item = ();
-    type Error = ();
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        match self.0.poll() {
-            Ok(Async::Ready(receipt)) => {
-                info!("withdrawal approved: {:?}", receipt);
-                Ok(Async::Ready(()))
-            }
-            Ok(Async::NotReady) => Ok(Async::NotReady),
-            Err(e) => {
-                error!("error approving withdrawal: {:?}", e);
-                Err(())
-            }
-        }
     }
 }
 

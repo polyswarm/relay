@@ -2071,7 +2071,7 @@ dependencies = [
 [[package]]
 name = "web3"
 version = "0.4.0"
-source = "git+https://github.com/polyswarm/rust-web3?branch=relay#fce5ffc36676cab87969340cd31034a0d9be4d89"
+source = "git+https://github.com/polyswarm/rust-web3?branch=relay#a8788e98637d510941dec6001d9709279b56d38f"
 dependencies = [
  "arrayvec 0.4.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "error-chain 0.12.0 (registry+https://github.com/rust-lang/crates.io-index)",

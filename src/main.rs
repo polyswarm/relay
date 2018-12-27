@@ -34,6 +34,7 @@ pub mod logger;
 pub mod missed_transfer;
 pub mod relay;
 pub mod settings;
+pub mod transaction;
 pub mod transfer;
 pub mod utils;
 pub mod withdrawal;

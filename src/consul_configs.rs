@@ -22,7 +22,7 @@ impl ConsulConfig {
         }
     }
 
-    pub fn wait_or_get(&self, chain: &str, key: &str) -> Result<String, Error> {
+    pub fn wait_or_get(&self, chain: &str) -> Result<serde_json::Value, Error> {
         let keyname = format!("chain/{}/{}", &self.community, &chain);
         let first = Box::new(true);
         let json = self.consul_select(keyname.as_ref(), || {
@@ -31,20 +31,7 @@ impl ConsulConfig {
             }
         })?;
         info!("chain for {:?} config available in consul now", chain);
-
-        if json[&key].is_u64() {
-            json[&key]
-                .as_u64()
-                .map_or(Err(OperationError::CouldNotGetConsulKey(key.to_string()).into()), |v| {
-                    Ok(v.to_string())
-                })
-        } else {
-            json[&key]
-                .as_str()
-                .map_or(Err(OperationError::CouldNotGetConsulKey(key.to_string()).into()), |v| {
-                    Ok(v.to_string())
-                })
-        }
+        Ok(json)
     }
 
     pub fn create_contract_abi(&self, contract_name: &str) -> Result<String, Error> {

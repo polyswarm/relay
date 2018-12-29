@@ -20,7 +20,6 @@ where
 {
     Build(BuildTransaction<T, P>),
     Send(Box<Future<Item = TransactionReceipt, Error = ()>>),
-    Done,
 }
 
 /// This struct implements Future so that it is easy to build a transaction, with the proper gas price in a future
@@ -187,29 +186,38 @@ where
     type Error = ();
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         let function = self.function.clone();
-        let next = match self.state {
-            TransactionState::Build(ref mut future) => {
-                let rlp_stream = try_ready!(future.poll());
-                let send_future = self
-                    .target
-                    .relay
-                    .send_raw_call_with_confirmations(rlp_stream.as_raw().into(), self.target.confirmations as usize)
-                    .map_err(move |e| {
-                        error!("error completing {} transaction: {}", function, e);
-                    });
-                TransactionState::Send(Box::new(send_future))
-            }
-            TransactionState::Send(ref mut future) => {
-                let receipt = try_ready!(future.poll());
-                info!("{} successful: {:?}", function, receipt);
-                TransactionState::Done
-            }
-            TransactionState::Done => TransactionState::Done,
-        };
-        if let TransactionState::Done = next {
-            return Ok(Async::Ready(()));
+        loop {
+            let next = match self.state {
+                TransactionState::Build(ref mut future) => {
+                    let function = function.clone();
+                    let rlp_stream = try_ready!(future.poll());
+                    let send_future = self
+                        .target
+                        .relay
+                        .send_raw_call_with_confirmations(rlp_stream.as_raw().into(), self.target.confirmations as usize)
+                        .map_err(move |e| {
+                            error!("error completing {} transaction: {}", function, e);
+                        });
+                    TransactionState::Send(Box::new(send_future))
+                }
+                TransactionState::Send(ref mut future) => {
+                    let receipt = try_ready!(future.poll());
+                    match receipt.status {
+                        Some(result) => {
+                            if result == 1.into() {
+                                info!("{} successful: {:?}", function, receipt);
+                            } else {
+                                warn!("{} failed: {:?}", function, receipt);
+                            }
+                        }
+                        None => {
+                            error!("{} receipt has no status: {:?}", function, receipt);
+                        }
+                    }
+                    return Ok(Async::Ready(()));
+                }
+            };
+            self.state = next;
         }
-        self.state = next;
-        Ok(Async::NotReady)
     }
 }

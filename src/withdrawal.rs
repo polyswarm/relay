@@ -209,7 +209,7 @@ impl GetWithdrawalApprovers {
             target
                 .relay
                 .query::<WithdrawalApprovers, Address, BlockNumber, ApprovalQuery>(
-                    "WithdrawalApprovals",
+                    "withdrawalApprovals",
                     approval_query,
                     account,
                     Options::default(),

@@ -306,12 +306,12 @@ impl<T: DuplexTransport + 'static> Network<T> {
         GAS_LIMIT.into()
     }
 
-    /// Returns the gas price for the network as a U256
-    /// Change the price by setting or unsetting free in the config.toml
-    pub fn get_gas_price(&self, gas_price: U256) -> U256 {
+    /// Takes in an estimated price, per the server.
+    /// Change gas price to 0 if free is set in config
+    pub fn finalize_gas_price(&self, potential_gas_price: U256) -> U256 {
         if self.free {
             return FREE_GAS_PRICE.into();
         }
-        gas_price
+        potential_gas_price
     }
 }

@@ -3,25 +3,27 @@ use consul::Client;
 use errors::OperationError;
 use failure::Error;
 use serde_json;
-use std::{thread, time};
+use std::collections::HashMap;
+use std::{process, thread, time};
 
+#[derive(Debug, Clone)]
 pub struct ConsulConfig {
     consul_url: String,
     consul_token: String,
-    sidechain_name: String,
+    community: String,
 }
 
 impl ConsulConfig {
-    pub fn new(consul_url: &str, consul_token: &str, sidechain_name: &str) -> Self {
+    pub fn new(consul_url: &str, consul_token: &str, community: &str) -> Self {
         Self {
             consul_url: consul_url.to_string(),
             consul_token: consul_token.to_string(),
-            sidechain_name: sidechain_name.to_string(),
+            community: community.to_string(),
         }
     }
 
-    pub fn wait_or_get(&self, chain: &str, key: &str) -> Result<String, Error> {
-        let keyname = format!("chain/{}/{}", &self.sidechain_name, &chain);
+    pub fn wait_or_get(&self, chain: &str) -> Result<serde_json::Value, Error> {
+        let keyname = format!("chain/{}/{}", &self.community, &chain);
         let first = Box::new(true);
         let json = self.consul_select(keyname.as_ref(), || {
             if *first {
@@ -29,24 +31,11 @@ impl ConsulConfig {
             }
         })?;
         info!("chain for {:?} config available in consul now", chain);
-
-        if json[&key].is_u64() {
-            json[&key]
-                .as_u64()
-                .map_or(Err(OperationError::CouldNotGetConsulKey(key.to_string()).into()), |v| {
-                    Ok(v.to_string())
-                })
-        } else {
-            json[&key]
-                .as_str()
-                .map_or(Err(OperationError::CouldNotGetConsulKey(key.to_string()).into()), |v| {
-                    Ok(v.to_string())
-                })
-        }
+        Ok(json)
     }
 
     pub fn create_contract_abi(&self, contract_name: &str) -> Result<String, Error> {
-        let keyname = format!("chain/{}/{}", &self.sidechain_name, contract_name);
+        let keyname = format!("chain/{}/{}", &self.community, contract_name);
         let json = self.consul_select(keyname.as_ref(), || {
             info!("chain for config not available in consul yet")
         })?;
@@ -74,6 +63,34 @@ impl ConsulConfig {
                 print_err();
                 thread::sleep(one_sec);
                 continue;
+            }
+        }
+    }
+
+    pub fn watch_for_config_deletion(&self, chains: &[&str]) {
+        let client = Client::new(&self.consul_url, &self.consul_token);
+        let keystore = client.keystore;
+        let one_sec = time::Duration::from_secs(1);
+        let mut contract_addresses = HashMap::new();
+
+        loop {
+            for chain in chains.iter() {
+                let keyname = format!("chain/{}/{}", &self.community, &chain);
+
+                if let Ok(json) = keystore.get_key(keyname) {
+                    contract_addresses.entry(chain).or_insert_with(|| json.clone());
+                    let val = &contract_addresses[chain];
+
+                    if &json != val {
+                        info!("Config change detected, exiting...");
+                        process::exit(1);
+                    } else {
+                        thread::sleep(one_sec);
+                    }
+                } else {
+                    info!("Config change detected, exiting...");
+                    process::exit(1);
+                }
             }
         }
     }

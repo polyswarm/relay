@@ -23,6 +23,7 @@ extern crate ethcore_transaction;
 extern crate ethkey;
 extern crate ethstore;
 extern crate rlp;
+use consul_configs::ConsulConfig;
 use std::sync::atomic::AtomicUsize;
 
 use clap::{App, Arg};
@@ -41,13 +42,13 @@ pub mod withdrawal;
 
 #[cfg(test)]
 mod mock;
-
 use failure::{Error, SyncFailure};
 use relay::{Network, Relay};
 use settings::Settings;
 use web3::futures::Future;
 
 use errors::OperationError;
+use std::thread;
 use tokio_core::reactor;
 use web3::Web3;
 
@@ -113,8 +114,15 @@ fn main() -> Result<(), Error> {
     let side_ws = web3::transports::WebSocket::with_event_loop(&settings.relay.sidechain.wsuri, &handle)
         .map_err(SyncFailure::new)?;
 
+    let consul_config = consul_configs::ConsulConfig::new(
+        &settings.relay.consul,
+        &settings.relay.consul_token,
+        &settings.relay.community,
+    );
+
     // Run the relay
-    handle.spawn(run(handle.clone(), settings, home_ws, side_ws));
+    handle.spawn(run(handle.clone(), settings, home_ws, side_ws, consul_config.clone()));
+
     while running.load(Ordering::SeqCst) {
         eloop.turn(Some(Duration::from_secs(1)));
     }
@@ -127,6 +135,7 @@ fn run(
     settings: Settings,
     home_ws: web3::transports::WebSocket,
     side_ws: web3::transports::WebSocket,
+    consul_config: ConsulConfig,
 ) -> impl Future<Item = (), Error = ()> {
     let account = utils::clean_0x(&settings.relay.account)
         .parse()
@@ -135,11 +144,6 @@ fn run(
 
     let home_web3 = Web3::new(home_ws.clone());
     let side_web3 = Web3::new(side_ws.clone());
-    let consul_config = consul_configs::ConsulConfig::new(
-        &settings.relay.consul,
-        &settings.relay.consul_token,
-        &settings.relay.community,
-    );
 
     home_web3
         .eth()
@@ -151,38 +155,41 @@ fn run(
                 .and_then(move |side_nonce| {
                     let mut _home_nonce = AtomicUsize::new(home_nonce.as_u64() as usize);
                     let mut _side_nonce = AtomicUsize::new(side_nonce.as_u64() as usize);
-                    let home_chain_id = consul_config
-                        .wait_or_get("homechain", "chain_id")
-                        .map_err(|e| e.to_string())?
-                        .parse::<u64>()
+                    let homechain_config = consul_config.wait_or_get("homechain").map_err(|e| e.to_string())?;
+                    let sidechain_config = consul_config.wait_or_get("sidechain").map_err(|e| e.to_string())?;
+                    let mut key = "chain_id";
+                    let home_chain_id = homechain_config[key]
+                        .as_u64()
+                        .ok_or_else(|| OperationError::CouldNotGetConsulKey(key.to_string()))
+                        .map_err(|e| e.to_string())?;
+                    let side_chain_id = sidechain_config[key]
+                        .as_u64()
+                        .ok_or_else(|| OperationError::CouldNotGetConsulKey(key.to_string()))
                         .map_err(|e| e.to_string())?;
 
-                    let side_chain_id = consul_config
-                        .wait_or_get("sidechain", "chain_id")
-                        .map_err(|e| e.to_string())?
-                        .parse::<u64>()
+                    key = "nectar_token_address";
+                    let homechain_nectar_token_address = homechain_config[key]
+                        .as_str()
+                        .ok_or_else(|| OperationError::CouldNotGetConsulKey(key.to_string()))
+                        .map_err(|e| e.to_string())?;
+                    let sidechain_nectar_token_address = sidechain_config[key]
+                        .as_str()
+                        .ok_or_else(|| OperationError::CouldNotGetConsulKey(key.to_string()))
                         .map_err(|e| e.to_string())?;
 
-                    let homechain_nectar_token_address = consul_config
-                        .wait_or_get("homechain", "nectar_token_address")
+                    key = "erc20_relay_address";
+                    let homechain_erc20_relay_address = homechain_config[key]
+                        .as_str()
+                        .ok_or_else(|| OperationError::CouldNotGetConsulKey(key.to_string()))
                         .map_err(|e| e.to_string())?;
-
-                    let homechain_erc20_relay_address = consul_config
-                        .wait_or_get("homechain", "erc20_relay_address")
-                        .map_err(|e| e.to_string())?;
-
-                    let sidechain_nectar_token_address = consul_config
-                        .wait_or_get("sidechain", "nectar_token_address")
-                        .map_err(|e| e.to_string())?;
-
-                    let sidechain_erc20_relay_address = consul_config
-                        .wait_or_get("sidechain", "erc20_relay_address")
+                    let sidechain_erc20_relay_address = sidechain_config[key]
+                        .as_str()
+                        .ok_or_else(|| OperationError::CouldNotGetConsulKey(key.to_string()))
                         .map_err(|e| e.to_string())?;
 
                     let nectar_token_abi = consul_config
                         .create_contract_abi("NectarToken")
                         .map_err(|e| e.to_string())?;
-
                     let erc20_relay_abi = consul_config
                         .create_contract_abi("ERC20Relay")
                         .map_err(|e| e.to_string())?;
@@ -223,7 +230,11 @@ fn run(
                         .map_err(|e| format!("error initializing sidechain {}", e))?,
                     );
                     handle.spawn(relay.run(&handle));
-
+                    let chains_to_watch = vec!["homechain", "sidechain"];
+                    // start watching for consul changes
+                    thread::spawn(move || {
+                        consul_config.watch_for_config_deletion(&chains_to_watch);
+                    });
                     Ok(())
                 })
                 .or_else(|e| {

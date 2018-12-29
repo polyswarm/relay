@@ -53,11 +53,11 @@ impl FindMissedTransfers {
                                     block.as_u64() - confirmations - LOOKBACK_RANGE
                                 };
                                 if block.as_u64() < confirmations + LOOKBACK_LEEWAY {
-                                    return Err(web3::Error::from_kind(web3::ErrorKind::Msg("Not enough blocks to look back".to_string())));
+                                    return Err(web3::Error::from_kind(web3::ErrorKind::Msg("Not enough blocks to check".to_string())));
                                 }
                                 let to = block.as_u64() - confirmations - LOOKBACK_LEEWAY;
                                 info!(
-                                    "looking for logs between {} and {} on {:?}",
+                                    "checking logs between {} and {} on {:?}",
                                     from,
                                     to,
                                     network_type,

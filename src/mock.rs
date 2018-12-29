@@ -121,7 +121,7 @@ impl DuplexTransport for MockTransport {
     fn subscribe(&self, id: &SubscriptionId) -> Self::NotificationStream {
         let (tx, rx) = mpsc::unbounded();
         if self.subscriptions.lock().insert(id.clone(), tx).is_some() {
-            warn!("Replacing subscription with id {:?}", id);
+            warn!("replacing subscription with id {:?}", id);
         }
         Box::new(rx.map_err(|()| ErrorKind::Transport("No data available".into()).into()))
     }

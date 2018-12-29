@@ -194,7 +194,10 @@ where
                     let send_future = self
                         .target
                         .relay
-                        .send_raw_call_with_confirmations(rlp_stream.as_raw().into(), self.target.confirmations as usize)
+                        .send_raw_call_with_confirmations(
+                            rlp_stream.as_raw().into(),
+                            self.target.confirmations as usize,
+                        )
                         .map_err(move |e| {
                             error!("error completing {} transaction: {}", function, e);
                         });

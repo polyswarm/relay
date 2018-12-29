@@ -75,7 +75,7 @@ impl<T: DuplexTransport + 'static> Future for HandleAnchors<T> {
         loop {
             let anchor = try_ready!(self.stream.poll());
             if let Some(a) = anchor {
-                self.handle.spawn(a.process(&self.target))
+                self.handle.spawn(a.process(&self.target));
             }
         }
     }

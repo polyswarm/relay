@@ -102,7 +102,7 @@ impl<T: DuplexTransport + 'static> Future for HandleTransfers<T> {
         loop {
             let transfer = try_ready!(self.stream.poll());
             if let Some(t) = transfer {
-                self.handle.spawn(t.approve_withdrawal(&self.target))
+                self.handle.spawn(t.approve_withdrawal(&self.target));
             }
         }
     }

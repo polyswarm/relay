@@ -239,13 +239,13 @@ fn run(
                 })
                 .or_else(|e| {
                     error!("{:?}", e);
-                    error!("Error getting transaction count on sidechain. Are you connected to geth?");
+                    error!("error getting transaction count on sidechain. Are you connected to geth?");
                     Ok(())
                 })
         })
         .or_else(|e| {
             error!("{:?}", e);
-            error!("Error getting transaction count on homechain. Are you connected to geth?");
+            error!("error getting transaction count on homechain. Are you connected to geth?");
             Ok(())
         })
 }

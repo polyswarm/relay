@@ -96,12 +96,12 @@ impl Future for GetWithdrawal {
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         let withdrawal = try_ready!(self.future.poll());
         if withdrawal.destination == Address::zero() && withdrawal.amount.as_u64() == 0 {
-            info!("Found transfer that was never approved");
+            info!("found transfer that was never approved");
             Ok(Async::Ready(withdrawal))
         } else if withdrawal.destination == self.transfer.destination && withdrawal.amount == self.transfer.amount {
             Ok(Async::Ready(withdrawal))
         } else {
-            error!("Withdrawal from contract did not match transfer");
+            error!("withdrawal from contract did not match transfer");
             Err(())
         }
     }

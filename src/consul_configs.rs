@@ -82,13 +82,13 @@ impl ConsulConfig {
                     let val = &contract_addresses[chain];
 
                     if &json != val {
-                        info!("Config change detected, exiting...");
+                        info!("config change detected, exiting...");
                         process::exit(1);
                     } else {
                         thread::sleep(one_sec);
                     }
                 } else {
-                    info!("Config change detected, exiting...");
+                    info!("config change detected, exiting...");
                     process::exit(1);
                 }
             }

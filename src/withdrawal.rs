@@ -204,7 +204,7 @@ impl GetWithdrawalApprovers {
         let target = target.clone();
         let account = target.account;
         let approval_query = ApprovalQuery::new(&approval_hash, &index);
-        let approval_hash = approval_hash.clone();
+        let approval_hash = *approval_hash;
         let future = Box::new(
             target
                 .relay

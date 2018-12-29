@@ -166,7 +166,7 @@ impl<T: DuplexTransport + 'static> Future for DoesRequireApproval<T> {
                         error!("withdrawal from contract did not match transfer");
                         return Ok(Async::Ready(false));
                     }
-                },
+                }
                 CheckWithdrawalState::GetWithdrawalApprovers(index, ref mut future) => {
                     let polled = future.poll();
                     match polled {
@@ -177,19 +177,20 @@ impl<T: DuplexTransport + 'static> Future for DoesRequireApproval<T> {
                             } else {
                                 let i = index + 1;
                                 let approval_hash = Self::get_withdrawal_hash(&self.transfer);
-                                let approval_future = GetWithdrawalApprovers::new(&self.target, &approval_hash, &i.into());
+                                let approval_future =
+                                    GetWithdrawalApprovers::new(&self.target, &approval_hash, &i.into());
                                 CheckWithdrawalState::GetWithdrawalApprovers(i, approval_future)
                             }
-                        },
+                        }
                         Ok(Async::NotReady) => {
                             return Ok(Async::NotReady);
-                        },
+                        }
                         Err(()) => {
                             info!("this relay missing from approvers");
                             return Ok(Async::Ready(true));
-                        },
+                        }
                     }
-                },
+                }
             };
             self.state = next;
         }

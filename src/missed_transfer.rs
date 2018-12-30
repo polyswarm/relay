@@ -202,11 +202,10 @@ impl HandleMissedTransfers {
             let target = target.clone();
             let handle = handle.clone();
             transfer
-                .get_withdrawal(&target)
-                .and_then(move |withdrawal| {
-                    info!("found withdrawal: {:?}", &withdrawal);
-                    if withdrawal.processed {
-                        info!("skipping already processed transfer: {:?}", &transfer.tx_hash);
+                .check_withdrawal(&target)
+                .and_then(move |needs_approval| {
+                    if !needs_approval {
+                        info!("skipping transfer that does not need approval: {:?}", &transfer.tx_hash);
                         Ok(None)
                     } else {
                         Ok(Some(transfer))
@@ -214,10 +213,9 @@ impl HandleMissedTransfers {
                 })
                 .and_then(move |transfer_option| {
                     let target = target.clone();
-                    let handle = handle.clone();
                     if let Some(transfer) = transfer_option {
                         info!("approving missed transfer: {:?}", transfer);
-                        handle.spawn(transfer.approve_withdrawal(&target))
+                        handle.spawn(transfer.approve_withdrawal(&target));
                     }
                     Ok(())
                 })

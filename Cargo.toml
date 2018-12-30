@@ -1,6 +1,6 @@
 [package]
 name = "polyswarm-relay"
-version = "0.1.0"
+version = "1.0.0"
 authors = ["PolySwarm Developers <info@polyswarm.io>"]
 
 [dependencies]

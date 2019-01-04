@@ -4,6 +4,7 @@
     consul = "http://consul:8500"
     community = "gamma"
     keydir = "./docker/keyfiles"
+    retries = 10
 
 [relay.homechain]
     wsuri = "ws://homechain:8546"

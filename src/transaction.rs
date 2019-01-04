@@ -1,3 +1,5 @@
+use super::errors::OperationError;
+use super::relay::Network;
 use ethcore_transaction::{Action, Transaction as RawTransactionRequest};
 use ethstore::accounts_dir::RootDiskDirectory;
 use ethstore::{EthStore, SimpleSecretStore, StoreAccountRef};
@@ -9,9 +11,6 @@ use web3::futures::prelude::*;
 use web3::futures::try_ready;
 use web3::types::{TransactionReceipt, U256};
 use web3::DuplexTransport;
-
-use super::errors::OperationError;
-use super::relay::Network;
 
 pub enum TransactionState<T, P>
 where
@@ -152,6 +151,7 @@ where
     target: Rc<Network<T>>,
     state: TransactionState<T, P>,
     params: P,
+    retries: u64, // amount of times relay should try to resync nonce
 }
 
 impl<T, P> SendTransaction<T, P>
@@ -166,15 +166,17 @@ where
     /// * `target` - Network where the withdrawal will be posted to the contract
     /// * `function` - Name of the function to call
     /// * `params` - Vec of Tokens corresponsind to the params for the contract function parameters
-    pub fn new(target: &Rc<Network<T>>, function: &str, params: &P) -> Self {
+    pub fn new(target: &Rc<Network<T>>, function: &str, params: &P, retries: u64) -> Self {
         let target = target.clone();
         let future = BuildTransaction::new(&target, function, params.clone());
         let state = TransactionState::Build(future);
+
         SendTransaction {
             function: function.to_string(),
             target,
             state,
             params: params.clone(),
+            retries: retries.clone(),
         }
     }
 }
@@ -212,20 +214,27 @@ where
                             if result == 1.into() {
                                 info!("{} successful: {:?}", function, receipt);
                             } else {
-                                warn!("{} failed: {:?}", function, receipt);
-                                info!("retrying....");
-                                let target = self.target.clone();
-                                let params = self.params.clone();
-                                &self
-                                    .target
-                                    .web3
-                                    .eth()
-                                    .transaction_count(self.target.account, None)
-                                    .and_then(move |nonce| {
-                                        target.nonce.store(nonce.as_u64() as usize, Ordering::SeqCst);
-                                        SendTransaction::new(&target, "anchor", &params);
-                                        Ok(())
-                                    });
+                                let message = format!("{} failed: {:?}", function, receipt);
+                                warn!("{}", message);
+
+                                // update nonce
+                                if self.retries > 0 && message.contains("too low") {
+                                    info!("Nonce desync detected, resyncing nonce and retrying");
+                                    let target = self.target.clone();
+                                    let params = self.params.clone();
+                                    let retries = self.retries.clone();
+
+                                    &self
+                                        .target
+                                        .web3
+                                        .eth()
+                                        .transaction_count(self.target.account, None)
+                                        .and_then(move |nonce| {
+                                            target.nonce.store(nonce.as_u64() as usize, Ordering::SeqCst);
+                                            SendTransaction::new(&target, "anchor", &params, retries - 1);
+                                            Ok(())
+                                        });
+                                }
                             }
                         }
                         None => {

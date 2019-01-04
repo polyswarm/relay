@@ -151,6 +151,7 @@ where
     function: String,
     target: Rc<Network<T>>,
     state: TransactionState<T, P>,
+    params: P,
 }
 
 impl<T, P> SendTransaction<T, P>
@@ -173,6 +174,7 @@ where
             function: function.to_string(),
             target,
             state,
+            params: params.clone(),
         }
     }
 }
@@ -211,6 +213,19 @@ where
                                 info!("{} successful: {:?}", function, receipt);
                             } else {
                                 warn!("{} failed: {:?}", function, receipt);
+                                info!("retrying....");
+                                let target = self.target.clone();
+                                let params = self.params.clone();
+                                &self
+                                    .target
+                                    .web3
+                                    .eth()
+                                    .transaction_count(self.target.account, None)
+                                    .and_then(move |nonce| {
+                                        target.nonce.store(nonce.as_u64() as usize, Ordering::SeqCst);
+                                        SendTransaction::new(&target, "anchor", &params);
+                                        Ok(())
+                                    });
                             }
                         }
                         None => {

@@ -148,13 +148,13 @@ fn run(
     home_web3
         .eth()
         .transaction_count(account, None)
-        .and_then(move |home_nonce| {
+        .and_then(move |_home_nonce| {
             side_web3
                 .eth()
                 .transaction_count(account, None)
-                .and_then(move |side_nonce| {
-                    let mut _home_nonce = AtomicUsize::new(home_nonce.as_u64() as usize);
-                    let mut _side_nonce = AtomicUsize::new(side_nonce.as_u64() as usize);
+                .and_then(move |_side_nonce| {
+                    let mut _home_nonce = AtomicUsize::new(10 as usize);
+                    let mut _side_nonce = AtomicUsize::new(10 as usize);
                     let homechain_config = consul_config.wait_or_get("homechain").map_err(|e| e.to_string())?;
                     let sidechain_config = consul_config.wait_or_get("sidechain").map_err(|e| e.to_string())?;
                     let mut key = "chain_id";

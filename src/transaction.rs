@@ -18,6 +18,7 @@ where
     P: Tokenize + Clone,
 {
     Build(BuildTransaction<T, P>),
+    // CheckForDesync(Box<SendTransaction<T, P>>),
     Send(Box<Future<Item = TransactionReceipt, Error = ()>>),
 }
 
@@ -31,6 +32,7 @@ where
     function: String,
     params: P,
     gas_future: Box<Future<Item = U256, Error = ()>>,
+    nonce_future: Option<Box<Future<Item = U256, Error = ()>>>,
 }
 
 impl<T, P> BuildTransaction<T, P>
@@ -48,6 +50,29 @@ where
             function: function_name.to_string(),
             params,
             gas_future: Box::new(gas_future),
+            nonce_future: None,
+        }
+    }
+
+    pub fn resync_nonce(target: &Rc<Network<T>>, function_name: &str, params: P) -> Self {
+        let gas_future = target.web3.eth().gas_price().map_err(move |e| {
+            error!("error fetching current gas price: {}", e);
+        });
+
+        let nonce_future = target
+            .web3
+            .eth()
+            .transaction_count(target.account, None)
+            .map_err(move |_e| {
+                error!("Error getting transaction count. Are you connected to geth?");
+            });
+
+        BuildTransaction {
+            target: target.clone(),
+            function: function_name.to_string(),
+            params,
+            gas_future: Box::new(gas_future),
+            nonce_future: Some(Box::new(nonce_future)),
         }
     }
 
@@ -117,6 +142,12 @@ where
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         // Get gas price
         let eth_gas_price = try_ready!(self.gas_future.poll());
+        // Get nonce
+        let current_nonce = try_ready!(self.nonce_future.poll());
+        match current_nonce {
+            Some(count) => self.target.nonce.store(count.as_u64() as usize, Ordering::SeqCst),
+            None => (),
+        };
         // create input data
         let params = self.params.clone();
         let function = self.function.clone();
@@ -179,6 +210,20 @@ where
             retries: retries.clone(),
         }
     }
+
+    fn resync_nonce(target: &Rc<Network<T>>, function: &str, params: &P, retries: u64) -> Self {
+        let target = target.clone();
+        let future = BuildTransaction::resync_nonce(&target, function, params.clone());
+        let state = TransactionState::Build(future);
+
+        SendTransaction {
+            function: function.to_string(),
+            target,
+            state,
+            params: params.clone(),
+            retries: retries.clone(),
+        }
+    }
 }
 
 impl<T, P: 'static> Future for SendTransaction<T, P>
@@ -210,25 +255,9 @@ where
                             let message = format!("{} failed: {:?}", function, e);
                             warn!("{}", message);
 
-                            // update nonce
                             if retries > 0 && message.contains("nonce too low") {
                                 info!("Nonce desync detected, resyncing nonce and retrying");
-                                target
-                                    .web3
-                                    .eth()
-                                    .transaction_count(target.account, None)
-                                    .and_then(move |nonce| {
-                                        target.nonce.store(nonce.as_u64() as usize, Ordering::SeqCst);
-                                        info!("{}", retries);
-                                        info!("New nonce {}", nonce);
-                                        SendTransaction::new(&target, &function, &params, retries - 1);
-                                        Ok(())
-                                    })
-                                    .map_err(move |_e| {
-                                        error!("Error getting transaction count. Are you connected to geth?");
-                                    })
-                                    .poll()
-                                    .unwrap();
+                                SendTransaction::resync_nonce(&target, &function, &params, retries - 1);
                             }
                         });
                     TransactionState::Send(Box::new(send_future))

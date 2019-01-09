@@ -130,7 +130,7 @@ where
         let gas = self.target.get_gas_limit();
         let gas_price = self.target.finalize_gas_price(eth_gas_price);
         let nonce = U256::from(self.target.nonce.load(Ordering::SeqCst));
-        self.target.nonce.fetch_add(1, Ordering::SeqCst);
+        // self.target.nonce.fetch_add(1, Ordering::SeqCst);
         match self.build_transaction(&input_data, gas, gas_price, 0.into(), nonce) {
             Ok(stream) => Ok(Async::Ready(stream)),
             Err(e) => {
@@ -181,7 +181,7 @@ where
     }
 }
 
-impl<T, P> Future for SendTransaction<T, P>
+impl<T, P: 'static> Future for SendTransaction<T, P>
 where
     T: DuplexTransport + 'static,
     P: Tokenize + Clone,
@@ -195,6 +195,9 @@ where
                 TransactionState::Build(ref mut future) => {
                     let function = function.clone();
                     let rlp_stream = try_ready!(future.poll());
+                    let retries = self.retries.clone();
+                    let target = self.target.clone();
+                    let params = self.params.clone();
                     let send_future = self
                         .target
                         .relay
@@ -204,9 +207,33 @@ where
                         )
                         .map_err(move |e| {
                             error!("error completing {} transaction: {}", function, e);
+                            let message = format!("{} failed: {:?}", function, e);
+                            warn!("{}", message);
+
+                            // update nonce
+                            if retries > 0 && message.contains("nonce too low") {
+                                info!("Nonce desync detected, resyncing nonce and retrying");
+                                target
+                                    .web3
+                                    .eth()
+                                    .transaction_count(target.account, None)
+                                    .and_then(move |nonce| {
+                                        target.nonce.store(nonce.as_u64() as usize, Ordering::SeqCst);
+                                        info!("{}", retries);
+                                        info!("New nonce {}", nonce);
+                                        SendTransaction::new(&target, &function, &params, retries - 1);
+                                        Ok(())
+                                    })
+                                    .map_err(move |_e| {
+                                        error!("Error getting transaction count. Are you connected to geth?");
+                                    })
+                                    .poll()
+                                    .unwrap();
+                            }
                         });
                     TransactionState::Send(Box::new(send_future))
                 }
+
                 TransactionState::Send(ref mut future) => {
                     let receipt = try_ready!(future.poll());
                     match receipt.status {
@@ -214,27 +241,7 @@ where
                             if result == 1.into() {
                                 info!("{} successful: {:?}", function, receipt);
                             } else {
-                                let message = format!("{} failed: {:?}", function, receipt);
-                                warn!("{}", message);
-
-                                // update nonce
-                                if self.retries > 0 && message.contains("too low") {
-                                    info!("Nonce desync detected, resyncing nonce and retrying");
-                                    let target = self.target.clone();
-                                    let params = self.params.clone();
-                                    let retries = self.retries.clone();
-
-                                    &self
-                                        .target
-                                        .web3
-                                        .eth()
-                                        .transaction_count(self.target.account, None)
-                                        .and_then(move |nonce| {
-                                            target.nonce.store(nonce.as_u64() as usize, Ordering::SeqCst);
-                                            SendTransaction::new(&target, "anchor", &params, retries - 1);
-                                            Ok(())
-                                        });
-                                }
+                                warn!("{} failed: {:?}", function, receipt);
                             }
                         }
                         None => {

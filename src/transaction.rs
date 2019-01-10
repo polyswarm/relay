@@ -20,7 +20,7 @@ where
     Build(BuildTransaction<T, P>),
     // CheckForDesync(Box<SendTransaction<T, P>>),
     Send(Box<Future<Item = TransactionReceipt, Error = web3::error::Error>>),
-    ResyncNonce(Box<Future<Item = U256 , Error = ()>>),
+    ResyncNonce(Box<Future<Item = U256, Error = ()>>),
 }
 
 /// This struct implements Future so that it is easy to build a transaction, with the proper gas price in a future
@@ -202,19 +202,16 @@ where
             let next = match self.state {
                 TransactionState::Build(ref mut future) => {
                     let rlp_stream = try_ready!(future.poll());
-                    let send_future = self
-                        .target
-                        .relay
-                        .send_raw_call_with_confirmations(
-                            rlp_stream.as_raw().into(),
-                            self.target.confirmations as usize,
-                        );
+                    let send_future = self.target.relay.send_raw_call_with_confirmations(
+                        rlp_stream.as_raw().into(),
+                        self.target.confirmations as usize,
+                    );
                     TransactionState::Send(Box::new(send_future))
                 }
                 TransactionState::Send(ref mut future) => {
                     let target = self.target.clone();
                     let function = self.function.clone();
-                    match future.poll(){
+                    match future.poll() {
                         Ok(Async::Ready(receipt)) => {
                             match receipt.status {
                                 Some(result) => {
@@ -235,17 +232,18 @@ where
                             let message = format!("{} failed: {:?}", function, e);
                             if self.retries > 0 && message.contains("nonce too low") {
                                 info!("Nonce desync detected, resyncing nonce and retrying");
-                                let nonce_future = target
-                                    .web3
-                                    .eth()
-                                    .transaction_count(target.account, None)
-                                    .map_err(move |_e| {
-                                        error!("Error getting transaction count. Are you connected to geth?");
-                                    });
-                                    TransactionState::ResyncNonce(Box::new(nonce_future))
+                                let nonce_future =
+                                    target
+                                        .web3
+                                        .eth()
+                                        .transaction_count(target.account, None)
+                                        .map_err(move |_e| {
+                                            error!("Error getting transaction count. Are you connected to geth?");
+                                        });
+                                TransactionState::ResyncNonce(Box::new(nonce_future))
                             } else {
                                 error!("error sending transaction: {:?}", e);
-                                return Err(())
+                                return Err(());
                             }
                         }
                     }

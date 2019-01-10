@@ -20,6 +20,7 @@ where
     Build(BuildTransaction<T, P>),
     // CheckForDesync(Box<SendTransaction<T, P>>),
     Send(Box<Future<Item = TransactionReceipt, Error = ()>>),
+    ResyncNonce(Box<Future<Item = U256 , Error = ()>>),
 }
 
 /// This struct implements Future so that it is easy to build a transaction, with the proper gas price in a future
@@ -31,8 +32,8 @@ where
     target: Rc<Network<T>>,
     function: String,
     params: P,
+    nonce: Option<U256>,
     gas_future: Box<Future<Item = U256, Error = ()>>,
-    nonce_future: Option<Box<Future<Item = U256, Error = ()>>>,
 }
 
 impl<T, P> BuildTransaction<T, P>
@@ -40,7 +41,7 @@ where
     T: DuplexTransport + 'static,
     P: Tokenize + Clone,
 {
-    pub fn new(target: &Rc<Network<T>>, function_name: &str, params: P) -> Self {
+    pub fn new(target: &Rc<Network<T>>, function_name: &str, params: P, nonce: Option<U256>) -> Self {
         let gas_future = target.web3.eth().gas_price().map_err(move |e| {
             error!("error fetching current gas price: {}", e);
         });
@@ -49,30 +50,8 @@ where
             target: target.clone(),
             function: function_name.to_string(),
             params,
+            nonce,
             gas_future: Box::new(gas_future),
-            nonce_future: None,
-        }
-    }
-
-    pub fn resync_nonce(target: &Rc<Network<T>>, function_name: &str, params: P) -> Self {
-        let gas_future = target.web3.eth().gas_price().map_err(move |e| {
-            error!("error fetching current gas price: {}", e);
-        });
-
-        let nonce_future = target
-            .web3
-            .eth()
-            .transaction_count(target.account, None)
-            .map_err(move |_e| {
-                error!("Error getting transaction count. Are you connected to geth?");
-            });
-
-        BuildTransaction {
-            target: target.clone(),
-            function: function_name.to_string(),
-            params,
-            gas_future: Box::new(gas_future),
-            nonce_future: Some(Box::new(nonce_future)),
         }
     }
 
@@ -142,12 +121,9 @@ where
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         // Get gas price
         let eth_gas_price = try_ready!(self.gas_future.poll());
-        // Get nonce
-        let current_nonce = try_ready!(self.nonce_future.poll());
-        match current_nonce {
-            Some(count) => self.target.nonce.store(count.as_u64() as usize, Ordering::SeqCst),
-            None => (),
-        };
+        if let Some(nonce) = self.nonce {
+            self.target.nonce.store(nonce.as_u64() as usize, Ordering::SeqCst);
+        }
         // create input data
         let params = self.params.clone();
         let function = self.function.clone();
@@ -161,7 +137,6 @@ where
         let gas = self.target.get_gas_limit();
         let gas_price = self.target.finalize_gas_price(eth_gas_price);
         let nonce = U256::from(self.target.nonce.load(Ordering::SeqCst));
-        // self.target.nonce.fetch_add(1, Ordering::SeqCst);
         match self.build_transaction(&input_data, gas, gas_price, 0.into(), nonce) {
             Ok(stream) => Ok(Async::Ready(stream)),
             Err(e) => {
@@ -199,7 +174,7 @@ where
     /// * `params` - Vec of Tokens corresponsind to the params for the contract function parameters
     pub fn new(target: &Rc<Network<T>>, function: &str, params: &P, retries: u64) -> Self {
         let target = target.clone();
-        let future = BuildTransaction::new(&target, function, params.clone());
+        let future = BuildTransaction::new(&target, function, params.clone(), None);
         let state = TransactionState::Build(future);
 
         SendTransaction {
@@ -207,21 +182,7 @@ where
             target,
             state,
             params: params.clone(),
-            retries: retries.clone(),
-        }
-    }
-
-    fn resync_nonce(target: &Rc<Network<T>>, function: &str, params: &P, retries: u64) -> Self {
-        let target = target.clone();
-        let future = BuildTransaction::resync_nonce(&target, function, params.clone());
-        let state = TransactionState::Build(future);
-
-        SendTransaction {
-            function: function.to_string(),
-            target,
-            state,
-            params: params.clone(),
-            retries: retries.clone(),
+            retries,
         }
     }
 }
@@ -235,14 +196,13 @@ where
     type Error = ();
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         let function = self.function.clone();
+        let target = self.target.clone();
+        let params = self.params.clone();
         loop {
             let next = match self.state {
                 TransactionState::Build(ref mut future) => {
-                    let function = function.clone();
                     let rlp_stream = try_ready!(future.poll());
-                    let retries = self.retries.clone();
-                    let target = self.target.clone();
-                    let params = self.params.clone();
+                    let function = self.function.clone();
                     let send_future = self
                         .target
                         .relay
@@ -252,35 +212,60 @@ where
                         )
                         .map_err(move |e| {
                             error!("error completing {} transaction: {}", function, e);
-                            let message = format!("{} failed: {:?}", function, e);
-                            warn!("{}", message);
-
-                            if retries > 0 && message.contains("nonce too low") {
-                                info!("Nonce desync detected, resyncing nonce and retrying");
-                                SendTransaction::resync_nonce(&target, &function, &params, retries - 1);
-                            }
                         });
                     TransactionState::Send(Box::new(send_future))
                 }
-
                 TransactionState::Send(ref mut future) => {
-                    let receipt = try_ready!(future.poll());
-                    match receipt.status {
-                        Some(result) => {
-                            if result == 1.into() {
-                                info!("{} successful: {:?}", function, receipt);
+                    let target = self.target.clone();
+                    let function = self.function.clone();
+                    match future.poll(){
+                        Ok(Async::Ready(receipt)) => {
+                            match receipt.status {
+                                Some(result) => {
+                                    if result == 1.into() {
+                                        info!("{} successful: {:?}", function, receipt);
+                                    } else {
+                                        warn!("{} failed: {:?}", function, receipt);
+                                    }
+                                }
+                                None => {
+                                    error!("{} receipt has no status: {:?}", function, receipt);
+                                }
+                            }
+                            return Ok(Async::Ready(()));
+                        }
+                        Ok(Async::NotReady) => return Ok(Async::NotReady),
+                        Err(e) => {
+                            let message = format!("{} failed: {:?}", function, e);
+                            if self.retries > 0 && message.contains("nonce too low") {
+                                info!("Nonce desync detected, resyncing nonce and retrying");
+                                let nonce_future = target
+                                    .web3
+                                    .eth()
+                                    .transaction_count(target.account, None)
+                                    .map_err(move |_e| {
+                                        error!("Error getting transaction count. Are you connected to geth?");
+                                    });
+                                    TransactionState::ResyncNonce(Box::new(nonce_future))
                             } else {
-                                warn!("{} failed: {:?}", function, receipt);
+                                error!("error resyncing nonce");
+                                return Err(())
                             }
                         }
-                        None => {
-                            error!("{} receipt has no status: {:?}", function, receipt);
-                        }
                     }
-                    return Ok(Async::Ready(()));
+                }
+                TransactionState::ResyncNonce(ref mut future) => {
+                    let nonce = try_ready!(future.poll());
+                    let function = function.clone();
+                    let params = params.clone();
+                    let future = BuildTransaction::new(&target, &function, params, Some(nonce));
+                    TransactionState::Build(future)
                 }
             };
             self.state = next;
+            if let TransactionState::Build(_) = self.state {
+                self.retries -= 1;
+            }
         }
     }
 }

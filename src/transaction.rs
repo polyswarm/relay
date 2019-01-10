@@ -19,7 +19,7 @@ where
 {
     Build(BuildTransaction<T, P>),
     // CheckForDesync(Box<SendTransaction<T, P>>),
-    Send(Box<Future<Item = TransactionReceipt, Error = ()>>),
+    Send(Box<Future<Item = TransactionReceipt, Error = web3::error::Error>>),
     ResyncNonce(Box<Future<Item = U256 , Error = ()>>),
 }
 
@@ -202,17 +202,13 @@ where
             let next = match self.state {
                 TransactionState::Build(ref mut future) => {
                     let rlp_stream = try_ready!(future.poll());
-                    let function = self.function.clone();
                     let send_future = self
                         .target
                         .relay
                         .send_raw_call_with_confirmations(
                             rlp_stream.as_raw().into(),
                             self.target.confirmations as usize,
-                        )
-                        .map_err(move |e| {
-                            error!("error completing {} transaction: {}", function, e);
-                        });
+                        );
                     TransactionState::Send(Box::new(send_future))
                 }
                 TransactionState::Send(ref mut future) => {
@@ -248,7 +244,7 @@ where
                                     });
                                     TransactionState::ResyncNonce(Box::new(nonce_future))
                             } else {
-                                error!("error resyncing nonce");
+                                error!("error sending transaction: {:?}", e);
                                 return Err(())
                             }
                         }

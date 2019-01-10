@@ -18,7 +18,6 @@ where
     P: Tokenize + Clone,
 {
     Build(BuildTransaction<T, P>),
-    // CheckForDesync(Box<SendTransaction<T, P>>),
     Send(Box<Future<Item = TransactionReceipt, Error = web3::error::Error>>),
     ResyncNonce(Box<Future<Item = U256, Error = ()>>),
 }
@@ -137,6 +136,7 @@ where
         let gas = self.target.get_gas_limit();
         let gas_price = self.target.finalize_gas_price(eth_gas_price);
         let nonce = U256::from(self.target.nonce.load(Ordering::SeqCst));
+        self.target.nonce.fetch_add(1, Ordering::SeqCst);
         match self.build_transaction(&input_data, gas, gas_price, 0.into(), nonce) {
             Ok(stream) => Ok(Async::Ready(stream)),
             Err(e) => {

@@ -1,6 +1,7 @@
 use ethabi::Token;
 use std::fmt;
 use std::rc::Rc;
+
 use std::time;
 use tokio_core::reactor;
 use web3::confirm::wait_for_transaction_confirmation;
@@ -46,7 +47,7 @@ impl Transfer {
         target: &Rc<Network<T>>,
     ) -> SendTransaction<T, Self> {
         info!("approving withdrawal {}", self);
-        SendTransaction::new(target, "approveWithdrawal", self)
+        SendTransaction::new(target, "approveWithdrawal", self, target.retries)
     }
 }
 

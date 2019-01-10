@@ -95,6 +95,7 @@ pub struct Network<T: DuplexTransport> {
     pub keydir: String,
     pub password: String,
     pub nonce: AtomicUsize,
+    pub retries: u64,
 }
 
 impl<T: DuplexTransport + 'static> Network<T> {
@@ -125,6 +126,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
         keydir: &str,
         password: &str,
         nonce: AtomicUsize,
+        retries: u64,
     ) -> Result<Self, OperationError> {
         let web3 = Web3::new(transport);
         let account = clean_0x(account)
@@ -159,6 +161,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
             keydir: keydir.to_string(),
             password: password.to_string(),
             nonce,
+            retries,
         })
     }
 
@@ -184,6 +187,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
         keydir: &str,
         password: &str,
         nonce: AtomicUsize,
+        retries: u64,
     ) -> Result<Self, OperationError> {
         Self::new(
             NetworkType::Home,
@@ -201,6 +205,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
             keydir,
             password,
             nonce,
+            retries,
         )
     }
 
@@ -228,6 +233,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
         keydir: &str,
         password: &str,
         nonce: AtomicUsize,
+        retries: u64,
     ) -> Result<Self, OperationError> {
         Self::new(
             NetworkType::Side,
@@ -245,6 +251,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
             keydir,
             password,
             nonce,
+            retries,
         )
     }
 

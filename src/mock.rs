@@ -179,6 +179,7 @@ mod tests {
             "../",
             "password",
             tx_count,
+            0,
         )
         .unwrap();
     }

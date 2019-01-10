@@ -49,6 +49,8 @@ pub struct Relay {
     pub community: String,
     /// keyfile used to confirm blocks
     pub keydir: String,
+    /// The amount of attempts to resync the account nonce when `nonce too low` errors occur
+    pub retries: u64,
 }
 
 /// Per-network settings
@@ -79,6 +81,7 @@ impl Settings {
         c.set_default("relay.community", "")?;
         c.set_default("relay.homechain.interval", 30)?;
         c.set_default("relay.sidechain.interval", 30)?;
+        c.set_default("relay.retries", 10)?;
 
         // XXX: Get default from the CONSUL_TOKEN environment variable, look into naming such that
         // below Environment override does this for us

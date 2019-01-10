@@ -1,3 +1,5 @@
+use super::errors::OperationError;
+use super::relay::Network;
 use ethcore_transaction::{Action, Transaction as RawTransactionRequest};
 use ethstore::accounts_dir::RootDiskDirectory;
 use ethstore::{EthStore, SimpleSecretStore, StoreAccountRef};
@@ -10,16 +12,14 @@ use web3::futures::try_ready;
 use web3::types::{TransactionReceipt, U256};
 use web3::DuplexTransport;
 
-use super::errors::OperationError;
-use super::relay::Network;
-
 pub enum TransactionState<T, P>
 where
     T: DuplexTransport + 'static,
     P: Tokenize + Clone,
 {
     Build(BuildTransaction<T, P>),
-    Send(Box<Future<Item = TransactionReceipt, Error = ()>>),
+    Send(Box<Future<Item = TransactionReceipt, Error = web3::error::Error>>),
+    ResyncNonce(Box<Future<Item = U256, Error = ()>>),
 }
 
 /// This struct implements Future so that it is easy to build a transaction, with the proper gas price in a future
@@ -31,6 +31,7 @@ where
     target: Rc<Network<T>>,
     function: String,
     params: P,
+    nonce: Option<U256>,
     gas_future: Box<Future<Item = U256, Error = ()>>,
 }
 
@@ -39,7 +40,7 @@ where
     T: DuplexTransport + 'static,
     P: Tokenize + Clone,
 {
-    pub fn new(target: &Rc<Network<T>>, function_name: &str, params: P) -> Self {
+    pub fn new(target: &Rc<Network<T>>, function_name: &str, params: P, nonce: Option<U256>) -> Self {
         let gas_future = target.web3.eth().gas_price().map_err(move |e| {
             error!("error fetching current gas price: {}", e);
         });
@@ -48,6 +49,7 @@ where
             target: target.clone(),
             function: function_name.to_string(),
             params,
+            nonce,
             gas_future: Box::new(gas_future),
         }
     }
@@ -118,6 +120,9 @@ where
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         // Get gas price
         let eth_gas_price = try_ready!(self.gas_future.poll());
+        if let Some(nonce) = self.nonce {
+            self.target.nonce.store(nonce.as_u64() as usize, Ordering::SeqCst);
+        }
         // create input data
         let params = self.params.clone();
         let function = self.function.clone();
@@ -151,6 +156,8 @@ where
     function: String,
     target: Rc<Network<T>>,
     state: TransactionState<T, P>,
+    params: P,
+    retries: u64, // amount of times relay should try to resync nonce
 }
 
 impl<T, P> SendTransaction<T, P>
@@ -165,19 +172,22 @@ where
     /// * `target` - Network where the withdrawal will be posted to the contract
     /// * `function` - Name of the function to call
     /// * `params` - Vec of Tokens corresponsind to the params for the contract function parameters
-    pub fn new(target: &Rc<Network<T>>, function: &str, params: &P) -> Self {
+    pub fn new(target: &Rc<Network<T>>, function: &str, params: &P, retries: u64) -> Self {
         let target = target.clone();
-        let future = BuildTransaction::new(&target, function, params.clone());
+        let future = BuildTransaction::new(&target, function, params.clone(), None);
         let state = TransactionState::Build(future);
+
         SendTransaction {
             function: function.to_string(),
             target,
             state,
+            params: params.clone(),
+            retries,
         }
     }
 }
 
-impl<T, P> Future for SendTransaction<T, P>
+impl<T, P: 'static> Future for SendTransaction<T, P>
 where
     T: DuplexTransport + 'static,
     P: Tokenize + Clone,
@@ -186,41 +196,70 @@ where
     type Error = ();
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         let function = self.function.clone();
+        let target = self.target.clone();
+        let params = self.params.clone();
         loop {
             let next = match self.state {
                 TransactionState::Build(ref mut future) => {
-                    let function = function.clone();
                     let rlp_stream = try_ready!(future.poll());
-                    let send_future = self
-                        .target
-                        .relay
-                        .send_raw_call_with_confirmations(
-                            rlp_stream.as_raw().into(),
-                            self.target.confirmations as usize,
-                        )
-                        .map_err(move |e| {
-                            error!("error completing {} transaction: {}", function, e);
-                        });
+                    let send_future = self.target.relay.send_raw_call_with_confirmations(
+                        rlp_stream.as_raw().into(),
+                        self.target.confirmations as usize,
+                    );
                     TransactionState::Send(Box::new(send_future))
                 }
                 TransactionState::Send(ref mut future) => {
-                    let receipt = try_ready!(future.poll());
-                    match receipt.status {
-                        Some(result) => {
-                            if result == 1.into() {
-                                info!("{} successful: {:?}", function, receipt);
+                    let target = self.target.clone();
+                    let function = self.function.clone();
+                    match future.poll() {
+                        Ok(Async::Ready(receipt)) => {
+                            match receipt.status {
+                                Some(result) => {
+                                    if result == 1.into() {
+                                        info!("{} successful: {:?}", function, receipt);
+                                    } else {
+                                        warn!("{} failed: {:?}", function, receipt);
+                                    }
+                                }
+                                None => {
+                                    error!("{} receipt has no status: {:?}", function, receipt);
+                                }
+                            }
+                            return Ok(Async::Ready(()));
+                        }
+                        Ok(Async::NotReady) => return Ok(Async::NotReady),
+                        Err(e) => {
+                            let message = format!("{} failed: {:?}", function, e);
+                            if self.retries > 0 && message.contains("nonce too low") {
+                                info!("Nonce desync detected, resyncing nonce and retrying");
+                                let nonce_future =
+                                    target
+                                        .web3
+                                        .eth()
+                                        .transaction_count(target.account, None)
+                                        .map_err(move |_e| {
+                                            error!("Error getting transaction count. Are you connected to geth?");
+                                        });
+                                TransactionState::ResyncNonce(Box::new(nonce_future))
                             } else {
-                                warn!("{} failed: {:?}", function, receipt);
+                                error!("error sending transaction: {:?}", e);
+                                return Err(());
                             }
                         }
-                        None => {
-                            error!("{} receipt has no status: {:?}", function, receipt);
-                        }
                     }
-                    return Ok(Async::Ready(()));
+                }
+                TransactionState::ResyncNonce(ref mut future) => {
+                    let nonce = try_ready!(future.poll());
+                    let function = function.clone();
+                    let params = params.clone();
+                    let future = BuildTransaction::new(&target, &function, params, Some(nonce));
+                    TransactionState::Build(future)
                 }
             };
             self.state = next;
+            if let TransactionState::Build(_) = self.state {
+                self.retries -= 1;
+            }
         }
     }
 }

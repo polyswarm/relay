@@ -26,7 +26,7 @@ impl Anchor {
     /// * `target` - Network to post the anchor
     fn process<T: DuplexTransport + 'static>(&self, target: &Rc<Network<T>>) -> SendTransaction<T, Self> {
         info!("anchoring block {}", self);
-        SendTransaction::new(target, "anchor", self)
+        SendTransaction::new(target, "anchor", self, target.retries)
     }
 }
 

@@ -209,6 +209,7 @@ fn run(
                             &settings.relay.keydir,
                             &settings.relay.password,
                             _home_nonce,
+                            settings.relay.retries,
                         )
                         .map_err(|e| format!("error initializing homechain {}", e))?,
                         Network::sidechain(
@@ -226,6 +227,7 @@ fn run(
                             &settings.relay.keydir,
                             &settings.relay.password,
                             _side_nonce,
+                            settings.relay.retries,
                         )
                         .map_err(|e| format!("error initializing sidechain {}", e))?,
                     );

@@ -2,7 +2,8 @@ use std::rc::Rc;
 use tokio_core::reactor;
 use web3::futures::prelude::*;
 use web3::futures::sync::mpsc;
-use web3::types::{Address, BlockNumber, FilterBuilder, U256};
+use web3::futures::try_ready;
+use web3::types::{Address, BlockNumber, FilterBuilder, TransactionReceipt, H256, U256};
 use web3::DuplexTransport;
 
 use super::contracts::TRANSFER_EVENT_SIGNATURE;
@@ -11,6 +12,115 @@ use super::transfer::Transfer;
 
 pub const LOOKBACK_RANGE: u64 = 1_000;
 pub const LOOKBACK_LEEWAY: u64 = 5;
+
+pub enum FindTransferState {
+    PullTransfers(TransactionReceipt, Box<Future<Item = U256, Error = ()>>),
+    FetchTransaction(Box<Future<Item = Option<TransactionReceipt>, Error = ()>>),
+}
+
+/// Future to find a vec of transfers at a specific transaction
+pub struct FindTransferInTransaction<T: DuplexTransport + 'static> {
+    hash: H256,
+    source: Rc<Network<T>>,
+    state: FindTransferState,
+}
+
+impl<T: DuplexTransport + 'static> FindTransferInTransaction<T> {
+    fn new(source: &Rc<Network<T>>, hash: &H256) -> Self {
+        let web3 = source.web3.clone();
+        let future = web3.clone().eth().transaction_receipt(*hash).map_err(|e| {
+            error!("error getting transaction receipt: {:?}", e);
+        });
+        let state = FindTransferState::FetchTransaction(Box::new(future));
+        FindTransferInTransaction {
+            hash: *hash,
+            source: source.clone(),
+            state,
+        }
+    }
+}
+
+impl<T: DuplexTransport + 'static> Future for FindTransferInTransaction<T> {
+    type Item = Vec<Transfer>;
+    type Error = ();
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        loop {
+            let source = self.source.clone();
+            let hash = self.hash;
+            let next = match self.state {
+                FindTransferState::PullTransfers(ref receipt, ref mut future) => {
+                    let block = try_ready!(future.poll());
+
+                    if let None = receipt.block_hash {
+                        error!("receipt did not have block hash");
+                        return Err(());
+                    }
+                    let block_hash = receipt.block_hash.unwrap();
+
+                    let receipt = receipt.clone();
+                    return receipt.block_number.map_or_else(
+                        || {
+                            error!("receipt did not have block number");
+                            return Err(());
+                        },
+                        |receipt_block| {
+                            // confirmations is u64, check agains lower 64 of 256
+                            if let Some(confirmed) = block.checked_rem(receipt_block).map(|u| u.as_u64()) {
+                                if confirmed >= source.confirmations {
+                                    let logs = receipt.logs;
+                                    let mut transfers = Vec::new();
+                                    for log in logs {
+                                        if log.topics[0] == TRANSFER_EVENT_SIGNATURE.into()
+                                            && log.topics[3] == source.relay.address().into()
+                                        {
+                                            let destination: Address = log.topics[1].into();
+                                            let amount: U256 = log.data.0[..32].into();
+                                            if destination == Address::zero() {
+                                                info!("found mint. Skipping");
+                                                continue;
+                                            }
+                                            let transfer = Transfer {
+                                                destination,
+                                                amount,
+                                                tx_hash: hash,
+                                                block_hash,
+                                                block_number: receipt_block.clone(),
+                                            };
+                                            transfers.push(transfer);
+                                        }
+                                    }
+                                    if transfers.len() > 0 {
+                                        return Ok(Async::Ready(transfers));
+                                    }
+                                    error!("error finding relay transactions");
+                                    return Err(());
+                                }
+                            }
+                            error!("transaction did not occur more than confirmation blocks ago");
+                            return Err(());
+                        },
+                    );
+                }
+                FindTransferState::FetchTransaction(ref mut future) => {
+                    let receipt = try_ready!(future.poll());
+                    match receipt {
+                        Some(r) => {
+                            let future = source.web3.clone().eth().block_number().map_err(|e| {
+                                error!("error getting current block: {:?}", e);
+                            });
+                            FindTransferState::PullTransfers(r, Box::new(future))
+                        }
+                        None => {
+                            error!("Could not find requested transaction hash");
+                            return Err(());
+                        }
+                    }
+                }
+            };
+            self.state = next;
+        }
+    }
+}
 
 /// Stream of Transfer that were missed, either from downtime, or failed approvals
 pub struct FindMissedTransfers(mpsc::UnboundedReceiver<Transfer>);

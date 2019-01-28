@@ -14,7 +14,7 @@ pub const LOOKBACK_RANGE: u64 = 1_000;
 pub const LOOKBACK_LEEWAY: u64 = 5;
 
 pub enum FindTransferState {
-    ExtractTransfers(TransactionReceipt, Box<Future<Item = U256, Error = ()>>),
+    ExtractTransfers(Box<Future<Item = Vec<Transfer>, Error = ()>>),
     FetchReceipt(Box<Future<Item = Option<TransactionReceipt>, Error = ()>>),
 }
 
@@ -54,73 +54,78 @@ impl<T: DuplexTransport + 'static> Future for FindTransferInTransaction<T> {
             let source = self.source.clone();
             let hash = self.hash;
             let next = match self.state {
-                FindTransferState::ExtractTransfers(ref receipt, ref mut future) => {
-                    let block = try_ready!(future.poll());
-
-                    if let None = receipt.block_hash {
-                        error!("receipt did not have block hash");
+                FindTransferState::ExtractTransfers(ref mut future) => {
+                    let transfers = try_ready!(future.poll());
+                    if transfers.is_empty() {
+                        warn!("no relay transactions found at {}", self.hash);
                         return Err(());
+                    } else {
+                        return Ok(Async::Ready(transfers));
                     }
-                    let block_hash = receipt.block_hash.unwrap();
-
-                    let receipt = receipt.clone();
-                    return receipt.block_number.map_or_else(
-                        || {
-                            error!("receipt did not have block number");
-                            return Err(());
-                        },
-                        |receipt_block| {
-                            // confirmations is u64, check against lower 64 of 256
-                            if let Some(confirmed) = block.checked_rem(receipt_block).map(|u| u.as_u64()) {
-                                if confirmed >= source.confirmations {
-                                    let logs = receipt.logs;
-                                    let mut transfers = Vec::new();
-                                    for log in logs {
-                                        if log.topics[0] == TRANSFER_EVENT_SIGNATURE.into()
-                                            && log.topics[3] == source.relay.address().into()
-                                        {
-                                            let destination: Address = log.topics[1].into();
-                                            let amount: U256 = log.data.0[..32].into();
-                                            if destination == Address::zero() {
-                                                info!("found mint. Skipping");
-                                                continue;
-                                            }
-                                            let transfer = Transfer {
-                                                destination,
-                                                amount,
-                                                tx_hash: hash,
-                                                block_hash,
-                                                block_number: receipt_block.clone(),
-                                            };
-                                            transfers.push(transfer);
-                                        }
-                                    }
-                                    if transfers.len() > 0 {
-                                        return Ok(Async::Ready(transfers));
-                                    }
-                                    error!("error finding relay transactions");
-                                    return Err(());
-                                }
-                            }
-                            error!("transaction did not occur more than confirmation blocks ago");
-                            return Err(());
-                        },
-                    );
                 }
                 FindTransferState::FetchReceipt(ref mut future) => {
                     let receipt = try_ready!(future.poll());
                     match receipt {
                         Some(r) => {
-                            let future = source.web3.clone().eth().block_number().map_err(|e| {
-                                error!("error getting current block: {:?}", e);
-                            });
-                            FindTransferState::ExtractTransfers(r, Box::new(future))
+                            if r.block_hash.is_none() {
+                                error!("receipt did not have block hash");
+                                return Err(());
+                            }
+                            let block_hash = r.block_hash.unwrap();
+                            r.block_number.map_or_else(
+                                || {
+                                    error!("receipt did not have block number");
+                                    Err(())
+                                },
+                                |receipt_block| {
+                                    let future = source
+                                        .web3
+                                        .clone()
+                                        .eth()
+                                        .block_number()
+                                        .and_then(move |block| {
+                                            let mut transfers = Vec::new();
+                                            if let Some(confirmed) =
+                                                block.checked_rem(receipt_block).map(|u| u.as_u64())
+                                            {
+                                                if confirmed > source.confirmations {
+                                                    let logs = r.logs;
+                                                    for log in logs {
+                                                        if log.topics[0] == TRANSFER_EVENT_SIGNATURE.into()
+                                                            && log.topics[3] == source.relay.address().into()
+                                                        {
+                                                            let destination: Address = log.topics[1].into();
+                                                            let amount: U256 = log.data.0[..32].into();
+                                                            if destination == Address::zero() {
+                                                                info!("found mint. Skipping");
+                                                                continue;
+                                                            }
+                                                            let transfer = Transfer {
+                                                                destination,
+                                                                amount,
+                                                                tx_hash: hash,
+                                                                block_hash,
+                                                                block_number: receipt_block,
+                                                            };
+                                                            transfers.push(transfer);
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            Ok(transfers)
+                                        })
+                                        .map_err(|e| {
+                                            error!("error getting current block: {:?}", e);
+                                        });
+                                    Ok(FindTransferState::ExtractTransfers(Box::new(future)))
+                                },
+                            )
                         }
                         None => {
                             error!("Could not find requested transaction hash");
                             return Err(());
                         }
-                    }
+                    }?
                 }
             };
             self.state = next;
@@ -355,7 +360,7 @@ impl<T: DuplexTransport + 'static> ValidateAndApproveTransfer<T> {
         ValidateAndApproveTransfer {
             target: target.clone(),
             handle: handle.clone(),
-            transfer: transfer.clone(),
+            transfer: *transfer,
             future: Box::new(future),
         }
     }
@@ -369,9 +374,8 @@ impl<T: DuplexTransport + 'static> Future for ValidateAndApproveTransfer<T> {
         if needs_approval {
             let target = self.target.clone();
             let handle = self.handle.clone();
-            let transfer = self.transfer.clone();
-            info!("approving missed transfer: {:?}", transfer);
-            handle.spawn(transfer.approve_withdrawal(&target));
+            info!("approving missed transfer: {:?}", self.transfer);
+            handle.spawn(self.transfer.approve_withdrawal(&target));
         }
         Ok(Async::Ready(()))
     }

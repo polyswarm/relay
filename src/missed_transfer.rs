@@ -14,8 +14,8 @@ pub const LOOKBACK_RANGE: u64 = 1_000;
 pub const LOOKBACK_LEEWAY: u64 = 5;
 
 pub enum FindTransferState {
-    PullTransfers(TransactionReceipt, Box<Future<Item = U256, Error = ()>>),
-    FetchTransaction(Box<Future<Item = Option<TransactionReceipt>, Error = ()>>),
+    ExtractTransfers(TransactionReceipt, Box<Future<Item = U256, Error = ()>>),
+    FetchReceipt(Box<Future<Item = Option<TransactionReceipt>, Error = ()>>),
 }
 
 /// Future to find a vec of transfers at a specific transaction
@@ -26,12 +26,18 @@ pub struct FindTransferInTransaction<T: DuplexTransport + 'static> {
 }
 
 impl<T: DuplexTransport + 'static> FindTransferInTransaction<T> {
+    /// Returns a newly created FindTransferInTransaction Future
+    ///
+    /// # Arguments
+    ///
+    /// * `source` - Network where the transaction took place
+    /// * `hash` - Transaction hash to check
     fn new(source: &Rc<Network<T>>, hash: &H256) -> Self {
         let web3 = source.web3.clone();
         let future = web3.clone().eth().transaction_receipt(*hash).map_err(|e| {
             error!("error getting transaction receipt: {:?}", e);
         });
-        let state = FindTransferState::FetchTransaction(Box::new(future));
+        let state = FindTransferState::FetchReceipt(Box::new(future));
         FindTransferInTransaction {
             hash: *hash,
             source: source.clone(),
@@ -48,7 +54,7 @@ impl<T: DuplexTransport + 'static> Future for FindTransferInTransaction<T> {
             let source = self.source.clone();
             let hash = self.hash;
             let next = match self.state {
-                FindTransferState::PullTransfers(ref receipt, ref mut future) => {
+                FindTransferState::ExtractTransfers(ref receipt, ref mut future) => {
                     let block = try_ready!(future.poll());
 
                     if let None = receipt.block_hash {
@@ -64,7 +70,7 @@ impl<T: DuplexTransport + 'static> Future for FindTransferInTransaction<T> {
                             return Err(());
                         },
                         |receipt_block| {
-                            // confirmations is u64, check agains lower 64 of 256
+                            // confirmations is u64, check against lower 64 of 256
                             if let Some(confirmed) = block.checked_rem(receipt_block).map(|u| u.as_u64()) {
                                 if confirmed >= source.confirmations {
                                     let logs = receipt.logs;
@@ -101,14 +107,14 @@ impl<T: DuplexTransport + 'static> Future for FindTransferInTransaction<T> {
                         },
                     );
                 }
-                FindTransferState::FetchTransaction(ref mut future) => {
+                FindTransferState::FetchReceipt(ref mut future) => {
                     let receipt = try_ready!(future.poll());
                     match receipt {
                         Some(r) => {
                             let future = source.web3.clone().eth().block_number().map_err(|e| {
                                 error!("error getting current block: {:?}", e);
                             });
-                            FindTransferState::PullTransfers(r, Box::new(future))
+                            FindTransferState::ExtractTransfers(r, Box::new(future))
                         }
                         None => {
                             error!("Could not find requested transaction hash");
@@ -311,28 +317,7 @@ impl HandleMissedTransfers {
         let future = FindMissedTransfers::new(source, &handle).for_each(move |transfer| {
             let target = target.clone();
             let handle = handle.clone();
-            transfer
-                .check_withdrawal(&target)
-                .and_then(move |needs_approval| {
-                    if !needs_approval {
-                        info!("skipping transfer that does not need approval: {:?}", &transfer.tx_hash);
-                        Ok(None)
-                    } else {
-                        Ok(Some(transfer))
-                    }
-                })
-                .and_then(move |transfer_option| {
-                    let target = target.clone();
-                    if let Some(transfer) = transfer_option {
-                        info!("approving missed transfer: {:?}", transfer);
-                        handle.spawn(transfer.approve_withdrawal(&target));
-                    }
-                    Ok(())
-                })
-                .or_else(move |e| {
-                    error!("error searching for and approving missed transfers: {:?}", e);
-                    Ok(())
-                })
+            ValidateAndApproveTransfer::new(&target, &handle, &transfer)
         });
         HandleMissedTransfers(Box::new(future))
     }
@@ -343,5 +328,51 @@ impl Future for HandleMissedTransfers {
     type Error = ();
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         self.0.poll()
+    }
+}
+
+/// Future to check a transfer against the contract and approve is necessary
+pub struct ValidateAndApproveTransfer<T: DuplexTransport + 'static> {
+    target: Rc<Network<T>>,
+    handle: reactor::Handle,
+    transfer: Transfer,
+    future: Box<Future<Item = bool, Error = ()>>,
+}
+
+impl<T: DuplexTransport + 'static> ValidateAndApproveTransfer<T> {
+    /// Returns a newly created HandleMissedTransfers Future
+    ///
+    /// # Arguments
+    ///
+    /// * `target` - Network where the transfer will be approved for a withdrawal
+    /// * `handle` - Handle to spawn new futures
+    /// * `transfer` - Transfer event to check/approve
+    pub fn new(target: &Rc<Network<T>>, handle: &reactor::Handle, transfer: &Transfer) -> Self {
+        let future = transfer.check_withdrawal(&target).map_err(|e| {
+            error!("error checking withdrawal for approval: {:?}", e);
+        });
+
+        ValidateAndApproveTransfer {
+            target: target.clone(),
+            handle: handle.clone(),
+            transfer: transfer.clone(),
+            future: Box::new(future),
+        }
+    }
+}
+
+impl<T: DuplexTransport + 'static> Future for ValidateAndApproveTransfer<T> {
+    type Item = ();
+    type Error = ();
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        let needs_approval = try_ready!(self.future.poll());
+        if needs_approval {
+            let target = self.target.clone();
+            let handle = self.handle.clone();
+            let transfer = self.transfer.clone();
+            info!("approving missed transfer: {:?}", transfer);
+            handle.spawn(transfer.approve_withdrawal(&target));
+        }
+        Ok(Async::Ready(()))
     }
 }

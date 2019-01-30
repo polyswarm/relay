@@ -2,6 +2,7 @@
 /// Relay defines multiple failure types to have an easy way to delineate
 /// between errors we may want to emit during verbose logging or to allow the
 /// user to filter errors on which "unit" an error arises from.
+use actix_web::{http, HttpResponse, ResponseError};
 
 /// OperationError defines errors resulting from interaction from, between or
 /// with the chains.
@@ -24,6 +25,28 @@ pub enum OperationError {
 
     #[fail(display = "Unable to build transaction: {}", _0)]
     CouldNotBuildTransaction(String),
+}
+
+#[derive(Fail, Debug)]
+pub enum EndpointError {
+    #[fail(display = "invalid chain: {}.", _0)]
+    BadChain(String),
+
+    #[fail(display = "invalid transaction hash: {}.", _0)]
+    BadTransactionHash(String),
+
+    #[fail(display = "receiver closed.")]
+    UnableToSend,
+}
+
+impl ResponseError for EndpointError {
+    fn error_response(&self) -> HttpResponse {
+        match *self {
+            EndpointError::BadChain(_) => HttpResponse::new(http::StatusCode::BAD_REQUEST),
+            EndpointError::BadTransactionHash(_) => HttpResponse::new(http::StatusCode::BAD_REQUEST),
+            EndpointError::UnableToSend => HttpResponse::new(http::StatusCode::INTERNAL_SERVER_ERROR),
+        }
+    }
 }
 
 /// ConfigError defines errors arising from an application misconfiguration,

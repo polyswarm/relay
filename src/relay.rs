@@ -3,13 +3,14 @@ use std::sync::atomic::AtomicUsize;
 use tokio_core::reactor;
 
 use web3::contract::Contract;
+use web3::futures::sync::mpsc;
 use web3::futures::Future;
 use web3::types::{Address, U256};
 use web3::{DuplexTransport, Web3};
 
 use super::anchor::HandleAnchors;
 use super::errors::OperationError;
-use super::missed_transfer::HandleMissedTransfers;
+use super::missed_transfer::{HandleMissedTransfers, HandleQueries, HashQuery};
 use super::transfer::HandleTransfers;
 use failure::{Error, SyncFailure};
 
@@ -26,7 +27,6 @@ fn clean_0x(s: &str) -> &str {
 }
 
 /// Token relay between two Ethereum networks
-#[derive(Clone)]
 pub struct Relay<T: DuplexTransport> {
     homechain: Rc<Network<T>>,
     sidechain: Rc<Network<T>>,
@@ -46,6 +46,10 @@ impl<T: DuplexTransport + 'static> Relay<T> {
         }
     }
 
+    fn handle_queries(&self, rx: mpsc::UnboundedReceiver<HashQuery>, handle: &reactor::Handle) -> HandleQueries {
+        HandleQueries::new(&self.homechain, &self.sidechain, rx, handle)
+    }
+
     pub fn unlock(&self, password: &str) -> impl Future<Item = (), Error = Error> {
         self.homechain
             .unlock(password)
@@ -59,13 +63,18 @@ impl<T: DuplexTransport + 'static> Relay<T> {
     /// # Arguments
     ///
     /// * `handle` - Handle to the event loop to spawn additional futures
-    pub fn run(&self, handle: &reactor::Handle) -> impl Future<Item = (), Error = ()> {
+    pub fn run(
+        &self,
+        rx: mpsc::UnboundedReceiver<HashQuery>,
+        handle: &reactor::Handle,
+    ) -> impl Future<Item = (), Error = ()> {
         self.sidechain
             .handle_anchors(&self.homechain, handle)
             .join(self.homechain.handle_transfers(&self.sidechain, handle))
             .join(self.sidechain.handle_transfers(&self.homechain, handle))
             .join(self.homechain.handle_missed_transfers(&self.sidechain, handle))
             .join(self.sidechain.handle_missed_transfers(&self.homechain, handle))
+            .join(self.handle_queries(rx, handle))
             .and_then(|_| Ok(()))
     }
 }

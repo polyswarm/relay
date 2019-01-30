@@ -1,5 +1,6 @@
 use std::rc::Rc;
 use tokio_core::reactor;
+use web3::futures::future;
 use web3::futures::prelude::*;
 use web3::futures::sync::mpsc;
 use web3::futures::try_ready;
@@ -12,6 +13,81 @@ use super::transfer::Transfer;
 
 pub const LOOKBACK_RANGE: u64 = 1_000;
 pub const LOOKBACK_LEEWAY: u64 = 5;
+
+#[derive(Clone)]
+pub enum QueryChain {
+    Home,
+    Side,
+}
+
+#[derive(Clone)]
+pub struct HashQuery {
+    pub chain: QueryChain,
+    pub tx_hash: H256,
+}
+
+/// Future to handle the Stream of missed transfers by checking them, and approving them
+pub struct HandleQueries {
+    future: Box<Future<Item = (), Error = ()>>,
+}
+
+impl HandleQueries {
+    /// Returns a newly created HandleMissedTransfers Future
+    ///
+    /// # Arguments
+    ///
+    /// * `source` - Network where the missed transfers are captured
+    /// * `target` - Network where the transfer will be approved for a withdrawal
+    /// * `handle` - Handle to spawn new futures
+    pub fn new<T: DuplexTransport + 'static>(
+        homechain: &Rc<Network<T>>,
+        sidechain: &Rc<Network<T>>,
+        rx: mpsc::UnboundedReceiver<HashQuery>,
+        handle: &reactor::Handle,
+    ) -> Self {
+        let handle = handle.clone();
+        let homechain = homechain.clone();
+        let sidechain = sidechain.clone();
+        let query_future = rx.for_each(move |query| {
+            let homechain = homechain.clone();
+            let sidechain = sidechain.clone();
+            let handle = handle.clone();
+            let (source, target) = match query.chain {
+                QueryChain::Home => (homechain, sidechain),
+                QueryChain::Side => (sidechain, homechain),
+            };
+            FindTransferInTransaction::new(&source, &query.tx_hash)
+                .and_then(move |transfers| {
+                    let handle = handle.clone();
+                    let target = target.clone();
+                    let futures: Vec<ValidateAndApproveTransfer<T>> = transfers
+                        .iter()
+                        .map(move |transfer| {
+                            let handle = handle.clone();
+                            let target = target.clone();
+                            ValidateAndApproveTransfer::new(&target, &handle, &transfer)
+                        })
+                        .collect();
+                    future::join_all(futures)
+                })
+                .and_then(|_| Ok(()))
+                .map_err(move |e| {
+                    error!("error approving queried transfers: {:?}", e);
+                })
+        });
+        HandleQueries {
+            future: Box::new(query_future),
+        }
+    }
+}
+
+impl Future for HandleQueries {
+    type Item = ();
+    type Error = ();
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        self.future.poll()
+    }
+}
 
 pub enum FindTransferState {
     ExtractTransfers(Box<Future<Item = Vec<Transfer>, Error = ()>>),

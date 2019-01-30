@@ -50,6 +50,7 @@ impl Endpoint {
                             search(&tx, &info)
                         })
                     })
+                    .finish()
             })
             .bind(format!("127.0.0.1:{}", port))
             .unwrap()

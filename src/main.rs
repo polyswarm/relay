@@ -115,11 +115,6 @@ fn main() -> Result<(), Error> {
 
     logger::init_logger(&settings.logging, "relay", log_severity).expect("problem initializing relay logger");
 
-    let (tx, rx) = mpsc::unbounded();
-
-    let endpoint = Endpoint::new(tx, matches.value_of("port").unwrap_or("27633"));
-    endpoint.start_server();
-
     // Set up our two websocket connections on the same event loop
     let mut eloop = tokio_core::reactor::Core::new()?;
     let handle = eloop.handle();
@@ -135,6 +130,11 @@ fn main() -> Result<(), Error> {
         &settings.relay.consul_token,
         &settings.relay.community,
     );
+
+    let (tx, rx) = mpsc::unbounded();
+
+    let endpoint = Endpoint::new(tx, matches.value_of("port").unwrap_or("12344"));
+    endpoint.start_server();
 
     // Run the relay
     handle.spawn(run(

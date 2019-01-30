@@ -10,7 +10,8 @@ use web3::{DuplexTransport, Web3};
 
 use super::anchor::HandleAnchors;
 use super::errors::OperationError;
-use super::missed_transfer::{HandleMissedTransfers, HandleQueries, HashQuery};
+use super::missed_transfer::HandleMissedTransfers;
+use super::query::{HandleQueries, HashQuery};
 use super::transfer::HandleTransfers;
 use failure::{Error, SyncFailure};
 

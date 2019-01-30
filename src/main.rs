@@ -32,6 +32,7 @@ pub mod contracts;
 pub mod errors;
 pub mod logger;
 pub mod missed_transfer;
+pub mod query;
 pub mod relay;
 pub mod settings;
 pub mod transaction;
@@ -45,31 +46,21 @@ use failure::{Error, SyncFailure};
 use tokio_core::reactor;
 use web3::futures::sync::mpsc;
 use web3::futures::Future;
-use web3::types::H256;
 use web3::Web3;
 
 use errors::OperationError;
 #[cfg(test)]
 mod mock;
+use query::{Endpoint, HashQuery};
 use relay::{Network, Relay};
 use settings::Settings;
 
-use std::sync::atomic::{AtomicUsize, AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
-use std::str::FromStr;
 
 use log::Level;
-
-use actix_web::http::{Method, StatusCode};
-use actix_web::{middleware, server, HttpResponse, Path};
-
-use errors::EndpointError;
-use missed_transfer::{HashQuery, QueryChain};
-
-pub const HOME: &str = "HOME";
-pub const SIDE: &str = "SIDE";
 
 fn main() -> Result<(), Error> {
     // Set up ctrl-c handler
@@ -102,6 +93,13 @@ fn main() -> Result<(), Error> {
                 .help("Specifies the logging severity level")
                 .takes_value(true),
         )
+        .arg(
+            Arg::with_name("port")
+                .long("port")
+                .value_name("Server port")
+                .help("Port to bind the endpoint")
+                .takes_value(true),
+        )
         .get_matches();
 
     let settings = Settings::new(matches.value_of("config"))?;
@@ -119,22 +117,8 @@ fn main() -> Result<(), Error> {
 
     let (tx, rx) = mpsc::unbounded();
 
-    thread::spawn(move || {
-        let tx = tx.clone();
-        let sys = actix::System::new("relay-endpoint");
-        server::new(move || {
-            let tx = tx.clone();
-            actix_web::App::new()
-                .middleware(middleware::Logger::default())
-                .resource("/{chain}/{tx_hash}", move |r| {
-                    r.method(Method::POST).with(build_search(tx))
-                })
-        })
-        .bind("127.0.0.1:8080")
-        .unwrap()
-        .start();
-        let _ = sys.run();
-    });
+    let endpoint = Endpoint::new(tx, matches.value_of("port").unwrap_or("27633"));
+    endpoint.start_server();
 
     // Set up our two websocket connections on the same event loop
     let mut eloop = tokio_core::reactor::Core::new()?;
@@ -167,31 +151,6 @@ fn main() -> Result<(), Error> {
     }
 
     Ok(())
-}
-
-fn build_search(
-    tx: mpsc::UnboundedSender<HashQuery>,
-) -> impl Fn(Path<(String, String)>) -> Result<HttpResponse, EndpointError> {
-    return move |info: Path<(String, String)>| {
-        let tx = tx.clone();
-        let tx_hash: H256 = H256::from_str(&info.1[..]).map_err(|e| {
-            error!("error parsing transaction hash: {:?}", e);
-            EndpointError::BadTransactionHash(info.1.clone())
-        })?;
-        let chain = if info.0.to_uppercase() == "HOME" {
-            Ok(QueryChain::Home)
-        } else if info.0.to_uppercase() == "SIDE" {
-            Ok(QueryChain::Side)
-        } else {
-            Err(EndpointError::BadChain(info.0.clone()))
-        }?;
-        let query = HashQuery { chain, tx_hash };
-        tx.unbounded_send(query).map_err(|e| {
-            error!("error sending query: {:?}", e);
-            EndpointError::UnableToSend
-        })?;
-        Ok(HttpResponse::new(StatusCode::OK))
-    };
 }
 
 fn run(

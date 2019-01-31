@@ -2,6 +2,7 @@ use std::rc::Rc;
 use tokio_core::reactor;
 use web3::futures::prelude::*;
 use web3::futures::sync::mpsc;
+use web3::futures::try_ready;
 use web3::types::{Address, BlockNumber, FilterBuilder, U256};
 use web3::DuplexTransport;
 
@@ -201,28 +202,7 @@ impl HandleMissedTransfers {
         let future = FindMissedTransfers::new(source, &handle).for_each(move |transfer| {
             let target = target.clone();
             let handle = handle.clone();
-            transfer
-                .check_withdrawal(&target)
-                .and_then(move |needs_approval| {
-                    if !needs_approval {
-                        info!("skipping transfer that does not need approval: {:?}", &transfer.tx_hash);
-                        Ok(None)
-                    } else {
-                        Ok(Some(transfer))
-                    }
-                })
-                .and_then(move |transfer_option| {
-                    let target = target.clone();
-                    if let Some(transfer) = transfer_option {
-                        info!("approving missed transfer: {:?}", transfer);
-                        handle.spawn(transfer.approve_withdrawal(&target));
-                    }
-                    Ok(())
-                })
-                .or_else(move |e| {
-                    error!("error searching for and approving missed transfers: {:?}", e);
-                    Ok(())
-                })
+            ValidateAndApproveTransfer::new(&target, &handle, &transfer)
         });
         HandleMissedTransfers(Box::new(future))
     }
@@ -233,5 +213,50 @@ impl Future for HandleMissedTransfers {
     type Error = ();
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         self.0.poll()
+    }
+}
+
+/// Future to check a transfer against the contract and approve is necessary
+pub struct ValidateAndApproveTransfer<T: DuplexTransport + 'static> {
+    target: Rc<Network<T>>,
+    handle: reactor::Handle,
+    transfer: Transfer,
+    future: Box<Future<Item = bool, Error = ()>>,
+}
+
+impl<T: DuplexTransport + 'static> ValidateAndApproveTransfer<T> {
+    /// Returns a newly created HandleMissedTransfers Future
+    ///
+    /// # Arguments
+    ///
+    /// * `target` - Network where the transfer will be approved for a withdrawal
+    /// * `handle` - Handle to spawn new futures
+    /// * `transfer` - Transfer event to check/approve
+    pub fn new(target: &Rc<Network<T>>, handle: &reactor::Handle, transfer: &Transfer) -> Self {
+        let future = transfer.check_withdrawal(&target).map_err(|e| {
+            error!("error checking withdrawal for approval: {:?}", e);
+        });
+
+        ValidateAndApproveTransfer {
+            target: target.clone(),
+            handle: handle.clone(),
+            transfer: *transfer,
+            future: Box::new(future),
+        }
+    }
+}
+
+impl<T: DuplexTransport + 'static> Future for ValidateAndApproveTransfer<T> {
+    type Item = ();
+    type Error = ();
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        let needs_approval = try_ready!(self.future.poll());
+        if needs_approval {
+            let target = self.target.clone();
+            let handle = self.handle.clone();
+            info!("approving missed transfer: {:?}", self.transfer);
+            handle.spawn(self.transfer.approve_withdrawal(&target));
+        }
+        Ok(Async::Ready(()))
     }
 }

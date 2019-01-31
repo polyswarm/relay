@@ -1,5 +1,9 @@
 # This example assumes RELAY_ACCOUNT and RELAY_PASSWORD are passed via the environment
 
+[endpoint]
+    # Any valid port: 0 < port < 65536
+    port = 12344
+
 [logging]
     # Supports "raw" or "json"
     format = "json"

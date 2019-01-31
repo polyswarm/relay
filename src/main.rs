@@ -1,3 +1,5 @@
+extern crate actix;
+extern crate actix_web;
 extern crate base64;
 extern crate clap;
 extern crate config;
@@ -23,16 +25,14 @@ extern crate ethcore_transaction;
 extern crate ethkey;
 extern crate ethstore;
 extern crate rlp;
-use consul_configs::ConsulConfig;
-use std::sync::atomic::AtomicUsize;
 
-use clap::{App, Arg};
 pub mod anchor;
 pub mod consul_configs;
 pub mod contracts;
 pub mod errors;
 pub mod logger;
 pub mod missed_transfer;
+pub mod query;
 pub mod relay;
 pub mod settings;
 pub mod transaction;
@@ -40,20 +40,24 @@ pub mod transfer;
 pub mod utils;
 pub mod withdrawal;
 
-#[cfg(test)]
-mod mock;
+use clap::{App, Arg};
+use consul_configs::ConsulConfig;
 use failure::{Error, SyncFailure};
-use relay::{Network, Relay};
-use settings::Settings;
-use web3::futures::Future;
-
-use errors::OperationError;
-use std::thread;
 use tokio_core::reactor;
+use web3::futures::sync::mpsc;
+use web3::futures::Future;
 use web3::Web3;
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use errors::OperationError;
+#[cfg(test)]
+mod mock;
+use query::{Endpoint, HashQuery};
+use relay::{Network, Relay};
+use settings::Settings;
+
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::thread;
 use std::time::Duration;
 
 use log::Level;
@@ -70,7 +74,7 @@ fn main() -> Result<(), Error> {
 
     // Parse options
     let matches = App::new("Polyswarm Relay")
-        .version("0.1.0")
+        .version("0.1.1")
         .author("PolySwarm Developers <info@polyswarm.io>")
         .about("Relays ERC20 tokens between two different networks.")
         .arg(
@@ -120,8 +124,20 @@ fn main() -> Result<(), Error> {
         &settings.relay.community,
     );
 
+    let (tx, rx) = mpsc::unbounded();
+
+    let endpoint = Endpoint::new(tx, settings.endpoint.port);
+    endpoint.start_server();
+
     // Run the relay
-    handle.spawn(run(handle.clone(), settings, home_ws, side_ws, consul_config.clone()));
+    handle.spawn(run(
+        handle.clone(),
+        rx,
+        settings,
+        home_ws,
+        side_ws,
+        consul_config.clone(),
+    ));
 
     while running.load(Ordering::SeqCst) {
         eloop.turn(Some(Duration::from_secs(1)));
@@ -132,6 +148,7 @@ fn main() -> Result<(), Error> {
 
 fn run(
     handle: reactor::Handle,
+    rx: mpsc::UnboundedReceiver<HashQuery>,
     settings: Settings,
     home_ws: web3::transports::WebSocket,
     side_ws: web3::transports::WebSocket,
@@ -231,7 +248,7 @@ fn run(
                         )
                         .map_err(|e| format!("error initializing sidechain {}", e))?,
                     );
-                    handle.spawn(relay.run(&handle));
+                    handle.spawn(relay.run(rx, &handle));
                     let chains_to_watch = vec!["homechain", "sidechain"];
                     // start watching for consul changes
                     thread::spawn(move || {

@@ -13,6 +13,7 @@ pub struct Settings {
     /// Relay settings
     pub relay: Relay,
     pub logging: Logging,
+    pub endpoint: Endpoint,
 }
 
 /// Logging settings
@@ -24,6 +25,13 @@ pub struct Settings {
 pub enum Logging {
     Raw,
     Json,
+}
+
+// Endpoint settings
+#[derive(Debug, Deserialize)]
+pub struct Endpoint {
+    /// The port to listen on
+    pub port: u16,
 }
 
 /// Relay settings
@@ -76,6 +84,7 @@ impl Settings {
     {
         let mut c = Config::new();
 
+        c.set_default("endpoint.port", 12344)?;
         c.set_default("relay.confirmations", 12)?;
         c.set_default("relay.anchor_frequency", 100)?;
         c.set_default("relay.community", "")?;
@@ -107,7 +116,9 @@ impl Settings {
 
     fn validated(self) -> Result<Self, ConfigError> {
         let lookback_combined = LOOKBACK_RANGE + LOOKBACK_LEEWAY;
-        if self.relay.anchor_frequency == 0 {
+        if self.endpoint.port == 0 {
+            Err(ConfigError::InvalidPort)
+        } else if self.relay.anchor_frequency == 0 {
             Err(ConfigError::InvalidAnchorFrequency)
         } else if self.relay.confirmations >= self.relay.anchor_frequency {
             Err(ConfigError::InvalidConfirmations)

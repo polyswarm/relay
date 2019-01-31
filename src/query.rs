@@ -28,7 +28,7 @@ pub struct Endpoint {
 }
 
 impl Endpoint {
-    pub fn new(tx: mpsc::UnboundedSender<HashQuery>, port: &str) -> Self {
+    pub fn new(tx: mpsc::UnboundedSender<HashQuery>, port: u16) -> Self {
         Self {
             tx,
             port: port.to_string(),

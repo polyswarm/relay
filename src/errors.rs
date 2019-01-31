@@ -67,4 +67,7 @@ pub enum ConfigError {
 
     #[fail(display = "not such keyfiles directory exists")]
     InvalidKeydir,
+
+    #[fail(display = "invalid port, must be between 0 and 65535")]
+    InvalidPort
 }

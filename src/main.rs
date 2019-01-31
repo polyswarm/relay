@@ -93,13 +93,6 @@ fn main() -> Result<(), Error> {
                 .help("Specifies the logging severity level")
                 .takes_value(true),
         )
-        .arg(
-            Arg::with_name("port")
-                .long("port")
-                .value_name("Server port")
-                .help("Port to bind the endpoint")
-                .takes_value(true),
-        )
         .get_matches();
 
     let settings = Settings::new(matches.value_of("config"))?;
@@ -133,7 +126,7 @@ fn main() -> Result<(), Error> {
 
     let (tx, rx) = mpsc::unbounded();
 
-    let endpoint = Endpoint::new(tx, matches.value_of("port").unwrap_or("12344"));
+    let endpoint = Endpoint::new(tx, settings.endpoint.port);
     endpoint.start_server();
 
     // Run the relay

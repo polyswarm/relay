@@ -139,8 +139,8 @@ impl HandleQueries {
                     future::join_all(futures)
                 })
                 .and_then(|_| Ok(()))
-                .or_else(move |e| {
-                    error!("error approving queried transfers: {:?}", e);
+                .or_else(move |_| {
+                    // No log here, errors are caught in Futures
                     Ok(())
                 })
         });
@@ -202,7 +202,7 @@ impl<T: DuplexTransport + 'static> Future for FindTransferInTransaction<T> {
                 FindTransferState::ExtractTransfers(ref mut future) => {
                     let transfers = try_ready!(future.poll());
                     if transfers.is_empty() {
-                        warn!("no relay transactions found at {}", hash);
+                        warn!("no relay transactions found at {:?}", hash);
                         return Err(());
                     } else {
                         return Ok(Async::Ready(transfers));
@@ -236,7 +236,7 @@ impl<T: DuplexTransport + 'static> Future for FindTransferInTransaction<T> {
                                                 if confirmed > source.confirmations {
                                                     let logs = r.logs;
                                                     for log in logs {
-                                                        info!("found log at {}: {:?}", hash, log);
+                                                        info!("found log at {:?}: {:?}", hash, log);
                                                         if log.topics[0] == TRANSFER_EVENT_SIGNATURE.into()
                                                             && log.topics[2] == source.relay.address().into()
                                                         {
@@ -268,7 +268,7 @@ impl<T: DuplexTransport + 'static> Future for FindTransferInTransaction<T> {
                             )
                         }
                         None => {
-                            error!("Could not find requested transaction hash");
+                            error!("unable to find {:?} on {:?}", hash, source.network_type);
                             return Err(());
                         }
                     }?

@@ -1,6 +1,6 @@
 use std::rc::Rc;
-use std::str::FromStr;
 use std::thread;
+use std::str::FromStr;
 use tokio_core::reactor;
 use web3::futures::future;
 use web3::futures::prelude::*;
@@ -17,6 +17,7 @@ use super::errors::EndpointError;
 use super::relay::Network;
 use super::transfer::Transfer;
 use super::missed_transfer::ValidateAndApproveTransfer;
+use super::utils;
 
 pub const HOME: &str = "HOME";
 pub const SIDE: &str = "SIDE";
@@ -52,7 +53,7 @@ impl Endpoint {
                     })
                     .finish()
             })
-            .bind(format!("127.0.0.1:{}", port))
+            .bind(format!("0.0.0.0:{}", port))
             .unwrap()
             .start();
             let _ = sys.run();
@@ -61,7 +62,8 @@ impl Endpoint {
 }
 
 fn search(tx: &mpsc::UnboundedSender<HashQuery>, info: &Path<(String, String)>) -> Result<HttpResponse, EndpointError> {
-    let tx_hash: H256 = H256::from_str(&info.1[..]).map_err(|e| {
+    let clean = utils::clean_0x(&info.1);
+    let tx_hash: H256 = H256::from_str(&clean[..]).map_err(|e| {
         error!("error parsing transaction hash: {:?}", e);
         EndpointError::BadTransactionHash(info.1.clone())
     })?;
@@ -137,8 +139,9 @@ impl HandleQueries {
                     future::join_all(futures)
                 })
                 .and_then(|_| Ok(()))
-                .map_err(move |e| {
+                .or_else(move |e| {
                     error!("error approving queried transfers: {:?}", e);
+                    Ok(())
                 })
         });
         HandleQueries {
@@ -199,7 +202,7 @@ impl<T: DuplexTransport + 'static> Future for FindTransferInTransaction<T> {
                 FindTransferState::ExtractTransfers(ref mut future) => {
                     let transfers = try_ready!(future.poll());
                     if transfers.is_empty() {
-                        warn!("no relay transactions found at {}", self.hash);
+                        warn!("no relay transactions found at {}", hash);
                         return Err(());
                     } else {
                         return Ok(Async::Ready(transfers));
@@ -233,8 +236,9 @@ impl<T: DuplexTransport + 'static> Future for FindTransferInTransaction<T> {
                                                 if confirmed > source.confirmations {
                                                     let logs = r.logs;
                                                     for log in logs {
+                                                        info!("found log at {}: {:?}", hash, log);
                                                         if log.topics[0] == TRANSFER_EVENT_SIGNATURE.into()
-                                                            && log.topics[3] == source.relay.address().into()
+                                                            && log.topics[2] == source.relay.address().into()
                                                         {
                                                             let destination: Address = log.topics[1].into();
                                                             let amount: U256 = log.data.0[..32].into();

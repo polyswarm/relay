@@ -1,6 +1,6 @@
 use std::rc::Rc;
-use std::thread;
 use std::str::FromStr;
+use std::thread;
 use tokio_core::reactor;
 use web3::futures::future;
 use web3::futures::prelude::*;
@@ -14,9 +14,9 @@ use actix_web::{middleware, server, HttpResponse, Path};
 
 use super::contracts::TRANSFER_EVENT_SIGNATURE;
 use super::errors::EndpointError;
+use super::missed_transfer::ValidateAndApproveTransfer;
 use super::relay::{Network, NetworkType};
 use super::transfer::Transfer;
-use super::missed_transfer::ValidateAndApproveTransfer;
 use super::utils;
 
 pub const HOME: &str = "HOME";

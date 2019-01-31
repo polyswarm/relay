@@ -69,5 +69,5 @@ pub enum ConfigError {
     InvalidKeydir,
 
     #[fail(display = "invalid port, must be between 0 and 65535")]
-    InvalidPort
+    InvalidPort,
 }

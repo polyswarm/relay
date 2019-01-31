@@ -14,7 +14,7 @@ use actix_web::{middleware, server, HttpResponse, Path};
 
 use super::contracts::TRANSFER_EVENT_SIGNATURE;
 use super::errors::EndpointError;
-use super::relay::Network;
+use super::relay::{Network, NetworkType};
 use super::transfer::Transfer;
 use super::missed_transfer::ValidateAndApproveTransfer;
 use super::utils;
@@ -22,12 +22,19 @@ use super::utils;
 pub const HOME: &str = "HOME";
 pub const SIDE: &str = "SIDE";
 
+/// This defines the http endpoint used to request a look at a specific transaction hash
 pub struct Endpoint {
     tx: mpsc::UnboundedSender<HashQuery>,
     port: String,
 }
 
 impl Endpoint {
+    /// Returns a newly created Endpoint Struct
+    ///
+    /// # Arguments
+    ///
+    /// * `tx` - Sender to report new queries
+    /// * `port` - Handle to spawn new futures
     pub fn new(tx: mpsc::UnboundedSender<HashQuery>, port: u16) -> Self {
         Self {
             tx,
@@ -35,6 +42,7 @@ impl Endpoint {
         }
     }
 
+    /// Start listening on the given port for messages at /chain/tx_hash
     pub fn start_server(&self) {
         let tx = self.tx.clone();
         let port = self.port.clone();
@@ -61,6 +69,12 @@ impl Endpoint {
     }
 }
 
+/// Return an HttpResponse given the success of sending the txhash and chain to be scanned
+///
+/// # Arguments
+///
+/// * `tx` - Sender to report new queries
+/// * `info` - Tuple of two strings. The chain and tx hash.
 fn search(tx: &mpsc::UnboundedSender<HashQuery>, info: &Path<(String, String)>) -> Result<HttpResponse, EndpointError> {
     let clean = utils::clean_0x(&info.1);
     let tx_hash: H256 = H256::from_str(&clean[..]).map_err(|e| {
@@ -68,9 +82,9 @@ fn search(tx: &mpsc::UnboundedSender<HashQuery>, info: &Path<(String, String)>) 
         EndpointError::BadTransactionHash(info.1.clone())
     })?;
     let chain = if info.0.to_uppercase() == "HOME" {
-        Ok(QueryChain::Home)
+        Ok(NetworkType::Home)
     } else if info.0.to_uppercase() == "SIDE" {
-        Ok(QueryChain::Side)
+        Ok(NetworkType::Side)
     } else {
         Err(EndpointError::BadChain(info.0.clone()))
     }?;
@@ -82,15 +96,10 @@ fn search(tx: &mpsc::UnboundedSender<HashQuery>, info: &Path<(String, String)>) 
     Ok(HttpResponse::new(StatusCode::OK))
 }
 
-#[derive(Clone)]
-pub enum QueryChain {
-    Home,
-    Side,
-}
-
+/// This struct is used to determine which chain & hash to look for.
 #[derive(Clone)]
 pub struct HashQuery {
-    pub chain: QueryChain,
+    pub chain: NetworkType,
     pub tx_hash: H256,
 }
 
@@ -106,6 +115,7 @@ impl HandleQueries {
     ///
     /// * `source` - Network where the missed transfers are captured
     /// * `target` - Network where the transfer will be approved for a withdrawal
+    /// * `rx` - Receiver where requested HashQueries will come across
     /// * `handle` - Handle to spawn new futures
     pub fn new<T: DuplexTransport + 'static>(
         homechain: &Rc<Network<T>>,
@@ -121,8 +131,8 @@ impl HandleQueries {
             let sidechain = sidechain.clone();
             let handle = handle.clone();
             let (source, target) = match query.chain {
-                QueryChain::Home => (homechain, sidechain),
-                QueryChain::Side => (sidechain, homechain),
+                NetworkType::Home => (homechain, sidechain),
+                NetworkType::Side => (sidechain, homechain),
             };
             FindTransferInTransaction::new(&source, &query.tx_hash)
                 .and_then(move |transfers| {

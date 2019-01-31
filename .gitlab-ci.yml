@@ -16,13 +16,13 @@ lint:
 
 test:
   stage: test
-  image: rust:1.30
+  image: rust:1.31.1
   script:
     - cargo test --verbose
 
 coverage:
   stage: coverage
-  image: rust:1.30
+  image: rust:1.31.1
   allow_failure: true
   coverage: '/COVERAGE:\d+\.\d+/'
   script:
@@ -38,7 +38,7 @@ kick-e2e:
         - docker
     stage: deploy
     before_script:
-      - apk --no-cache add curl jq    
+      - apk --no-cache add curl jq
     script:
       - set -e
 

@@ -107,7 +107,7 @@ fn status(tx: &mpsc::UnboundedSender<RequestType>) -> Box<Future<Item = HttpResp
             .take(1)
             .collect()
             .and_then(move |messages: Vec<Result<StatusResponse, ()>>| {
-                if messages.len() >= 1 {
+                if !messages.is_empty() {
                     Ok(messages[0].clone())
                 } else {
                     Err(())

@@ -9,9 +9,9 @@ use web3::types::{Address, U256};
 use web3::{DuplexTransport, Web3};
 
 use super::anchor::HandleAnchors;
+use super::endpoint::{HandleRequests, RequestType};
 use super::errors::OperationError;
 use super::missed_transfer::HandleMissedTransfers;
-use super::endpoint::{HandleRequests, RequestType};
 use super::transfer::HandleTransfers;
 use failure::{Error, SyncFailure};
 

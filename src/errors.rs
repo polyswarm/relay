@@ -42,7 +42,7 @@ pub enum EndpointError {
     UnableToGetStatus,
 
     #[fail(display = "timeout")]
-    Timeout
+    Timeout,
 }
 
 impl ResponseError for EndpointError {

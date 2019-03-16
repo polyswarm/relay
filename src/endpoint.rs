@@ -1,8 +1,8 @@
+use ethabi::Token;
+use serde_derive::{Deserialize, Serialize};
 use std::rc::Rc;
 use std::str::FromStr;
 use std::thread;
-use ethabi::Token;
-use serde_derive::{Deserialize, Serialize};
 use tokio_core::reactor;
 use web3::contract;
 use web3::contract::tokens::{Detokenize, Tokenize};
@@ -11,7 +11,7 @@ use web3::futures::future;
 use web3::futures::prelude::*;
 use web3::futures::sync::mpsc;
 use web3::futures::try_ready;
-use web3::types::{Address, TransactionReceipt, H256, U256, BlockNumber};
+use web3::types::{Address, BlockNumber, TransactionReceipt, H256, U256};
 use web3::DuplexTransport;
 
 use actix_web::http::{Method, StatusCode};
@@ -64,10 +64,12 @@ impl Endpoint {
                 let hash_tx = self.tx.clone();
                 actix_web::App::new()
                     .middleware(middleware::Logger::default())
-                    .resource("/status", move |r| r.method(Method::GET).f(move |_| {
-                        let tx = status_tx.clone();
-                        status(&tx)
-                    }))
+                    .resource("/status", move |r| {
+                        r.method(Method::GET).f(move |_| {
+                            let tx = status_tx.clone();
+                            status(&tx)
+                        })
+                    })
                     .resource("/{chain}/{tx_hash}", move |r| {
                         r.method(Method::POST).with(move |info: Path<(String, String)>| {
                             let tx = hash_tx.clone();
@@ -98,35 +100,33 @@ pub struct StatusResponse {
 /// # Arguments
 ///
 /// * `tx` - Sender to report new requests
-fn status(tx: &mpsc::UnboundedSender<RequestType>) -> Box<Future<Item=HttpResponse, Error=EndpointError>> {
+fn status(tx: &mpsc::UnboundedSender<RequestType>) -> Box<Future<Item = HttpResponse, Error = EndpointError>> {
     let (status_tx, status_rx) = mpsc::unbounded();
-    let request_future: Box<Future<Item=HttpResponse, Error=EndpointError>> = Box::new(status_rx.take(1).collect()
-        .and_then(move |messages: Vec<Result<StatusResponse, ()>>| {
-            if messages.len() >= 1 {
-                Ok(messages[0].clone())
-            } else {
-                Err(())
-            }
-        }).and_then(move |msg| {
-            match msg {
+    let request_future: Box<Future<Item = HttpResponse, Error = EndpointError>> = Box::new(
+        status_rx
+            .take(1)
+            .collect()
+            .and_then(move |messages: Vec<Result<StatusResponse, ()>>| {
+                if messages.len() >= 1 {
+                    Ok(messages[0].clone())
+                } else {
+                    Err(())
+                }
+            })
+            .and_then(move |msg| match msg {
                 Ok(response) => {
                     let body = serde_json::to_string(&response).map_err(move |e| {
                         error!("error parsing response: {:?}", e);
                     })?;
 
-                    Ok(HttpResponse::Ok()
-                        .content_type("application/json")
-                        .body(body)
-                    )
-                },
-                Err(_) => {
-                    Err(())
+                    Ok(HttpResponse::Ok().content_type("application/json").body(body))
                 }
-            }
-        }).map_err(|_| {
-            error!("error receiving message");
-            EndpointError::UnableToGetStatus
-        })
+                Err(_) => Err(()),
+            })
+            .map_err(|_| {
+                error!("error receiving message");
+                EndpointError::UnableToGetStatus
+            }),
     );
 
     let request = RequestType::Status(status_tx);
@@ -139,14 +139,16 @@ fn status(tx: &mpsc::UnboundedSender<RequestType>) -> Box<Future<Item=HttpRespon
     Box::new(request_future)
 }
 
-
 /// Return an HttpResponse given the success of sending the txhash and chain to be scanned
 ///
 /// # Arguments
 ///
 /// * `tx` - Sender to report new requests
 /// * `info` - Tuple of two strings. The chain and tx hash.
-fn search(tx: &mpsc::UnboundedSender<RequestType>, info: &Path<(String, String)>) -> Result<HttpResponse, EndpointError> {
+fn search(
+    tx: &mpsc::UnboundedSender<RequestType>,
+    info: &Path<(String, String)>,
+) -> Result<HttpResponse, EndpointError> {
     let clean = utils::clean_0x(&info.1);
     let tx_hash: H256 = H256::from_str(&clean[..]).map_err(|e| {
         error!("error parsing transaction hash: {:?}", e);
@@ -191,7 +193,6 @@ impl HandleRequests {
         let homechain = homechain.clone();
         let sidechain = sidechain.clone();
         let requests_future = rx.for_each(move |request| {
-
             let homechain = homechain.clone();
             let sidechain = sidechain.clone();
             let handle = handle.clone();
@@ -201,93 +202,119 @@ impl HandleRequests {
                         NetworkType::Home => (homechain, sidechain),
                         NetworkType::Side => (sidechain, homechain),
                     };
-                    future::Either::A(FindTransferInTransaction::new(&source, &tx_hash)
-                        .and_then(move |transfers| {
-                            let handle = handle.clone();
-                            let target = target.clone();
-                            let futures: Vec<ValidateAndApproveTransfer<T>> = transfers
-                                .iter()
-                                .map(move |transfer| {
-                                    let handle = handle.clone();
-                                    let target = target.clone();
-                                    ValidateAndApproveTransfer::new(&target, &handle, &transfer)
-                                })
-                                .collect();
-                            future::join_all(futures)
-                        })
-                        .and_then(|_| Ok(()))
-                        .or_else(move |_| {
-                            // No log here, errors are caught in Futures
-                            Ok(())
-                        }))
+                    future::Either::A(
+                        FindTransferInTransaction::new(&source, &tx_hash)
+                            .and_then(move |transfers| {
+                                let handle = handle.clone();
+                                let target = target.clone();
+                                let futures: Vec<ValidateAndApproveTransfer<T>> = transfers
+                                    .iter()
+                                    .map(move |transfer| {
+                                        let handle = handle.clone();
+                                        let target = target.clone();
+                                        ValidateAndApproveTransfer::new(&target, &handle, &transfer)
+                                    })
+                                    .collect();
+                                future::join_all(futures)
+                            })
+                            .and_then(|_| Ok(()))
+                            .or_else(move |_| {
+                                // No log here, errors are caught in Futures
+                                Ok(())
+                            }),
+                    )
                 }
                 RequestType::Status(tx) => {
-                    let home_eth_future = homechain.web3.eth().balance(homechain.account, None)
-                    .and_then(move |balance| Ok(Some(balance)))
-                    .or_else(|_| Ok(None));
+                    let home_eth_future = homechain
+                        .web3
+                        .eth()
+                        .balance(homechain.account, None)
+                        .and_then(move |balance| Ok(Some(balance)))
+                        .or_else(|_| Ok(None));
 
-                    let home_balance_query  = BalanceQuery::new(homechain.account);
-                    let home_nct_future = homechain.token.query::<BalanceOf, Address, BlockNumber, BalanceQuery>(
-                                "balanceOf",
-                                home_balance_query,
-                                homechain.account,
-                                Options::default(),
-                                BlockNumber::Latest,
-                    ).and_then(move |balance| Ok(Some(balance.0)))
-                    .or_else(move |_| Ok(None));
+                    let home_balance_query = BalanceQuery::new(homechain.account);
+                    let home_nct_future = homechain
+                        .token
+                        .query::<BalanceOf, Address, BlockNumber, BalanceQuery>(
+                            "balanceOf",
+                            home_balance_query,
+                            homechain.account,
+                            Options::default(),
+                            BlockNumber::Latest,
+                        )
+                        .and_then(move |balance| Ok(Some(balance.0)))
+                        .or_else(move |_| Ok(None));
 
-                    let home_last_block_future = homechain.web3.eth().block_number().and_then(move |block| Ok(Some(block))).or_else(|_| Ok(None));
+                    let home_last_block_future = homechain
+                        .web3
+                        .eth()
+                        .block_number()
+                        .and_then(move |block| Ok(Some(block)))
+                        .or_else(|_| Ok(None));
 
-                    let side_balance_query  = BalanceQuery::new(sidechain.account);
-                    let side_nct_future = sidechain.token.query::<BalanceOf, Address, BlockNumber, BalanceQuery>(
-                                "balanceOf",
-                                side_balance_query,
-                                sidechain.account,
-                                Options::default(),
-                                BlockNumber::Latest,
-                    ).and_then(move |balance| Ok(Some(balance.0)))
-                    .or_else(move |_| Ok(None));
+                    let side_balance_query = BalanceQuery::new(sidechain.account);
+                    let side_nct_future = sidechain
+                        .token
+                        .query::<BalanceOf, Address, BlockNumber, BalanceQuery>(
+                            "balanceOf",
+                            side_balance_query,
+                            sidechain.account,
+                            Options::default(),
+                            BlockNumber::Latest,
+                        )
+                        .and_then(move |balance| Ok(Some(balance.0)))
+                        .or_else(move |_| Ok(None));
 
-                    let side_last_block_future = sidechain.web3.eth().block_number().and_then(move |block| Ok(Some(block))).or_else(|_| Ok(None));
+                    let side_last_block_future = sidechain
+                        .web3
+                        .eth()
+                        .block_number()
+                        .and_then(move |block| Ok(Some(block)))
+                        .or_else(|_| Ok(None));
 
-                    let futures: Vec<Box<Future<Item=Option<U256>, Error=()>>> = vec![Box::new(home_eth_future),
-                                       Box::new(home_nct_future),
-                                       Box::new(home_last_block_future),
-                                       Box::new(side_nct_future),
-                                       Box::new(side_last_block_future)
+                    let futures: Vec<Box<Future<Item = Option<U256>, Error = ()>>> = vec![
+                        Box::new(home_eth_future),
+                        Box::new(home_nct_future),
+                        Box::new(home_last_block_future),
+                        Box::new(side_nct_future),
+                        Box::new(side_last_block_future),
                     ];
 
                     let tx = tx.clone();
                     let error_tx = tx.clone();
 
-                    future::Either::B(future::join_all(futures)
-                    .and_then(move |results| {
-                        info!("results from status futures: {:?}", results);
-                        Ok(StatusResponse {
-                            home_eth: results[0],
-                            home_nct: results[1],
-                            home_last_block: results[2],
-                            side_nct: results[3],
-                            side_last_block: results[4]
-                        })
-                    }).and_then(move |response| {
-                        info!("Status response: {:?}", response);
-                        let tx: mpsc::UnboundedSender<Result<StatusResponse, ()>> = tx.clone();
-                        let send_result = tx.unbounded_send(Ok(response));
-                        if send_result.is_err() {
-                            error!("error sending status response");
-                        }
-                        info!("sent response");
-                        Ok(())
-                    }).or_else(move |e| {
-                        let tx = error_tx.clone();
-                        error!("error getting status: {:?}", e);
-                        let send_result = tx.unbounded_send(Err(()));
-                        if send_result.is_err() {
-                            error!("error sending status response");
-                        }
-                        Ok(())
-                    }))
+                    future::Either::B(
+                        future::join_all(futures)
+                            .and_then(move |results| {
+                                info!("results from status futures: {:?}", results);
+                                Ok(StatusResponse {
+                                    home_eth: results[0],
+                                    home_nct: results[1],
+                                    home_last_block: results[2],
+                                    side_nct: results[3],
+                                    side_last_block: results[4],
+                                })
+                            })
+                            .and_then(move |response| {
+                                info!("Status response: {:?}", response);
+                                let tx: mpsc::UnboundedSender<Result<StatusResponse, ()>> = tx.clone();
+                                let send_result = tx.unbounded_send(Ok(response));
+                                if send_result.is_err() {
+                                    error!("error sending status response");
+                                }
+                                info!("sent response");
+                                Ok(())
+                            })
+                            .or_else(move |e| {
+                                let tx = error_tx.clone();
+                                error!("error getting status: {:?}", e);
+                                let send_result = tx.unbounded_send(Err(()));
+                                if send_result.is_err() {
+                                    error!("error sending status response");
+                                }
+                                Ok(())
+                            }),
+                    )
                 }
             }
         });
@@ -433,9 +460,7 @@ pub struct BalanceQuery {
 
 impl BalanceQuery {
     fn new(address: Address) -> Self {
-        BalanceQuery {
-            address
-        }
+        BalanceQuery { address }
     }
 }
 

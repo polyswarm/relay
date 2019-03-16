@@ -32,7 +32,7 @@ pub mod contracts;
 pub mod errors;
 pub mod logger;
 pub mod missed_transfer;
-pub mod query;
+pub mod endpoint;
 pub mod relay;
 pub mod settings;
 pub mod transaction;
@@ -51,7 +51,7 @@ use web3::Web3;
 use errors::OperationError;
 #[cfg(test)]
 mod mock;
-use query::{Endpoint, HashQuery};
+use endpoint::{Endpoint, RequestType};
 use relay::{Network, Relay};
 use settings::Settings;
 
@@ -148,7 +148,7 @@ fn main() -> Result<(), Error> {
 
 fn run(
     handle: reactor::Handle,
-    rx: mpsc::UnboundedReceiver<HashQuery>,
+    hash_rx: mpsc::UnboundedReceiver<RequestType>,
     settings: Settings,
     home_ws: web3::transports::WebSocket,
     side_ws: web3::transports::WebSocket,
@@ -248,7 +248,7 @@ fn run(
                         )
                         .map_err(|e| format!("error initializing sidechain {}", e))?,
                     );
-                    handle.spawn(relay.run(rx, &handle));
+                    handle.spawn(relay.run(hash_rx, &handle));
                     let chains_to_watch = vec!["homechain", "sidechain"];
                     // start watching for consul changes
                     thread::spawn(move || {

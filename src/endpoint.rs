@@ -33,6 +33,35 @@ pub enum RequestType {
     Status(mpsc::UnboundedSender<Result<StatusResponse, ()>>),
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct StatusResponse {
+    home: NetworkStatus,
+    side: NetworkStatus,
+}
+
+impl StatusResponse {
+    pub fn new(home: NetworkStatus, side: NetworkStatus) -> Self {
+        StatusResponse { home, side }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct NetworkStatus {
+    relay_eth_balance: Option<U256>,
+    relay_last_block: Option<U256>,
+    contract_nct: Option<U256>,
+}
+
+impl NetworkStatus {
+    pub fn new(relay_eth_balance: Option<U256>, relay_last_block: Option<U256>, contract_nct: Option<U256>) -> Self {
+        NetworkStatus {
+            relay_eth_balance,
+            relay_last_block,
+            contract_nct,
+        }
+    }
+}
+
 /// This defines the http endpoint used to request a look at a specific transaction hash
 #[derive(Clone)]
 pub struct Endpoint {
@@ -84,15 +113,6 @@ impl Endpoint {
             let _ = sys.run();
         });
     }
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct StatusResponse {
-    home_eth: Option<U256>,
-    home_nct: Option<U256>,
-    home_last_block: Option<U256>,
-    side_nct: Option<U256>,
-    side_last_block: Option<U256>,
 }
 
 /// Return an HttpResponse that contains the status of this relay
@@ -232,7 +252,7 @@ impl HandleRequests {
                         .and_then(move |balance| Ok(Some(balance)))
                         .or_else(|_| Ok(None));
 
-                    let home_balance_query = BalanceQuery::new(homechain.account);
+                    let home_balance_query = BalanceQuery::new(homechain.relay.address());
                     let home_nct_future = homechain
                         .token
                         .query::<BalanceOf, Address, BlockNumber, BalanceQuery>(
@@ -252,7 +272,13 @@ impl HandleRequests {
                         .and_then(move |block| Ok(Some(block)))
                         .or_else(|_| Ok(None));
 
-                    let side_balance_query = BalanceQuery::new(sidechain.account);
+                    let side_eth_future = sidechain
+                        .web3
+                        .eth()
+                        .balance(sidechain.account, None)
+                        .and_then(move |balance| Ok(Some(balance)))
+                        .or_else(|_| Ok(None));
+                    let side_balance_query = BalanceQuery::new(sidechain.relay.address());
                     let side_nct_future = sidechain
                         .token
                         .query::<BalanceOf, Address, BlockNumber, BalanceQuery>(
@@ -274,10 +300,11 @@ impl HandleRequests {
 
                     let futures: Vec<Box<Future<Item = Option<U256>, Error = ()>>> = vec![
                         Box::new(home_eth_future),
-                        Box::new(home_nct_future),
                         Box::new(home_last_block_future),
-                        Box::new(side_nct_future),
+                        Box::new(home_nct_future),
+                        Box::new(side_eth_future),
                         Box::new(side_last_block_future),
+                        Box::new(side_nct_future),
                     ];
 
                     let tx = tx.clone();
@@ -287,13 +314,9 @@ impl HandleRequests {
                         future::join_all(futures)
                             .and_then(move |results| {
                                 info!("results from status futures: {:?}", results);
-                                Ok(StatusResponse {
-                                    home_eth: results[0],
-                                    home_nct: results[1],
-                                    home_last_block: results[2],
-                                    side_nct: results[3],
-                                    side_last_block: results[4],
-                                })
+                                let home = NetworkStatus::new(results[0], results[1], results[2]);
+                                let side = NetworkStatus::new(results[3], results[4], results[5]);
+                                Ok(StatusResponse::new(home, side))
                             })
                             .and_then(move |response| {
                                 info!("Status response: {:?}", response);

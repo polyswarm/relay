@@ -9,9 +9,9 @@ use web3::types::{Address, U256};
 use web3::{DuplexTransport, Web3};
 
 use super::anchor::HandleAnchors;
+use super::endpoint::{HandleRequests, RequestType};
 use super::errors::OperationError;
 use super::missed_transfer::HandleMissedTransfers;
-use super::query::{HandleQueries, HashQuery};
 use super::transfer::HandleTransfers;
 use failure::{Error, SyncFailure};
 
@@ -47,8 +47,8 @@ impl<T: DuplexTransport + 'static> Relay<T> {
         }
     }
 
-    fn handle_queries(&self, rx: mpsc::UnboundedReceiver<HashQuery>, handle: &reactor::Handle) -> HandleQueries {
-        HandleQueries::new(&self.homechain, &self.sidechain, rx, handle)
+    fn handle_requests(&self, rx: mpsc::UnboundedReceiver<RequestType>, handle: &reactor::Handle) -> HandleRequests {
+        HandleRequests::new(&self.homechain, &self.sidechain, rx, handle)
     }
 
     pub fn unlock(&self, password: &str) -> impl Future<Item = (), Error = Error> {
@@ -66,7 +66,7 @@ impl<T: DuplexTransport + 'static> Relay<T> {
     /// * `handle` - Handle to the event loop to spawn additional futures
     pub fn run(
         &self,
-        rx: mpsc::UnboundedReceiver<HashQuery>,
+        rx: mpsc::UnboundedReceiver<RequestType>,
         handle: &reactor::Handle,
     ) -> impl Future<Item = (), Error = ()> {
         self.sidechain
@@ -75,7 +75,7 @@ impl<T: DuplexTransport + 'static> Relay<T> {
             .join(self.sidechain.handle_transfers(&self.homechain, handle))
             .join(self.homechain.handle_missed_transfers(&self.sidechain, handle))
             .join(self.sidechain.handle_missed_transfers(&self.homechain, handle))
-            .join(self.handle_queries(rx, handle))
+            .join(self.handle_requests(rx, handle))
             .and_then(|_| Ok(()))
     }
 }

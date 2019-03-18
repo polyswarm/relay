@@ -37,6 +37,12 @@ pub enum EndpointError {
 
     #[fail(display = "receiver closed.")]
     UnableToSend,
+
+    #[fail(display = "unable to get relay status.")]
+    UnableToGetStatus,
+
+    #[fail(display = "timeout")]
+    Timeout,
 }
 
 impl ResponseError for EndpointError {
@@ -45,6 +51,8 @@ impl ResponseError for EndpointError {
             EndpointError::BadChain(_) => HttpResponse::new(http::StatusCode::BAD_REQUEST),
             EndpointError::BadTransactionHash(_) => HttpResponse::new(http::StatusCode::BAD_REQUEST),
             EndpointError::UnableToSend => HttpResponse::new(http::StatusCode::INTERNAL_SERVER_ERROR),
+            EndpointError::UnableToGetStatus => HttpResponse::new(http::StatusCode::INTERNAL_SERVER_ERROR),
+            EndpointError::Timeout => HttpResponse::new(http::StatusCode::REQUEST_TIMEOUT),
         }
     }
 }

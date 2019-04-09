@@ -40,7 +40,7 @@ RUN find ./src -type f -exec touch {} \; && \
 FROM ubuntu:bionic
 
 RUN apt-get update && apt-get install -y \
-        wget \
+        wget jq \
     && rm -rf /var/lib/apt/lists/*
 
 ENV DOCKERIZE_VERSION v0.6.1

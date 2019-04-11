@@ -34,11 +34,10 @@ coverage:
     - ./testutils/collect_coverage.sh --auto
 
 kick-e2e:
+    image: $CI_CUSTOM_DEV_REGISTRY_URI/ci-images/stage:latest
     tags:
         - docker
     stage: deploy
-    before_script:
-      - apk --no-cache add curl jq
     script:
       - set -e
 

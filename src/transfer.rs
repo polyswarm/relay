@@ -207,9 +207,8 @@ impl WatchTransfers {
                         )
                     })
                 })
-                .or_else(move |e| {
+                .map_err(move |e| {
                     error!("error in {:?} transfer stream: {}", network_type, e);
-                    Ok(())
                 })
         };
 

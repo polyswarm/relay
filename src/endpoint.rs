@@ -53,7 +53,11 @@ pub struct NetworkStatus {
 }
 
 impl NetworkStatus {
-    pub fn new(relay_eth_balance: Option<U256>, relay_last_block: Option<U256>, contract_nct_balance: Option<U256>) -> Self {
+    pub fn new(
+        relay_eth_balance: Option<U256>,
+        relay_last_block: Option<U256>,
+        contract_nct_balance: Option<U256>,
+    ) -> Self {
         NetworkStatus {
             relay_eth_balance,
             relay_last_block,

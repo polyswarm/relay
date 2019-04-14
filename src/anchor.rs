@@ -9,7 +9,7 @@ use web3::futures::prelude::*;
 use web3::futures::sync::mpsc;
 use web3::futures::try_ready;
 use web3::types::{BlockId, BlockNumber, H256, U256};
-use web3::DuplexTransport;
+use web3::{DuplexTransport, ErrorKind};
 
 /// Represents a block on the sidechain to be anchored to the homechain
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -74,8 +74,13 @@ impl<T: DuplexTransport + 'static> Future for HandleAnchors<T> {
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         loop {
             let anchor = try_ready!(self.stream.poll());
-            if let Some(a) = anchor {
-                self.handle.spawn(a.process(&self.target));
+            match anchor {
+                Some(a) => {
+                    self.handle.spawn(a.process(&self.target));
+                }
+                None => {
+                    return Err(());
+                }
             }
         }
     }
@@ -99,13 +104,19 @@ impl FindAnchors {
             let confirmations = source.confirmations;
             let handle = handle.clone();
             let web3 = source.web3.clone();
+            let timeout = source.timeout::<web3::types::BlockHeader>(&handle);
 
             source
                 .web3
                 .eth_subscribe()
                 .subscribe_new_heads()
-                .and_then(move |sub| {
-                    sub.for_each(move |head| {
+                .and_then(move |subscription| {
+                    timeout(Box::new(subscription)).map_err(|_| {
+                        web3::Error::from_kind(ErrorKind::Msg("Unable to start head subscription".to_string()))
+                    })
+                })
+                .and_then(move |timed| {
+                    timed.for_each(move |head| {
                         head.number.map_or_else(
                             || {
                                 warn!("no block number in block head event");
@@ -154,7 +165,7 @@ impl FindAnchors {
                                                     }
                                                 })
                                                 .or_else(|e| {
-                                                    error!("error waiting for anchor confirmations: {}", e);
+                                                    error!("error waiting for anchor confirmations: {:?}", e);
                                                     Ok(())
                                                 }),
                                         );
@@ -167,9 +178,8 @@ impl FindAnchors {
                         )
                     })
                 })
-                .or_else(move |e| {
+                .map_err(move |e| {
                     error!("error in {:?} anchor stream: {}", network_type, e);
-                    Ok(())
                 })
         };
 

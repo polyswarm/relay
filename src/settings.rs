@@ -70,6 +70,8 @@ pub struct Network {
     pub free: bool,
     /// seconds between checks for missed transactions
     pub interval: u64,
+    /// seconds until timeout on block events
+    pub timeout: u64,
 }
 
 impl Settings {

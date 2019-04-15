@@ -346,7 +346,8 @@ impl<T: DuplexTransport + 'static> Network<T> {
     }
 }
 
-/// TimeoutStream implements Stream, but times out
+/// TimeoutStream adds a timeout to an existing Stream.
+/// returns Err if too much time has passed since the last object from the stream
 pub struct TimeoutStream<I> {
     stream: Box<Stream<Item = I, Error = web3::Error>>,
     duration: Duration,
@@ -354,6 +355,13 @@ pub struct TimeoutStream<I> {
 }
 
 impl<I> TimeoutStream<I> {
+    /// Returns a newly created TimeoutStream Stream
+    ///
+    /// # Arguments
+    ///
+    /// * `stream` - Boxed stream to timeout
+    /// * `duration` - Duration of time to trigger the timeout
+    /// * `handle` - Handle to create a reactor::Timeout Future
     pub fn new(
         stream: Box<Stream<Item = I, Error = web3::Error>>,
         duration: Duration,
@@ -374,6 +382,7 @@ impl<I> Stream for TimeoutStream<I> {
     type Item = I;
     type Error = web3::Error;
 
+    /// Returns Items from the stream, or Err if timed out
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
         match self.stream.poll() {
             Ok(Async::NotReady) => match self.timeout.poll() {
@@ -395,10 +404,19 @@ impl<I> Stream for TimeoutStream<I> {
     }
 }
 
+/// Trait to add to any Stream for creating a TimeoutStream via timeout()
 pub trait Timeout<I> {
+    ///Returns a TimeoutStream that wraps the existing stream
+    ///
+    /// # Arguments
+    ///
+    /// * `self` - Existing Stream that this is added to. Consumes self.
+    /// * `duration` - Time in seconds to trigger a timeout
+    /// # `handle` - Tokio reactor::Handle for Creating Timeout Future
     fn timeout(self, duration: u64, handle: &reactor::Handle) -> Result<TimeoutStream<I>, ()>;
 }
 
+/// Add Timeout trait to SubscribtionStream, which is returned by web3.eth_subscribe()
 impl<T, I> Timeout<I> for SubscriptionStream<T, I>
 where
     T: DuplexTransport + 'static,

@@ -46,7 +46,7 @@ impl Transfer {
         &self,
         target: &Rc<Network<T>>,
     ) -> SendTransaction<T, Self> {
-        info!("approving withdrawal {} on {:?} ", self, target.network_type);
+        info!("approving withdrawal on {:?}: {} ", target.network_type, self);
         SendTransaction::new(target, "approveWithdrawal", self, target.retries)
     }
 }

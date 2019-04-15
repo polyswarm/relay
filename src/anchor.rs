@@ -1,4 +1,4 @@
-use super::relay::Network;
+use super::relay::{Network, Timeout};
 use super::transaction::SendTransaction;
 use ethabi::Token;
 use std::fmt;
@@ -102,16 +102,17 @@ impl FindAnchors {
             let network_type = source.network_type;
             let anchor_frequency = source.anchor_frequency;
             let confirmations = source.confirmations;
+            let h = handle.clone();
             let handle = handle.clone();
             let web3 = source.web3.clone();
-            let timeout = source.timeout::<web3::types::BlockHeader>(&handle);
+            let timeout = source.timeout;
 
             source
                 .web3
                 .eth_subscribe()
                 .subscribe_new_heads()
                 .and_then(move |subscription| {
-                    timeout(Box::new(subscription)).map_err(|_| {
+                    subscription.timeout(timeout, &h).map_err(|_| {
                         web3::Error::from_kind(ErrorKind::Msg("Unable to start head subscription".to_string()))
                     })
                 })

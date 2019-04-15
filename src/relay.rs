@@ -10,6 +10,7 @@ use std::rc::Rc;
 use std::sync::atomic::AtomicUsize;
 use std::time::{Duration, Instant};
 use tokio_core::reactor;
+use web3::api::SubscriptionStream;
 use web3::contract::Contract;
 use web3::futures::prelude::*;
 use web3::futures::sync::mpsc;
@@ -319,18 +320,6 @@ impl<T: DuplexTransport + 'static> Network<T> {
         HandleMissedTransfers::new(self, target, handle)
     }
 
-    pub fn timeout<I>(
-        &self,
-        handle: &reactor::Handle,
-    ) -> Box<Fn(Box<Stream<Item = I, Error = web3::Error>>) -> Result<TimeoutStream<I>, ()>> {
-        let timeout = Duration::from_secs(self.timeout);
-        let handle = handle.clone();
-        Box::new(move |stream| {
-            let handle = handle.clone();
-            TimeoutStream::new(stream, timeout, &handle)
-        })
-    }
-
     /// Returns a HandleAnchors Future for this chain.
     /// Will anchor block headers from this network to the target network.
     ///
@@ -358,15 +347,15 @@ impl<T: DuplexTransport + 'static> Network<T> {
 }
 
 /// TimeoutStream implements Stream, but times out
-pub struct TimeoutStream<T> {
-    stream: Box<Stream<Item = T, Error = web3::Error>>,
+pub struct TimeoutStream<I> {
+    stream: Box<Stream<Item = I, Error = web3::Error>>,
     duration: Duration,
     timeout: reactor::Timeout,
 }
 
-impl<T> TimeoutStream<T> {
+impl<I> TimeoutStream<I> {
     pub fn new(
-        stream: Box<Stream<Item = T, Error = web3::Error>>,
+        stream: Box<Stream<Item = I, Error = web3::Error>>,
         duration: Duration,
         handle: &reactor::Handle,
     ) -> Result<Self, ()> {
@@ -381,8 +370,8 @@ impl<T> TimeoutStream<T> {
     }
 }
 
-impl<T> Stream for TimeoutStream<T> {
-    type Item = T;
+impl<I> Stream for TimeoutStream<I> {
+    type Item = I;
     type Error = web3::Error;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
@@ -403,5 +392,21 @@ impl<T> Stream for TimeoutStream<T> {
             Ok(Async::Ready(None)) => Ok(Async::Ready(None)),
             Err(e) => Err(e),
         }
+    }
+}
+
+pub trait Timeout<I> {
+    fn timeout(self, duration: u64, handle: &reactor::Handle) -> Result<TimeoutStream<I>, ()>;
+}
+
+impl<T, I> Timeout<I> for SubscriptionStream<T, I>
+where
+    T: DuplexTransport + 'static,
+    I: serde::de::DeserializeOwned + 'static,
+{
+    fn timeout(self, duration: u64, handle: &reactor::Handle) -> Result<TimeoutStream<I>, ()> {
+        let timeout = Duration::from_secs(duration);
+        let handle = handle.clone();
+        TimeoutStream::new(Box::new(self), timeout, &handle)
     }
 }

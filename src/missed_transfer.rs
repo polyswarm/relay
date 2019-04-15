@@ -8,7 +8,7 @@ use web3::types::{Address, BlockNumber, FilterBuilder, U256};
 use web3::{DuplexTransport, ErrorKind};
 
 use super::contracts::TRANSFER_EVENT_SIGNATURE;
-use super::relay::Network;
+use super::relay::{Network, Timeout};
 use super::transfer::Transfer;
 
 pub const LOOKBACK_RANGE: u64 = 1_000;
@@ -33,14 +33,17 @@ impl FindMissedTransfers {
         let interval = source.interval;
         let confirmations = source.confirmations;
         let web3 = source.web3.clone();
-        let timeout = source.timeout::<web3::types::BlockHeader>(&handle);
+        let timeout = source.timeout;
 
-        let future = web3
+        let future = {
+            let handle = handle.clone();
+
+            web3
             .clone()
             .eth_subscribe()
             .subscribe_new_heads()
             .and_then(move |subscription| {
-                timeout(Box::new(subscription)).map_err(|_| {
+                subscription.timeout(timeout, &handle).map_err(|_| {
                     web3::Error::from_kind(ErrorKind::Msg("Unable to start head subscription".to_string()))
                 })
             })
@@ -184,7 +187,8 @@ impl FindMissedTransfers {
                 })
             }).map_err(move |e| {
                 error!("error getting chunked blocks: {}", e);
-            });
+            })
+        };
         handle.spawn(future);
         FindMissedTransfers(rx)
     }

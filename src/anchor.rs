@@ -25,7 +25,7 @@ impl Anchor {
     ///
     /// * `target` - Network to post the anchor
     fn process<T: DuplexTransport + 'static>(&self, target: &Rc<Network<T>>) -> SendTransaction<T, Self> {
-        info!("anchoring block {}", self);
+        info!("anchoring block {} to {:?}", self, target.network_type);
         SendTransaction::new(target, "anchor", self, target.retries)
     }
 }
@@ -120,7 +120,7 @@ impl FindAnchors {
                     timed.for_each(move |head| {
                         head.number.map_or_else(
                             || {
-                                warn!("no block number in block head event");
+                                warn!("no block number in block head event on {:?}", network_type);
                                 Ok(())
                             },
                             |block_number| {
@@ -138,12 +138,18 @@ impl FindAnchors {
                                                 .and_then(move |block| match block {
                                                     Some(b) => {
                                                         if b.number.is_none() {
-                                                            warn!("no block number in anchor block");
+                                                            warn!(
+                                                                "no block number in anchor block on {:?}",
+                                                                network_type
+                                                            );
                                                             return Ok(());
                                                         }
 
                                                         if b.hash.is_none() {
-                                                            warn!("no block hash in anchor block");
+                                                            warn!(
+                                                                "no block hash in anchor block on {:?}",
+                                                                network_type
+                                                            );
                                                             return Ok(());
                                                         }
 
@@ -155,18 +161,27 @@ impl FindAnchors {
                                                             block_number,
                                                         };
 
-                                                        info!("anchor block confirmed, anchoring: {}", &anchor);
+                                                        info!(
+                                                            "anchor block confirmed, anchoring on {:?}: {}",
+                                                            network_type, &anchor
+                                                        );
 
                                                         tx.unbounded_send(anchor).unwrap();
                                                         Ok(())
                                                     }
                                                     None => {
-                                                        warn!("no block found for anchor confirmations");
+                                                        warn!(
+                                                            "no block found for anchor confirmations on {:?}",
+                                                            network_type
+                                                        );
                                                         Ok(())
                                                     }
                                                 })
-                                                .or_else(|e| {
-                                                    error!("error waiting for anchor confirmations: {:?}", e);
+                                                .or_else(move |e| {
+                                                    error!(
+                                                        "error waiting for anchor confirmations on {:?}: {:?}",
+                                                        network_type, e
+                                                    );
                                                     Ok(())
                                                 }),
                                         );
@@ -180,7 +195,7 @@ impl FindAnchors {
                     })
                 })
                 .map_err(move |e| {
-                    error!("error in {:?} anchor stream: {}", network_type, e);
+                    error!("error in anchor stream on {:?}: {}", network_type, e);
                 })
         };
 

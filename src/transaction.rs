@@ -41,8 +41,9 @@ where
     P: Tokenize + Clone,
 {
     pub fn new(target: &Rc<Network<T>>, function_name: &str, params: P, nonce: Option<U256>) -> Self {
+        let network_type = target.network_type;
         let gas_future = target.web3.eth().gas_price().map_err(move |e| {
-            error!("error fetching current gas price: {}", e);
+            error!("error fetching current gas price on {:?}: {}", network_type, e);
         });
 
         BuildTransaction {
@@ -210,19 +211,23 @@ where
                 }
                 TransactionState::Send(ref mut future) => {
                     let target = self.target.clone();
+                    let network_type = target.network_type;
                     let function = self.function.clone();
                     match future.poll() {
                         Ok(Async::Ready(receipt)) => {
                             match receipt.status {
                                 Some(result) => {
                                     if result == 1.into() {
-                                        info!("{} successful: {:?}", function, receipt);
+                                        info!("{} on {:?} successful: {:?}", function, network_type, receipt);
                                     } else {
-                                        warn!("{} failed: {:?}", function, receipt);
+                                        warn!("{} on {:?} failed: {:?}", function, network_type, receipt);
                                     }
                                 }
                                 None => {
-                                    error!("{} receipt has no status: {:?}", function, receipt);
+                                    error!(
+                                        "{} receipt on {:?} has no status: {:?}",
+                                        function, network_type, receipt
+                                    );
                                 }
                             }
                             return Ok(Async::Ready(()));
@@ -231,18 +236,21 @@ where
                         Err(e) => {
                             let message = format!("{} failed: {:?}", function, e);
                             if self.retries > 0 && message.contains("nonce too low") {
-                                info!("Nonce desync detected, resyncing nonce and retrying");
+                                info!(
+                                    "Nonce desync detected on {:?}, resyncing nonce and retrying",
+                                    network_type
+                                );
                                 let nonce_future =
                                     target
                                         .web3
                                         .eth()
                                         .transaction_count(target.account, None)
                                         .map_err(move |_e| {
-                                            error!("Error getting transaction count. Are you connected to geth?");
+                                            error!("Error getting transaction count on {:?}", network_type);
                                         });
                                 TransactionState::ResyncNonce(Box::new(nonce_future))
                             } else {
-                                error!("error sending transaction: {:?}", e);
+                                error!("error sending transaction on {:?}: {:?}", network_type, e);
                                 return Err(());
                             }
                         }

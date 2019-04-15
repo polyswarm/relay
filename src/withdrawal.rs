@@ -105,6 +105,7 @@ impl<T: DuplexTransport + 'static> DoesRequireApproval<T> {
     pub fn new(target: &Rc<Network<T>>, transfer: &Transfer) -> Self {
         let approval_hash = Self::get_withdrawal_hash(transfer);
         let account = target.account;
+        let network_type = target.network_type;
         let future = Box::new(
             target
                 .relay
@@ -115,8 +116,8 @@ impl<T: DuplexTransport + 'static> DoesRequireApproval<T> {
                     Options::default(),
                     BlockNumber::Latest,
                 )
-                .map_err(|e| {
-                    error!("error getting withdrawal: {:?}", e);
+                .map_err(move |e| {
+                    error!("error getting withdrawal on {:?}: {:?}", network_type, e);
                 }),
         );
         let state = CheckWithdrawalState::GetWithdrawal(future);
@@ -145,6 +146,7 @@ impl<T: DuplexTransport + 'static> Future for DoesRequireApproval<T> {
     type Error = ();
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        let network_type = self.target.network_type;
         loop {
             let next = match self.state {
                 CheckWithdrawalState::GetWithdrawal(ref mut future) => {
@@ -153,17 +155,17 @@ impl<T: DuplexTransport + 'static> Future for DoesRequireApproval<T> {
                         || (withdrawal.destination == self.transfer.destination
                             && withdrawal.amount == self.transfer.amount)
                     {
-                        info!("found withdrawal: {:?}", withdrawal);
+                        info!("found withdrawal on {:?}: {:?}", network_type, withdrawal);
                         if withdrawal.processed {
                             return Ok(Async::Ready(false));
                         } else {
-                            info!("transaction not processed - checking approvers");
+                            info!("transaction not processed on {:?} - checking approvers", network_type);
                             let approval_hash = Self::get_withdrawal_hash(&self.transfer);
                             let approval_future = GetWithdrawalApprovals::new(&self.target, &approval_hash, &0.into());
                             CheckWithdrawalState::GetWithdrawalApprovals(0, approval_future)
                         }
                     } else {
-                        error!("withdrawal from contract did not match transfer");
+                        error!("withdrawal from contract did not match transfer on {:?}", network_type);
                         return Ok(Async::Ready(false));
                     }
                 }
@@ -203,6 +205,7 @@ impl GetWithdrawalApprovals {
     pub fn new<T: DuplexTransport + 'static>(target: &Rc<Network<T>>, approval_hash: &H256, index: &U256) -> Self {
         let target = target.clone();
         let account = target.account;
+        let network_type = target.network_type;
         let approval_query = ApprovalQuery::new(&approval_hash, &index);
         let approval_hash = *approval_hash;
         let future = Box::new(
@@ -217,7 +220,7 @@ impl GetWithdrawalApprovals {
                 )
                 .map_err(move |_| {
                     // We expect this error
-                    info!("found all approvers for {:?}", approval_hash);
+                    info!("found all approvers for {:?} on {:?}", network_type, approval_hash);
                 }),
         );
         GetWithdrawalApprovals(future)

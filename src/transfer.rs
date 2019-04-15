@@ -46,7 +46,7 @@ impl Transfer {
         &self,
         target: &Rc<Network<T>>,
     ) -> SendTransaction<T, Self> {
-        info!("approving withdrawal {}", self);
+        info!("approving withdrawal {} on {:?} ", self, target.network_type);
         SendTransaction::new(target, "approveWithdrawal", self, target.retries)
     }
 }
@@ -144,13 +144,13 @@ impl WatchTransfers {
                 .and_then(move |sub| {
                     sub.for_each(move |log| {
                         if Some(true) == log.removed {
-                            warn!("received removed log, revoke votes");
+                            warn!("received removed logon {:?}, revoke votes", network_type);
                             return Ok(());
                         }
 
                         log.transaction_hash.map_or_else(
                             || {
-                                warn!("log missing transaction hash");
+                                warn!("log missing transaction hash on {:?}", network_type);
                                 Ok(())
                             },
                             |tx_hash| {
@@ -159,8 +159,8 @@ impl WatchTransfers {
                                 let amount: U256 = log.data.0[..32].into();
 
                                 info!(
-                                    "received transfer event in tx hash {:?}, waiting for confirmations",
-                                    &tx_hash
+                                    "received transfer event in tx hash {:?} on {:?}, waiting for confirmations",
+                                    &tx_hash, network_type
                                 );
 
                                 handle.spawn(
@@ -172,12 +172,12 @@ impl WatchTransfers {
                                     )
                                     .and_then(move |receipt| {
                                         if receipt.block_number.is_none() {
-                                            warn!("no block number in transfer receipt");
+                                            warn!("no block number in transfer receipt on {:?}", network_type);
                                             return Ok(());
                                         }
 
                                         if receipt.block_hash.is_none() {
-                                            warn!("no block hash in transfer receipt");
+                                            warn!("no block hash in transfer receipt on {:?}", network_type);
                                             return Ok(());
                                         }
 
@@ -192,12 +192,15 @@ impl WatchTransfers {
                                             block_number,
                                         };
 
-                                        info!("transfer event confirmed, approving {}", &transfer);
+                                        info!(
+                                            "transfer event on {:?} confirmed, approving {}",
+                                            network_type, &transfer
+                                        );
                                         tx.unbounded_send(transfer).unwrap();
                                         Ok(())
                                     })
-                                    .or_else(|e| {
-                                        error!("error waiting for transfer confirmations: {}", e);
+                                    .or_else(move |e| {
+                                        error!("error waiting for transfer confirmations on {:?}: {}", network_type, e);
                                         Ok(())
                                     }),
                                 );
@@ -208,7 +211,7 @@ impl WatchTransfers {
                     })
                 })
                 .map_err(move |e| {
-                    error!("error in {:?} transfer stream: {}", network_type, e);
+                    error!("error in transfer stream on {:?}: {}", network_type, e);
                 })
         };
 

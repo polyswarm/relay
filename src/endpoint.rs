@@ -381,8 +381,9 @@ impl<T: DuplexTransport + 'static> FindTransferInTransaction<T> {
     /// * `hash` - Transaction hash to check
     fn new(source: &Rc<Network<T>>, hash: &H256) -> Self {
         let web3 = source.web3.clone();
-        let future = web3.clone().eth().transaction_receipt(*hash).map_err(|e| {
-            error!("error getting transaction receipt: {:?}", e);
+        let network_type = source.network_type;
+        let future = web3.clone().eth().transaction_receipt(*hash).map_err(move |e| {
+            error!("error getting transaction receipt on {:?}: {:?}", network_type, e);
         });
         let state = FindTransferState::FetchReceipt(Box::new(future));
         FindTransferInTransaction {
@@ -399,12 +400,13 @@ impl<T: DuplexTransport + 'static> Future for FindTransferInTransaction<T> {
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         loop {
             let source = self.source.clone();
+            let network_type = source.network_type;
             let hash = self.hash;
             let next = match self.state {
                 FindTransferState::ExtractTransfers(ref mut future) => {
                     let transfers = try_ready!(future.poll());
                     if transfers.is_empty() {
-                        warn!("no relay transactions found at {:?}", hash);
+                        warn!("no relay transactions found on {:?} at {:?}", network_type, hash);
                         return Err(());
                     } else {
                         return Ok(Async::Ready(transfers));
@@ -415,13 +417,13 @@ impl<T: DuplexTransport + 'static> Future for FindTransferInTransaction<T> {
                     match receipt {
                         Some(r) => {
                             if r.block_hash.is_none() {
-                                error!("receipt did not have block hash");
+                                error!("receipt did not have block hash on {:?}", network_type);
                                 return Err(());
                             }
                             let block_hash = r.block_hash.unwrap();
                             r.block_number.map_or_else(
                                 || {
-                                    error!("receipt did not have block number");
+                                    error!("receipt did not have block number on {:?}", network_type);
                                     Err(())
                                 },
                                 |receipt_block| {
@@ -438,14 +440,17 @@ impl<T: DuplexTransport + 'static> Future for FindTransferInTransaction<T> {
                                                 if confirmed > source.confirmations {
                                                     let logs = r.logs;
                                                     for log in logs {
-                                                        info!("found log at {:?}: {:?}", hash, log);
+                                                        info!(
+                                                            "found log at {:?} on {:?}: {:?}",
+                                                            hash, network_type, log
+                                                        );
                                                         if log.topics[0] == TRANSFER_EVENT_SIGNATURE.into()
                                                             && log.topics[2] == source.relay.address().into()
                                                         {
                                                             let destination: Address = log.topics[1].into();
                                                             let amount: U256 = log.data.0[..32].into();
                                                             if destination == Address::zero() {
-                                                                info!("found mint. Skipping");
+                                                                info!("found mint on {:?}. Skipping", network_type);
                                                                 continue;
                                                             }
                                                             let transfer = Transfer {
@@ -462,8 +467,8 @@ impl<T: DuplexTransport + 'static> Future for FindTransferInTransaction<T> {
                                             }
                                             Ok(transfers)
                                         })
-                                        .map_err(|e| {
-                                            error!("error getting current block: {:?}", e);
+                                        .map_err(move |e| {
+                                            error!("error getting current block on {:?}: {:?}", network_type, e);
                                         });
                                     Ok(FindTransferState::ExtractTransfers(Box::new(future)))
                                 },

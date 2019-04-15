@@ -56,7 +56,7 @@ impl FindMissedTransfers {
                     let handle = handle.clone();
                     let tx = tx.clone();
                     head.number.map_or_else(|| {
-                        warn!("No block number in header");
+                        warn!("No block number in header on {:?}", network_type);
                         future::Either::A(future::ok(()))
                     },
                     move |block_number| {
@@ -111,13 +111,13 @@ impl FindMissedTransfers {
                                         );
                                         logs.iter().for_each(|log| {
                                             if Some(true) == log.removed {
-                                                warn!("found removed log");
+                                                warn!("found removed log on {:?}", network_type);
                                                 return;
                                             }
 
                                             log.transaction_hash.map_or_else(
                                                 || {
-                                                    warn!("log missing transaction hash");
+                                                    warn!("log missing transaction hash on {:?}", network_type);
                                                     return;
                                                 },
                                                 |tx_hash| {
@@ -125,10 +125,10 @@ impl FindMissedTransfers {
                                                     let destination: Address = log.topics[1].into();
                                                     let amount: U256 = log.data.0[..32].into();
                                                     if destination == Address::zero() {
-                                                        info!("found mint. Skipping");
+                                                        info!("found mint on {:?}. Skipping", network_type);
                                                         return;
                                                     }
-                                                    info!("found transfer event in tx hash {:?}", &tx_hash);
+                                                    info!("found transfer event on {:?} in tx hash {:?}", network_type, &tx_hash);
                                                     handle.spawn(
                                                         web3.eth()
                                                             .transaction_receipt(tx_hash)
@@ -137,19 +137,20 @@ impl FindMissedTransfers {
                                                                 transaction_receipt.map_or_else(
                                                                     || {
                                                                         error!(
-                                                                            "no receipt found for transaction hash {}",
-                                                                            &tx_hash
+                                                                            "no receipt found for transaction hash {} on {:?}",
+                                                                            &tx_hash,
+                                                                            network_type
                                                                         );
                                                                         Ok(())
                                                                     },
                                                                     |receipt| {
                                                                         if receipt.block_number.is_none() {
-                                                                            warn!("no block number in transfer receipt");
+                                                                            warn!("no block number in transfer receipt on {:?}", network_type);
                                                                             return Ok(());
                                                                         }
 
                                                                         if receipt.block_hash.is_none() {
-                                                                            warn!("no block hash in transfer receipt");
+                                                                            warn!("no block hash in transfer receipton {:?}", network_type);
                                                                             return Ok(());
                                                                         }
 
@@ -164,15 +165,16 @@ impl FindMissedTransfers {
                                                                             block_number,
                                                                         };
                                                                         info!(
-                                                                            "transfer event found, checking for approval {}",
-                                                                            &transfer
+                                                                            "transfer event {} found on {:?}, checking for approval ",
+                                                                            &transfer,
+                                                                            network_type
                                                                         );
                                                                         tx.unbounded_send(transfer).unwrap();
                                                                         Ok(())
                                                                     },
                                                                 )
                                                             }).or_else(move |e| {
-                                                                error!("error approving transaction: {}", e);
+                                                                error!("error approving transaction on {:?}: {}", network_type, e);
                                                                 Ok(())
                                                             })
                                                     );
@@ -186,7 +188,7 @@ impl FindMissedTransfers {
                     })
                 })
             }).map_err(move |e| {
-                error!("error getting chunked blocks: {}", e);
+                error!("error in block head stream on {:?}: {}", network_type, e);
             })
         };
         handle.spawn(future);
@@ -259,8 +261,9 @@ impl<T: DuplexTransport + 'static> ValidateAndApproveTransfer<T> {
     /// * `handle` - Handle to spawn new futures
     /// * `transfer` - Transfer event to check/approve
     pub fn new(target: &Rc<Network<T>>, handle: &reactor::Handle, transfer: &Transfer) -> Self {
-        let future = transfer.check_withdrawal(&target).map_err(|e| {
-            error!("error checking withdrawal for approval: {:?}", e);
+        let network_type = target.network_type;
+        let future = transfer.check_withdrawal(&target).map_err(move |e| {
+            error!("error checking withdrawal for approval on {:?}: {:?}", network_type, e);
         });
 
         ValidateAndApproveTransfer {
@@ -280,7 +283,10 @@ impl<T: DuplexTransport + 'static> Future for ValidateAndApproveTransfer<T> {
         if needs_approval {
             let target = self.target.clone();
             let handle = self.handle.clone();
-            info!("approving missed transfer: {:?}", self.transfer);
+            info!(
+                "approving missed transfer on {:?}: {:?}",
+                target.network_type, self.transfer
+            );
             handle.spawn(self.transfer.approve_withdrawal(&target));
         }
         Ok(Async::Ready(()))

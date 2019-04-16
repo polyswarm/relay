@@ -81,7 +81,7 @@ impl<T: DuplexTransport + 'static> Relay<T> {
             .join(self.handle_requests(rx, handle))
             .and_then(|_| Ok(()))
             .map_err(|_| {
-                process::exit(1);
+                process::exit(-1);
             })
     }
 }

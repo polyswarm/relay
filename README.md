@@ -52,9 +52,12 @@ Use the http endpoint to force a scan of an existing transaction that was missed
 While relay automatically looks at old transactions to find any that it missed, the range is limited for performance.
 The endpoint fills the gap in transactions missed to to long downtimes, by allowing someone to specify a transaction hash with a transfer.
 
-The endpoint only has one route to hit.
+Additionally, there is a status route that will show the latest blocks for each network, along with the remaining NCT in the contract
+
+### Routes
 
 **POST** `/[chain]/[transaction hash]`
+**GET** `/status`
 
 
 ## Running tests

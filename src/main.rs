@@ -221,7 +221,8 @@ fn run(
                             &erc20_relay_abi,
                             settings.relay.homechain.free,
                             settings.relay.confirmations,
-                            settings.relay.sidechain.interval,
+                            settings.relay.homechain.interval,
+                            settings.relay.homechain.timeout,
                             home_chain_id,
                             &settings.relay.keydir,
                             &settings.relay.password,
@@ -240,6 +241,7 @@ fn run(
                             settings.relay.confirmations,
                             settings.relay.anchor_frequency,
                             settings.relay.sidechain.interval,
+                            settings.relay.sidechain.timeout,
                             side_chain_id,
                             &settings.relay.keydir,
                             &settings.relay.password,
@@ -256,15 +258,8 @@ fn run(
                     });
                     Ok(())
                 })
-                .or_else(|e| {
-                    error!("{:?}", e);
-                    error!("error getting transaction count on sidechain. Are you connected to geth?");
-                    Ok(())
-                })
         })
-        .or_else(|e| {
-            error!("{:?}", e);
-            error!("error getting transaction count on homechain. Are you connected to geth?");
-            Ok(())
+        .map_err(|e| {
+            error!("error getting transaction count: {:?}", e);
         })
 }

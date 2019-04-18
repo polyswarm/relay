@@ -1,19 +1,22 @@
-use std::rc::Rc;
-use std::sync::atomic::AtomicUsize;
-use tokio_core::reactor;
-
-use web3::contract::Contract;
-use web3::futures::sync::mpsc;
-use web3::futures::Future;
-use web3::types::{Address, U256};
-use web3::{DuplexTransport, Web3};
-
 use super::anchor::HandleAnchors;
 use super::endpoint::{HandleRequests, RequestType};
 use super::errors::OperationError;
 use super::missed_transfer::HandleMissedTransfers;
 use super::transfer::HandleTransfers;
 use failure::{Error, SyncFailure};
+use std::ops::Add;
+use std::process;
+use std::rc::Rc;
+use std::sync::atomic::AtomicUsize;
+use std::time::{Duration, Instant};
+use tokio_core::reactor;
+use web3::api::SubscriptionStream;
+use web3::contract::Contract;
+use web3::futures::prelude::*;
+use web3::futures::sync::mpsc;
+use web3::futures::{stream::Stream, Future};
+use web3::types::{Address, U256};
+use web3::{DuplexTransport, ErrorKind, Web3};
 
 const FREE_GAS_PRICE: u64 = 0;
 const GAS_LIMIT: u64 = 200_000;
@@ -77,6 +80,9 @@ impl<T: DuplexTransport + 'static> Relay<T> {
             .join(self.sidechain.handle_missed_transfers(&self.homechain, handle))
             .join(self.handle_requests(rx, handle))
             .and_then(|_| Ok(()))
+            .map_err(|_| {
+                process::exit(-1);
+            })
     }
 }
 
@@ -101,6 +107,7 @@ pub struct Network<T: DuplexTransport> {
     pub confirmations: u64,
     pub anchor_frequency: u64,
     pub interval: u64,
+    pub timeout: u64,
     pub chain_id: u64,
     pub keydir: String,
     pub password: String,
@@ -132,6 +139,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
         confirmations: u64,
         anchor_frequency: u64,
         interval: u64,
+        timeout: u64,
         chain_id: u64,
         keydir: &str,
         password: &str,
@@ -167,6 +175,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
             confirmations,
             anchor_frequency,
             interval,
+            timeout,
             chain_id,
             keydir: keydir.to_string(),
             password: password.to_string(),
@@ -193,6 +202,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
         free: bool,
         confirmations: u64,
         interval: u64,
+        timeout: u64,
         chain_id: u64,
         keydir: &str,
         password: &str,
@@ -211,6 +221,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
             confirmations,
             0,
             interval,
+            timeout,
             chain_id,
             keydir,
             password,
@@ -239,6 +250,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
         confirmations: u64,
         anchor_frequency: u64,
         interval: u64,
+        timeout: u64,
         chain_id: u64,
         keydir: &str,
         password: &str,
@@ -257,6 +269,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
             confirmations,
             anchor_frequency,
             interval,
+            timeout,
             chain_id,
             keydir,
             password,
@@ -330,5 +343,88 @@ impl<T: DuplexTransport + 'static> Network<T> {
             return FREE_GAS_PRICE.into();
         }
         potential_gas_price
+    }
+}
+
+/// TimeoutStream adds a timeout to an existing Stream.
+/// returns Err if too much time has passed since the last object from the stream
+pub struct TimeoutStream<I> {
+    stream: Box<Stream<Item = I, Error = web3::Error>>,
+    duration: Duration,
+    timeout: reactor::Timeout,
+}
+
+impl<I> TimeoutStream<I> {
+    /// Returns a newly created TimeoutStream Stream
+    ///
+    /// # Arguments
+    ///
+    /// * `stream` - Boxed stream to timeout
+    /// * `duration` - Duration of time to trigger the timeout
+    /// * `handle` - Handle to create a reactor::Timeout Future
+    pub fn new(
+        stream: Box<Stream<Item = I, Error = web3::Error>>,
+        duration: Duration,
+        handle: &reactor::Handle,
+    ) -> Result<Self, ()> {
+        let timeout = reactor::Timeout::new(duration, handle).map_err(move |e| {
+            error!("error creating timeout: {:?}", e);
+        })?;
+        Ok(TimeoutStream {
+            stream,
+            duration,
+            timeout,
+        })
+    }
+}
+
+impl<I> Stream for TimeoutStream<I> {
+    type Item = I;
+    type Error = web3::Error;
+
+    /// Returns Items from the stream, or Err if timed out
+    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
+        match self.stream.poll() {
+            Ok(Async::NotReady) => match self.timeout.poll() {
+                Ok(Async::Ready(_)) => Err(web3::Error::from_kind(ErrorKind::Msg(
+                    "Geth connection unavailable".to_string(),
+                ))),
+                Ok(Async::NotReady) => Ok(Async::NotReady),
+                Err(_) => Err(web3::Error::from_kind(ErrorKind::Msg("Timeout broken".to_string()))),
+            },
+            Ok(Async::Ready(Some(msg))) => {
+                let mut at = Instant::now();
+                at = at.add(self.duration);
+                self.timeout.reset(at);
+                Ok(Async::Ready(Some(msg)))
+            }
+            Ok(Async::Ready(None)) => Ok(Async::Ready(None)),
+            Err(e) => Err(e),
+        }
+    }
+}
+
+/// Trait to add to any Stream for creating a TimeoutStream via timeout()
+pub trait Timeout<I> {
+    ///Returns a TimeoutStream that wraps the existing stream
+    ///
+    /// # Arguments
+    ///
+    /// * `self` - Existing Stream that this is added to. Consumes self.
+    /// * `duration` - Time in seconds to trigger a timeout
+    /// # `handle` - Tokio reactor::Handle for Creating Timeout Future
+    fn timeout(self, duration: u64, handle: &reactor::Handle) -> Result<TimeoutStream<I>, ()>;
+}
+
+/// Add Timeout trait to SubscribtionStream, which is returned by web3.eth_subscribe()
+impl<T, I> Timeout<I> for SubscriptionStream<T, I>
+where
+    T: DuplexTransport + 'static,
+    I: serde::de::DeserializeOwned + 'static,
+{
+    fn timeout(self, duration: u64, handle: &reactor::Handle) -> Result<TimeoutStream<I>, ()> {
+        let timeout = Duration::from_secs(duration);
+        let handle = handle.clone();
+        TimeoutStream::new(Box::new(self), timeout, &handle)
     }
 }

@@ -92,6 +92,8 @@ impl Settings {
         c.set_default("relay.community", "")?;
         c.set_default("relay.homechain.interval", 30)?;
         c.set_default("relay.sidechain.interval", 30)?;
+        c.set_default("relay.homechain.timeout", 30)?;
+        c.set_default("relay.sidechain.timeout", 30)?;
         c.set_default("relay.retries", 10)?;
 
         // XXX: Get default from the CONSUL_TOKEN environment variable, look into naming such that

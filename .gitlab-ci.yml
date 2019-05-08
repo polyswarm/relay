@@ -4,6 +4,9 @@ stages:
   - coverage
   - e2e
   - deploy
+  
+services:
+  - docker:dind
 
 lint:
   stage: lint

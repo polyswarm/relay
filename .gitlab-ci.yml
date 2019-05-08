@@ -2,6 +2,7 @@ stages:
   - lint
   - test
   - coverage
+  - e2e
   - deploy
 
 lint:
@@ -37,7 +38,7 @@ kick-e2e:
     image: $CI_CUSTOM_DEV_REGISTRY_URI/ci-images/stage:latest
     tags:
         - docker
-    stage: deploy
+    stage: e2e
     script:
       - set -e
 
@@ -69,3 +70,14 @@ kick-e2e:
           echo "failure further down the pipeline"
           exit 1
         fi
+
+builddock:
+  stage: deploy
+  only:
+    - master
+    - feature/docker-build
+  script:
+    - docker build -t polyswarm/relay:latest -t polyswarm/relay:$CI_COMMIT_SHA --label git_commit_id=$CI_COMMIT_SHA -f docker/Dockerfile .
+    - docker login -u $CI_CUSTOM_DOCKER_HUB_USERNAME -p $CI_CUSTOM_DOCKER_HUB_PASSWORD
+    - docker push polyswarm/relay:latest
+    - docker push polyswarm/relay:$CI_COMMIT_SHA

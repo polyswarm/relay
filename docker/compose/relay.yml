@@ -1,7 +1,7 @@
 version: '3'
 services:
     relay0:
-        image: "005789955001.dkr.ecr.us-east-1.amazonaws.com/relay"
+        image: "polyswarm/relay"
         depends_on:
             - homechain
             - sidechain
@@ -18,7 +18,7 @@ services:
             - sidechain
             - consul
     relay1:
-        image: "005789955001.dkr.ecr.us-east-1.amazonaws.com/relay"
+        image: "polyswarm/relay"
         depends_on:
             - homechain
             - sidechain
@@ -35,7 +35,7 @@ services:
             - sidechain
             - consul
     relay2:
-        image: "005789955001.dkr.ecr.us-east-1.amazonaws.com/relay"
+        image: "polyswarm/relay"
         depends_on:
             - homechain
             - sidechain 

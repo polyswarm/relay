@@ -10,7 +10,7 @@ services:
         depends_on:
             - homechain
             - sidechain
-        image: "005789955001.dkr.ecr.us-east-1.amazonaws.com/contracts"
+        image: "polyswarm/contracts"
         environment:
             - geth=homechain
             - HOME_CHAIN=http://homechain:8545

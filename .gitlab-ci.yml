@@ -97,5 +97,5 @@ container_deployECR:
     - docker build -t "$REPO_URL/relay:latest" -t "$REPO_URL/relay:$CI_COMMIT_SHA" -f docker/Dockerfile .
     - docker push "$REPO_URL/relay:latest"
     - docker push "$REPO_URL/relay:$CI_COMMIT_SHA"
- only:
+    only:
     - master

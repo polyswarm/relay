@@ -91,6 +91,7 @@ container_deployECR:
     - docker
     stage: deployECR
     script:
+    - apk add --no-cache py-pip
     - pip install awscli
     - docker logout
     - $(aws ecr get-login --no-include-email --region us-east-1)

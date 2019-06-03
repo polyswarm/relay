@@ -100,3 +100,4 @@ container_deployECR:
     - docker push "$REPO_URL/relay:$CI_COMMIT_SHA"
     only:
     - master
+

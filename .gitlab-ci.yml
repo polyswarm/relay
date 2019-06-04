@@ -4,6 +4,7 @@ stages:
   - coverage
   - e2e
   - deploy
+  - deployECR
   
 services:
   - docker:dind

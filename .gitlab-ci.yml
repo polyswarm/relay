@@ -84,3 +84,18 @@ builddock:
     - docker login -u $CI_CUSTOM_DOCKER_HUB_USERNAME -p $CI_CUSTOM_DOCKER_HUB_PASSWORD
     - docker push polyswarm/relay:latest
     - docker push polyswarm/relay:$CI_COMMIT_SHA
+
+container_deployECR:
+    tags:
+    - docker
+    stage: deployECR
+    script:
+    - apk add --no-cache py-pip
+    - pip install awscli
+    - docker logout
+    - $(aws ecr get-login --no-include-email --region us-east-1)
+    - docker build -t "$REPO_URL/relay:latest" -t "$REPO_URL/relay:$CI_COMMIT_SHA" -f docker/Dockerfile .
+    - docker push "$REPO_URL/relay:latest"
+    - docker push "$REPO_URL/relay:$CI_COMMIT_SHA"
+    only:
+    - master

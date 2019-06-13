@@ -33,7 +33,9 @@ RUN find ./src -type f -exec touch {} \; \
 
 # These are being copied here due to default configurations in "orchestration"
 # TODO: "orchestration" should not provide explicit or absolte paths
-COPY ./docker/config.toml /config.toml
+COPY ./docker/config.toml ./config.toml
 COPY ./docker/keyfiles /keyfiles
+
+COPY ./lint.sh ./test.sh ./coverage.sh ./
 
 CMD ["polyswarm-relay", "--config", "config.toml"]

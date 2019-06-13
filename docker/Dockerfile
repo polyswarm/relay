@@ -31,7 +31,9 @@ RUN find ./src -type f -exec touch {} \; \
     && cargo build --release \
     && cp /polyswarm-relay/target/release/polyswarm-relay /usr/local/bin
 
-COPY ./docker/config.toml ./config.toml
-COPY ./docker/keyfiles ./keyfiles
+# These are being copied here due to default configurations in "orchestration"
+# TODO: "orchestration" should not provide explicit or absolte paths
+COPY ./docker/config.toml /config.toml
+COPY ./docker/keyfiles /keyfiles
 
 CMD ["polyswarm-relay", "--config", "config.toml"]

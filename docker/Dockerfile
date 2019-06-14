@@ -36,6 +36,4 @@ RUN find ./src -type f -exec touch {} \; \
 COPY ./docker/config.toml ./config.toml
 COPY ./docker/keyfiles /keyfiles
 
-COPY ./lint.sh ./test.sh ./coverage.sh ./
-
 CMD ["polyswarm-relay", "--config", "config.toml"]

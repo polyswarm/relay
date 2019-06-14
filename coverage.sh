@@ -7,4 +7,4 @@ apt-get install -y jq zsh binutils-dev libcurl4-openssl-dev zlib1g-dev libdw-dev
 rustup update nightly # required for kcov instrumentation
 rustup default nightly
 cargo install cargo-cov
-./testutils/collect_coverage.sh --auto
+./collect_coverage.sh --auto

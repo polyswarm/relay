@@ -37,7 +37,7 @@ test:
     - kube
   script:
     - docker pull $REPO_URL/$BASE_IMAGE_NAME:$CI_COMMIT_SHA
-    - docker run $REPO_URL/$BASE_IMAGE_NAME:$CI_COMMIT_SHA test.sh
+    - docker run $REPO_URL/$BASE_IMAGE_NAME:$CI_COMMIT_SHA ./test.sh
 
 test-lint:
   stage: test
@@ -46,7 +46,7 @@ test-lint:
   allow_failure: true
   script:
     - docker pull $REPO_URL/$BASE_IMAGE_NAME:$CI_COMMIT_SHA
-    - docker run $REPO_URL/$BASE_IMAGE_NAME:$CI_COMMIT_SHA lint.sh
+    - docker run $REPO_URL/$BASE_IMAGE_NAME:$CI_COMMIT_SHA ./lint.sh
 
 test-coverage:
   stage: test
@@ -56,7 +56,7 @@ test-coverage:
   coverage: '/COVERAGE:\d+\.\d+/'
   script:
     - docker pull $REPO_URL/$BASE_IMAGE_NAME:$CI_COMMIT_SHA
-    - docker run $REPO_URL/$BASE_IMAGE_NAME:$CI_COMMIT_SHA coverage.sh
+    - docker run $REPO_URL/$BASE_IMAGE_NAME:$CI_COMMIT_SHA ./coverage.sh
 
 ###############################################################
 # End-to-end Stage

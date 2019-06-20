@@ -1,47 +1,70 @@
-stages:
-  - lint
-  - test
-  - coverage
-  - e2e
-  - deploy
-  - deployECR
-  
+image: $REPO_URL/stage
+
 services:
   - docker:dind
 
-lint:
-  stage: lint
-  image: rust:1.31.1
-  allow_failure: true
+stages:
+  - build
+  - test
+  - e2e
+  - release
+  - deployment
+
+variables:
+  DOCKER_HOST: tcp://localhost:2375/
+  BASE_IMAGE_NAME: relay
+
+###############################################################
+# Build Stage (jobs inside a stage run in parallel)
+###############################################################
+
+build:
+  stage: build
+  tags:
+    - kube
   script:
-    - rustup component add rustfmt
-    - cargo fmt --all -- --check
-    - rustup component add clippy
-    - cargo clippy
+    - docker pull $REPO_URL/$BASE_IMAGE_NAME:latest || true
+    - docker build -t $REPO_URL/$BASE_IMAGE_NAME:$CI_COMMIT_SHA -f docker/Dockerfile --cache-from=$REPO_URL/$BASE_IMAGE_NAME:latest .
+    - docker push $REPO_URL/$BASE_IMAGE_NAME:$CI_COMMIT_SHA
+
+###############################################################
+# Test Stage
+###############################################################
 
 test:
   stage: test
-  image: rust:1.31.1
+  tags:
+    - kube
   script:
-    - cargo test --verbose
+    - docker pull $REPO_URL/$BASE_IMAGE_NAME:$CI_COMMIT_SHA
+    - docker run $REPO_URL/$BASE_IMAGE_NAME:$CI_COMMIT_SHA ./test.sh
 
-coverage:
-  stage: coverage
-  image: rust:1.31.1
+test-lint:
+  stage: test
+  tags:
+    - kube
+  allow_failure: true
+  script:
+    - docker pull $REPO_URL/$BASE_IMAGE_NAME:$CI_COMMIT_SHA
+    - docker run $REPO_URL/$BASE_IMAGE_NAME:$CI_COMMIT_SHA ./lint.sh
+
+test-coverage:
+  stage: test
+  tags:
+    - kube
   allow_failure: true
   coverage: '/COVERAGE:\d+\.\d+/'
   script:
-    - apt-get update
-    - apt-get install -y jq zsh binutils-dev libcurl4-openssl-dev zlib1g-dev libdw-dev libiberty-dev unzip cmake build-essential
-    - rustup update nightly # required for kcov instrumentation
-    - rustup default nightly
-    - cargo install cargo-cov
-    - ./testutils/collect_coverage.sh --auto
+    - docker pull $REPO_URL/$BASE_IMAGE_NAME:$CI_COMMIT_SHA
+    - docker run $REPO_URL/$BASE_IMAGE_NAME:$CI_COMMIT_SHA ./coverage.sh
+
+###############################################################
+# End-to-end Stage
+###############################################################
 
 kick-e2e:
-    image: $CI_CUSTOM_DEV_REGISTRY_URI/ci-images/stage:latest
     tags:
-        - docker
+      - kube
     stage: e2e
     script:
       - set -e
@@ -75,28 +98,33 @@ kick-e2e:
           exit 1
         fi
 
-builddock:
-  stage: deploy
+###############################################################
+# Release Stage
+###############################################################
+
+release-latest:
+  stage: release
+  tags:
+    - kube
   only:
     - master
-    - feature/docker-build
   script:
-    - docker build -t polyswarm/relay:latest -t polyswarm/relay:$CI_COMMIT_SHA --label git_commit_id=$CI_COMMIT_SHA -f docker/Dockerfile .
-    - docker login -u $CI_CUSTOM_DOCKER_HUB_USERNAME -p $CI_CUSTOM_DOCKER_HUB_PASSWORD
-    - docker push polyswarm/relay:latest
-    - docker push polyswarm/relay:$CI_COMMIT_SHA
-
-container_deployECR:
-    tags:
-    - docker
-    stage: deployECR
-    script:
-    - apk add --no-cache py-pip
-    - pip install awscli
+    # Gets the current image that was built in the CI for this commit
+    - docker pull $REPO_URL/$BASE_IMAGE_NAME:$CI_COMMIT_SHA
+    # Creates new tags for this image, one that should go to AWS and another to DockerHub with the tag "latest"
+    - docker tag $REPO_URL/$BASE_IMAGE_NAME:$CI_COMMIT_SHA $REPO_URL/$BASE_IMAGE_NAME:latest polyswarm/$BASE_IMAGE_NAME:latest
+    # Pushes to AWS
+    - docker push $REPO_URL/$BASE_IMAGE_NAME:latest
+    # Pushes to DockerHub
     - docker logout
-    - $(aws ecr get-login --no-include-email --region us-east-1)
-    - docker build -t "$REPO_URL/relay:latest" -t "$REPO_URL/relay:$CI_COMMIT_SHA" -f docker/Dockerfile .
-    - docker push "$REPO_URL/relay:latest"
-    - docker push "$REPO_URL/relay:$CI_COMMIT_SHA"
-    only:
-    - master
+    - docker login -u $CI_CUSTOM_DOCKER_HUB_USERNAME -p $CI_CUSTOM_DOCKER_HUB_PASSWORD
+    - docker push polyswarm/$BASE_IMAGE_NAME:latest
+
+###############################################################
+# Deployment Stage
+###############################################################
+
+
+
+
+

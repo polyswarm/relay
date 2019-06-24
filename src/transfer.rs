@@ -73,54 +73,22 @@ impl fmt::Display for Transfer {
     }
 }
 
-/// Future to start up and process a stream of transfers
+/// Stream of transfer events that have been on the main chain for N blocks.
+/// N is confirmations per settings.
 pub struct HandleTransfers<T: DuplexTransport + 'static> {
-    target: Rc<Network<T>>,
-    stream: WatchTransfers,
     handle: reactor::Handle,
+    rx: mpsc::UnboundedReceiver<Transfer>,
+    target: Rc<Network<T>>,
 }
 
 impl<T: DuplexTransport + 'static> HandleTransfers<T> {
-    /// Returns a newly created HandleTransfers Future
-    ///
-    /// # Arguments
-    ///
-    /// * `source` - Network where the transfers are performed
-    /// * `target` - Network where the withdrawal will be posted to the contract
-    /// * `handle` - Handle to spawn new futures
-    pub fn new(source: &Network<T>, target: &Rc<Network<T>>, handle: &reactor::Handle) -> Self {
-        let handle = handle.clone();
-        let target = target.clone();
-        let stream = WatchTransfers::new(source, &handle);
-        HandleTransfers { target, stream, handle }
-    }
-}
-
-impl<T: DuplexTransport + 'static> Future for HandleTransfers<T> {
-    type Item = ();
-    type Error = ();
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        loop {
-            let transfer = try_ready!(self.stream.poll());
-            if let Some(t) = transfer {
-                self.handle.spawn(t.approve_withdrawal(&self.target));
-            }
-        }
-    }
-}
-
-/// Stream of transfer events that have been on the main chain for N blocks.
-/// N is confirmations per settings.
-struct WatchTransfers(mpsc::UnboundedReceiver<Transfer>);
-
-impl WatchTransfers {
     /// Returns a newly created WatchTransfers Stream
     ///
     /// # Arguments
     ///
     /// * `source` - Network where the transfers are performed
     /// * `handle` - Handle to spawn new futures
-    fn new<T: DuplexTransport + 'static>(source: &Network<T>, handle: &reactor::Handle) -> Self {
+    pub fn new(source: &Network<T>, target: &Rc<Network<T>>, handle: &reactor::Handle) -> Self {
         let (tx, rx) = mpsc::unbounded();
         let filter = FilterBuilder::default()
             .address(vec![source.token.address()])
@@ -217,14 +185,23 @@ impl WatchTransfers {
 
         handle.spawn(future);
 
-        WatchTransfers(rx)
+        HandleTransfers {
+            handle: handle.clone(),
+            rx,
+            target: target.clone(),
+        }
     }
 }
 
-impl Stream for WatchTransfers {
+impl<T: DuplexTransport + 'static> Future for HandleTransfers<T> {
     type Item = Transfer;
     type Error = ();
-    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        self.0.poll()
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        loop {
+            let transfer = try_ready!(self.rx.poll());
+            if let Some(t) = transfer {
+                self.handle.spawn(t.approve_withdrawal(&self.target));
+            }
+        }
     }
 }

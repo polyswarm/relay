@@ -459,6 +459,7 @@ impl<T: DuplexTransport + 'static> Future for FindTransferInTransaction<T> {
                                                                 tx_hash: hash,
                                                                 block_hash,
                                                                 block_number: receipt_block,
+                                                                removed: false,
                                                             };
                                                             transfers.push(transfer);
                                                         }

@@ -1,13 +1,15 @@
 use super::anchor::HandleAnchors;
 use super::endpoint::{HandleRequests, RequestType};
 use super::errors::OperationError;
-use super::missed_transfer::HandleMissedTransfers;
-use super::transfer::HandleTransfers;
+use super::missed_transfer::RecheckPastTransferLogs;
+use super::transfer::WatchTransferLogs;
 use failure::{Error, SyncFailure};
+use lru::LruCache;
 use std::ops::Add;
 use std::process;
 use std::rc::Rc;
 use std::sync::atomic::AtomicUsize;
+use std::sync::RwLock;
 use std::time::{Duration, Instant};
 use tokio_core::reactor;
 use web3::api::SubscriptionStream;
@@ -15,7 +17,7 @@ use web3::contract::Contract;
 use web3::futures::prelude::*;
 use web3::futures::sync::mpsc;
 use web3::futures::{stream::Stream, Future};
-use web3::types::{Address, U256};
+use web3::types::{Address, H256, U256};
 use web3::{DuplexTransport, ErrorKind, Web3};
 
 const FREE_GAS_PRICE: u64 = 0;
@@ -74,16 +76,23 @@ impl<T: DuplexTransport + 'static> Relay<T> {
     ) -> impl Future<Item = (), Error = ()> {
         self.sidechain
             .handle_anchors(&self.homechain, handle)
-            .join(self.homechain.handle_transfers(&self.sidechain, handle))
-            .join(self.sidechain.handle_transfers(&self.homechain, handle))
-            .join(self.homechain.handle_missed_transfers(&self.sidechain, handle))
-            .join(self.sidechain.handle_missed_transfers(&self.homechain, handle))
+            .join(self.homechain.watch_transfer_logs(&self.sidechain, handle))
+            .join(self.sidechain.watch_transfer_logs(&self.homechain, handle))
+            .join(self.homechain.recheck_past_transfer_logs(&self.sidechain, handle))
+            .join(self.sidechain.recheck_past_transfer_logs(&self.homechain, handle))
             .join(self.handle_requests(rx, handle))
             .and_then(|_| Ok(()))
             .map_err(|_| {
                 process::exit(-1);
             })
     }
+}
+
+pub enum TransactionApprovalState {
+    Approved,
+    Removed,
+    WaitApproval,
+    WaitTransaction,
 }
 
 /// Networks are considered either the homechain or the sidechain for the purposes of relaying
@@ -112,6 +121,7 @@ pub struct Network<T: DuplexTransport> {
     pub keydir: String,
     pub password: String,
     pub nonce: AtomicUsize,
+    pub pending: RwLock<LruCache<H256, TransactionApprovalState>>,
     pub retries: u64,
 }
 
@@ -180,6 +190,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
             keydir: keydir.to_string(),
             password: password.to_string(),
             nonce,
+            pending: RwLock::new(LruCache::new(1024)),
             retries,
         })
     }
@@ -298,26 +309,30 @@ impl<T: DuplexTransport + 'static> Network<T> {
             })
     }
 
-    /// Returns a HandleTransfers Future for this chain.
+    /// Returns a WatchTransferLogs Future for this chain.
     /// Will anchor to the given target
     ///
     /// # Arguments
     ///
     /// * `target` - Network where to anchor the block headers
     /// * `handle` - Handle to spawn new tasks
-    pub fn handle_transfers(&self, target: &Rc<Network<T>>, handle: &reactor::Handle) -> HandleTransfers<T> {
-        HandleTransfers::new(self, target, handle)
+    pub fn watch_transfer_logs(&self, target: &Rc<Network<T>>, handle: &reactor::Handle) -> WatchTransferLogs<T> {
+        WatchTransferLogs::new(self, target, handle)
     }
 
-    /// Returns a HandleMissedTransfers Future for this chain.
+    /// Returns a RecheckPastTransferLogs Future for this chain.
     /// Will approve Transfers found in this network, to the target network.
     ///
     /// # Arguments
     ///
     /// * `target` - Network where to anchor the block headers
     /// * `handle` - Handle to spawn new tasks
-    pub fn handle_missed_transfers(&self, target: &Rc<Network<T>>, handle: &reactor::Handle) -> HandleMissedTransfers {
-        HandleMissedTransfers::new(self, target, handle)
+    pub fn recheck_past_transfer_logs(
+        &self,
+        target: &Rc<Network<T>>,
+        handle: &reactor::Handle,
+    ) -> RecheckPastTransferLogs {
+        RecheckPastTransferLogs::new(self, target, handle)
     }
 
     /// Returns a HandleAnchors Future for this chain.

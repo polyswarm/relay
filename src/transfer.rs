@@ -1,21 +1,19 @@
-use ethabi::Token;
 use std::fmt;
 use std::rc::Rc;
 
 use std::time;
 use tokio_core::reactor;
 use web3::confirm::wait_for_transaction_confirmation;
-use web3::contract::tokens::Tokenize;
 use web3::futures::prelude::*;
 use web3::futures::sync::mpsc;
 use web3::futures::try_ready;
-use web3::types::{Address, FilterBuilder, H256, U256};
+use web3::types::{Address, FilterBuilder, TransactionReceipt, H256, U256};
 use web3::DuplexTransport;
 
 use super::contracts::TRANSFER_EVENT_SIGNATURE;
-use super::relay::Network;
+use super::relay::{Network, TransactionApprovalState};
 use super::transaction::SendTransaction;
-use super::withdrawal::DoesRequireApproval;
+use super::withdrawal::{ApproveParams, DoesRequireApproval, UnapproveParams};
 
 /// Represents a token transfer between two networks
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -25,9 +23,45 @@ pub struct Transfer {
     pub tx_hash: H256,
     pub block_hash: H256,
     pub block_number: U256,
+    pub removed: bool,
 }
 
 impl Transfer {
+    /// Returns a Transfer object based on a receipt, and some values
+    ///
+    /// # Arguments
+    ///
+    /// * `address` Address of the wallet that sent the transfer
+    /// * `amount` - Amount of ERC20 token sent
+    /// * `removed` - Was this log removed
+    /// * `receipt` - TransactionReceipt for this log
+    ///
+    pub fn from_receipt(
+        destination: Address,
+        amount: U256,
+        removed: bool,
+        receipt: TransactionReceipt,
+    ) -> Result<Self, String> {
+        if receipt.block_number.is_none() {
+            return Err("no block number in transfer receipt".to_string());
+        }
+
+        if receipt.block_hash.is_none() {
+            return Err("no block hash in transfer receipt".to_string());
+        }
+
+        let block_hash = receipt.block_hash.unwrap();
+        let block_number = receipt.block_number.unwrap();
+
+        Ok(Transfer {
+            destination,
+            amount,
+            tx_hash: receipt.transaction_hash,
+            block_hash,
+            block_number,
+            removed,
+        })
+    }
     /// Returns a Future that will get the Withdrawal from the contract
     ///
     /// # Arguments
@@ -45,21 +79,27 @@ impl Transfer {
     pub fn approve_withdrawal<T: DuplexTransport + 'static>(
         &self,
         target: &Rc<Network<T>>,
-    ) -> SendTransaction<T, Self> {
+    ) -> SendTransaction<T, ApproveParams> {
         info!("approving withdrawal on {:?}: {} ", target.network_type, self);
-        SendTransaction::new(target, "approveWithdrawal", self, target.retries)
+        SendTransaction::new(
+            target,
+            "approveWithdrawal",
+            &ApproveParams::from(self.clone()),
+            target.retries,
+        )
     }
-}
 
-impl Tokenize for Transfer {
-    fn into_tokens(self) -> Vec<Token> {
-        let mut tokens = Vec::new();
-        tokens.push(Token::Address(self.destination));
-        tokens.push(Token::Uint(self.amount));
-        tokens.push(Token::FixedBytes(self.tx_hash.to_vec()));
-        tokens.push(Token::FixedBytes(self.block_hash.to_vec()));
-        tokens.push(Token::Uint(self.block_number));
-        tokens
+    pub fn unapprove_withdrawal<T: DuplexTransport + 'static>(
+        &self,
+        target: &Rc<Network<T>>,
+    ) -> SendTransaction<T, UnapproveParams> {
+        info!("unapproving withdrawal on {:?}: {} ", target.network_type, self);
+        SendTransaction::new(
+            target,
+            "unapproveWithdrawal",
+            &UnapproveParams::from(self.clone()),
+            target.retries,
+        )
     }
 }
 
@@ -75,13 +115,13 @@ impl fmt::Display for Transfer {
 
 /// Stream of transfer events that have been on the main chain for N blocks.
 /// N is confirmations per settings.
-pub struct HandleTransfers<T: DuplexTransport + 'static> {
+pub struct WatchTransferLogs<T: DuplexTransport + 'static> {
     handle: reactor::Handle,
     rx: mpsc::UnboundedReceiver<Transfer>,
     target: Rc<Network<T>>,
 }
 
-impl<T: DuplexTransport + 'static> HandleTransfers<T> {
+impl<T: DuplexTransport + 'static> WatchTransferLogs<T> {
     /// Returns a newly created WatchTransfers Stream
     ///
     /// # Arguments
@@ -105,17 +145,13 @@ impl<T: DuplexTransport + 'static> HandleTransfers<T> {
             let confirmations = source.confirmations as usize;
             let handle = handle.clone();
             let transport = source.web3.transport().clone();
+            let web3 = source.web3.clone();
             source
                 .web3
                 .eth_subscribe()
                 .subscribe_logs(filter)
                 .and_then(move |sub| {
                     sub.for_each(move |log| {
-                        if Some(true) == log.removed {
-                            warn!("received removed logon {:?}, revoke votes", network_type);
-                            return Ok(());
-                        }
-
                         log.transaction_hash.map_or_else(
                             || {
                                 warn!("log missing transaction hash on {:?}", network_type);
@@ -125,6 +161,49 @@ impl<T: DuplexTransport + 'static> HandleTransfers<T> {
                                 let tx = tx.clone();
                                 let destination: Address = log.topics[1].into();
                                 let amount: U256 = log.data.0[..32].into();
+
+                                if Some(true) == log.removed {
+                                    handle.spawn(
+                                        web3.eth()
+                                            .transaction_receipt(tx_hash)
+                                            .and_then(move |receipt_option| {
+                                                receipt_option.map_or_else(
+                                                    || {
+                                                        error!(
+                                                            "no receipt found for transaction hash {} on {:?}",
+                                                            &tx_hash, network_type
+                                                        );
+                                                        Ok(())
+                                                    },
+                                                    |receipt| {
+                                                        let transfer_result =
+                                                            Transfer::from_receipt(destination, amount, true, receipt);
+                                                        match transfer_result {
+                                                            Ok(transfer) => {
+                                                                info!(
+                                                                    "transfer event on {:?} confirmed, approving {}",
+                                                                    network_type, &transfer
+                                                                );
+                                                                tx.unbounded_send(transfer).unwrap();
+                                                            }
+                                                            Err(msg) => error!(
+                                                                "error producing transfer from receipt on {:?}: {}",
+                                                                network_type, msg
+                                                            ),
+                                                        }
+                                                        Ok(())
+                                                    },
+                                                )
+                                            })
+                                            .map_err(move |e| {
+                                                error!(
+                                                    "error getting removed transaction receipt on {:?}: {:?}",
+                                                    network_type, e
+                                                );
+                                            }),
+                                    );
+                                    return Ok(());
+                                }
 
                                 info!(
                                     "received transfer event in tx hash {:?} on {:?}, waiting for confirmations",
@@ -139,32 +218,23 @@ impl<T: DuplexTransport + 'static> HandleTransfers<T> {
                                         confirmations,
                                     )
                                     .and_then(move |receipt| {
-                                        if receipt.block_number.is_none() {
-                                            warn!("no block number in transfer receipt on {:?}", network_type);
-                                            return Ok(());
+                                        let transfer_result =
+                                            Transfer::from_receipt(destination, amount, false, receipt);
+
+                                        match transfer_result {
+                                            Ok(transfer) => {
+                                                info!(
+                                                    "transfer event on {:?} confirmed, approving {}",
+                                                    network_type, &transfer
+                                                );
+                                                tx.unbounded_send(transfer).unwrap();
+                                            }
+                                            Err(msg) => error!(
+                                                "error producing transfer from receipt on {:?}: {}",
+                                                network_type, msg
+                                            ),
                                         }
 
-                                        if receipt.block_hash.is_none() {
-                                            warn!("no block hash in transfer receipt on {:?}", network_type);
-                                            return Ok(());
-                                        }
-
-                                        let block_hash = receipt.block_hash.unwrap();
-                                        let block_number = receipt.block_number.unwrap();
-
-                                        let transfer = Transfer {
-                                            destination,
-                                            amount,
-                                            tx_hash,
-                                            block_hash,
-                                            block_number,
-                                        };
-
-                                        info!(
-                                            "transfer event on {:?} confirmed, approving {}",
-                                            network_type, &transfer
-                                        );
-                                        tx.unbounded_send(transfer).unwrap();
                                         Ok(())
                                     })
                                     .or_else(move |e| {
@@ -185,7 +255,7 @@ impl<T: DuplexTransport + 'static> HandleTransfers<T> {
 
         handle.spawn(future);
 
-        HandleTransfers {
+        WatchTransferLogs {
             handle: handle.clone(),
             rx,
             target: target.clone(),
@@ -193,14 +263,63 @@ impl<T: DuplexTransport + 'static> HandleTransfers<T> {
     }
 }
 
-impl<T: DuplexTransport + 'static> Future for HandleTransfers<T> {
-    type Item = Transfer;
+impl<T: DuplexTransport + 'static> Future for WatchTransferLogs<T> {
+    type Item = ();
     type Error = ();
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         loop {
             let transfer = try_ready!(self.rx.poll());
             if let Some(t) = transfer {
-                self.handle.spawn(t.approve_withdrawal(&self.target));
+                let mut cache = self.target.pending.read().unwrap();
+                let state = cache.peek(&t.tx_hash);
+                match state {
+                    Some(TransactionApprovalState::Approved) => {
+                        if t.removed {
+                            self.target
+                                .pending
+                                .write()
+                                .unwrap()
+                                .put(t.tx_hash.clone(), TransactionApprovalState::Removed);
+                            self.handle.spawn(t.unapprove_withdrawal(&self.target));
+                        }
+                    }
+                    Some(TransactionApprovalState::WaitApproval) => {
+                        if t.removed {
+                            self.target
+                                .pending
+                                .write()
+                                .unwrap()
+                                .put(t.tx_hash.clone(), TransactionApprovalState::Removed);
+                            self.handle.spawn(t.unapprove_withdrawal(&self.target));
+                        }
+                    }
+                    None => {
+                        if t.removed {
+                            self.target
+                                .pending
+                                .write()
+                                .unwrap()
+                                .put(t.tx_hash.clone(), TransactionApprovalState::Removed);
+                        } else {
+                            self.target
+                                .pending
+                                .write()
+                                .unwrap()
+                                .put(t.tx_hash.clone(), TransactionApprovalState::WaitTransaction);
+                            self.handle.spawn(t.approve_withdrawal(&self.target));
+                        }
+                    }
+                    _ => {
+                        // Includes Some(Removed) and Some(WaitTransaction)
+                        if t.removed {
+                            self.target
+                                .pending
+                                .write()
+                                .unwrap()
+                                .put(t.tx_hash.clone(), TransactionApprovalState::Removed);
+                        }
+                    }
+                };
             }
         }
     }

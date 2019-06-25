@@ -15,12 +15,14 @@ extern crate failure_derive;
 #[macro_use]
 extern crate log;
 extern crate jsonrpc_core as rpc;
+extern crate lru;
 extern crate parking_lot;
 #[macro_use]
 extern crate serde_derive;
 #[macro_use]
 extern crate serde_json;
 
+extern crate core;
 extern crate ethcore_transaction;
 extern crate ethkey;
 extern crate ethstore;

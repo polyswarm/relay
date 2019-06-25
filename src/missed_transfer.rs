@@ -144,35 +144,22 @@ impl FindMissedTransfers {
                                                                         Ok(())
                                                                     },
                                                                     |receipt| {
-                                                                        if receipt.block_number.is_none() {
-                                                                            warn!("no block number in transfer receipt on {:?}", network_type);
-                                                                            return Ok(());
-                                                                        }
+                                                                        let transfer_result = Transfer::from_receipt(destination, amount, false, receipt);
 
-                                                                        if receipt.block_hash.is_none() {
-                                                                            warn!("no block hash in transfer receipton {:?}", network_type);
-                                                                            return Ok(());
-                                                                        }
-
-                                                                        let block_hash = receipt.block_hash.unwrap();
-                                                                        let block_number = receipt.block_number.unwrap();
-
-                                                                        let transfer = Transfer {
-                                                                            destination,
-                                                                            amount,
-                                                                            tx_hash,
-                                                                            block_hash,
-                                                                            block_number,
+                                                                        match transfer_result {
+                                                                            Ok(transfer) => {
+                                                                                info!(
+                                                                                    "transfer event on {:?} confirmed, approving {}",
+                                                                                    network_type, &transfer
+                                                                                );
+                                                                                tx.unbounded_send(transfer).unwrap();
+                                                                            }
+                                                                            Err(msg) => {
+                                                                                error!("error producing transfer from receipt on {:?}: {}", network_type, msg)
+                                                                            }
                                                                         };
-                                                                        info!(
-                                                                            "transfer event {} found on {:?}, checking for approval ",
-                                                                            &transfer,
-                                                                            network_type
-                                                                        );
-                                                                        tx.unbounded_send(transfer).unwrap();
                                                                         Ok(())
-                                                                    },
-                                                                )
+                                                                })
                                                             }).or_else(move |e| {
                                                                 error!("error approving transaction on {:?}: {}", network_type, e);
                                                                 Ok(())
@@ -205,9 +192,9 @@ impl Stream for FindMissedTransfers {
 }
 
 /// Future to handle the Stream of missed transfers by checking them, and approving them
-pub struct HandleMissedTransfers(Box<Future<Item = (), Error = ()>>);
+pub struct RecheckPastTransferLogs(Box<Future<Item = (), Error = ()>>);
 
-impl HandleMissedTransfers {
+impl RecheckPastTransferLogs {
     /// Returns a newly created HandleMissedTransfers Future
     ///
     /// # Arguments
@@ -232,11 +219,11 @@ impl HandleMissedTransfers {
                 // This is only ever triggered when the FindMissedTransfers has an error, and closes the Sender.
                 Err(())
             });
-        HandleMissedTransfers(Box::new(future))
+        RecheckPastTransferLogs(Box::new(future))
     }
 }
 
-impl Future for HandleMissedTransfers {
+impl Future for RecheckPastTransferLogs {
     type Item = ();
     type Error = ();
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {

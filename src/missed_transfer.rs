@@ -8,8 +8,9 @@ use web3::types::{Address, BlockNumber, FilterBuilder, U256};
 use web3::{DuplexTransport, ErrorKind};
 
 use super::contracts::TRANSFER_EVENT_SIGNATURE;
-use super::relay::{Network, Timeout};
+use super::relay::Network;
 use super::transfer::Transfer;
+use super::utils::Timeout;
 
 pub const LOOKBACK_RANGE: u64 = 1_000;
 pub const LOOKBACK_LEEWAY: u64 = 5;

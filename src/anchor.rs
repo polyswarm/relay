@@ -1,5 +1,6 @@
-use super::relay::{Network, Timeout};
+use super::relay::Network;
 use super::transaction::SendTransaction;
+use super::utils::Timeout;
 use ethabi::Token;
 use std::fmt;
 use std::rc::Rc;

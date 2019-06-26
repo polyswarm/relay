@@ -88,7 +88,6 @@ pub enum TransactionApprovalState {
     Approved,
     Removed,
     WaitApproval,
-    WaitTransaction,
 }
 
 /// Networks are considered either the homechain or the sidechain for the purposes of relaying

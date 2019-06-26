@@ -67,7 +67,7 @@ impl Transfer {
         destination: Address,
         amount: U256,
         removed: bool,
-        receipt: TransactionReceipt,
+        receipt: &TransactionReceipt,
     ) -> Result<Self, String> {
         if receipt.block_number.is_none() {
             return Err("no block number in transfer receipt".to_string());
@@ -108,16 +108,15 @@ impl Transfer {
         target: &Rc<Network<T>>,
     ) -> Box<Future<Item = (), Error = ()>> {
         info!("approving withdrawal on {:?}: {} ", target.network_type, self);
-        let tx_hash = self.tx_hash.clone();
         let target = target.clone();
         Box::new(
             SendTransaction::new(
                 &target,
                 "approveWithdrawal",
-                &ApproveParams::from(self.clone()),
+                &ApproveParams::from(*self),
                 target.retries,
             )
-            .check_log_removed(&target, tx_hash)
+            .check_log_removed(&target, self.tx_hash)
             .and_then(move |success| {
                 success.map_or_else(
                     || {
@@ -141,7 +140,7 @@ impl Transfer {
         SendTransaction::new(
             target,
             "unapproveWithdrawal",
-            &UnapproveParams::from(self.clone()),
+            &UnapproveParams::from(*self),
             target.retries,
         )
     }
@@ -222,7 +221,7 @@ impl<T: DuplexTransport + 'static> WatchTransferLogs<T> {
                                                     },
                                                     |receipt| {
                                                         let transfer_result =
-                                                            Transfer::from_receipt(destination, amount, true, receipt);
+                                                            Transfer::from_receipt(destination, amount, true, &receipt);
                                                         match transfer_result {
                                                             Ok(transfer) => {
                                                                 info!(
@@ -274,7 +273,7 @@ impl<T: DuplexTransport + 'static> WatchTransferLogs<T> {
                                             },
                                             |receipt| {
                                                 let transfer_result =
-                                                    Transfer::from_receipt(destination, amount, false, receipt);
+                                                    Transfer::from_receipt(destination, amount, false, &receipt);
 
                                                 match transfer_result {
                                                     Ok(transfer) => {
@@ -327,13 +326,11 @@ impl<T: DuplexTransport + 'static> Future for WatchTransferLogs<T> {
         loop {
             let transfer = try_ready!(self.rx.poll());
             if let Some(t) = transfer {
-                let state: Option<TransactionApprovalState> =
-                    match self.target.pending.read().unwrap().peek(&t.tx_hash) {
-                        Some(value) => {
-                            Some(value.clone())
-                        },
-                        None => None
-                    };
+                let state: Option<TransactionApprovalState> = match self.target.pending.read().unwrap().peek(&t.tx_hash)
+                {
+                    Some(value) => Some(value.clone()),
+                    None => None,
+                };
                 match state {
                     Some(TransactionApprovalState::Approved) => {
                         if t.removed {
@@ -341,7 +338,7 @@ impl<T: DuplexTransport + 'static> Future for WatchTransferLogs<T> {
                                 .pending
                                 .write()
                                 .unwrap()
-                                .put(t.tx_hash.clone(), TransactionApprovalState::Removed);
+                                .put(t.tx_hash, TransactionApprovalState::Removed);
                             self.handle.spawn(t.unapprove_withdrawal(&self.target));
                         }
                     }
@@ -351,7 +348,7 @@ impl<T: DuplexTransport + 'static> Future for WatchTransferLogs<T> {
                                 .pending
                                 .write()
                                 .unwrap()
-                                .put(t.tx_hash.clone(), TransactionApprovalState::Removed);
+                                .put(t.tx_hash, TransactionApprovalState::Removed);
                             self.handle.spawn(t.unapprove_withdrawal(&self.target));
                         }
                     }
@@ -362,7 +359,7 @@ impl<T: DuplexTransport + 'static> Future for WatchTransferLogs<T> {
                                 .pending
                                 .write()
                                 .unwrap()
-                                .put(t.tx_hash.clone(), TransactionApprovalState::WaitApproval);
+                                .put(t.tx_hash, TransactionApprovalState::WaitApproval);
                             self.handle.spawn(t.approve_withdrawal(&self.target));
                         }
                     }
@@ -372,13 +369,13 @@ impl<T: DuplexTransport + 'static> Future for WatchTransferLogs<T> {
                                 .pending
                                 .write()
                                 .unwrap()
-                                .put(t.tx_hash.clone(), TransactionApprovalState::Removed);
+                                .put(t.tx_hash, TransactionApprovalState::Removed);
                         } else {
                             self.target
                                 .pending
                                 .write()
                                 .unwrap()
-                                .put(t.tx_hash.clone(), TransactionApprovalState::WaitApproval);
+                                .put(t.tx_hash, TransactionApprovalState::WaitApproval);
                             self.handle.spawn(t.approve_withdrawal(&self.target));
                         }
                     }

@@ -145,7 +145,7 @@ impl FindMissedTransfers {
                                                                         Ok(())
                                                                     },
                                                                     |receipt| {
-                                                                        let transfer_result = Transfer::from_receipt(destination, amount, false, receipt);
+                                                                        let transfer_result = Transfer::from_receipt(destination, amount, false, &receipt);
 
                                                                         match transfer_result {
                                                                             Ok(transfer) => {

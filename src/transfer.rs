@@ -355,6 +355,17 @@ impl<T: DuplexTransport + 'static> Future for WatchTransferLogs<T> {
                             self.handle.spawn(t.unapprove_withdrawal(&self.target));
                         }
                     }
+                    Some(TransactionApprovalState::Removed) => {
+                        // Remove logs can be added again
+                        if !t.removed {
+                            self.target
+                                .pending
+                                .write()
+                                .unwrap()
+                                .put(t.tx_hash.clone(), TransactionApprovalState::WaitApproval);
+                            self.handle.spawn(t.approve_withdrawal(&self.target));
+                        }
+                    }
                     None => {
                         if t.removed {
                             self.target

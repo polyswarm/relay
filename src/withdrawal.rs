@@ -32,6 +32,10 @@ impl Tokenize for ApprovalQuery {
     }
 }
 
+/// Parameters for the approveWithdrawal function.
+///
+/// Implements Tokenize so it can be passed to SendTransaction
+///
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct ApproveParams {
     pub destination: Address,
@@ -65,6 +69,10 @@ impl From<Transfer> for ApproveParams {
     }
 }
 
+/// Parameters for the unapproveWithdrawal function.
+///
+/// Implements Tokenize so it can be passed to SendTransaction
+///
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct UnapproveParams {
     pub tx_hash: H256,

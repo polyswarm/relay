@@ -327,8 +327,13 @@ impl<T: DuplexTransport + 'static> Future for WatchTransferLogs<T> {
         loop {
             let transfer = try_ready!(self.rx.poll());
             if let Some(t) = transfer {
-                let mut cache = self.target.pending.read().unwrap();
-                let state = cache.peek(&t.tx_hash);
+                let state: Option<TransactionApprovalState> =
+                    match self.target.pending.read().unwrap().peek(&t.tx_hash) {
+                        Some(value) => {
+                            Some(value.clone())
+                        },
+                        None => None
+                    };
                 match state {
                     Some(TransactionApprovalState::Approved) => {
                         if t.removed {

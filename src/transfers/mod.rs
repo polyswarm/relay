@@ -3,7 +3,7 @@ pub mod past;
 pub mod transfer;
 pub mod withdrawal;
 
-use super::eth;
 use super::relay;
+use super::transactions;
 use super::transfers;
 use super::utils;

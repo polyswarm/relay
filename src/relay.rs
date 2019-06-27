@@ -11,8 +11,8 @@ use web3::futures::Future;
 use web3::types::{Address, H256, U256};
 use web3::{DuplexTransport, Web3};
 
-use super::errors::OperationError;
 use super::anchors::anchor::HandleAnchors;
+use super::errors::OperationError;
 use super::server::endpoint::{HandleRequests, RequestType};
 use super::transfers::live::WatchLiveTransfers;
 use super::transfers::past::RecheckPastTransferLogs;

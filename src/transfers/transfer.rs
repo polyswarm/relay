@@ -5,8 +5,8 @@ use web3::futures::future::Future;
 use web3::types::{Address, TransactionReceipt, H256, U256};
 use web3::DuplexTransport;
 
-use super::eth::transaction::SendTransaction;
 use super::relay::Network;
+use super::transactions::transaction::SendTransaction;
 use super::utils::{CheckLogRemoved, CheckRemoved};
 use super::withdrawal::{ApproveParams, DoesRequireApproval, UnapproveParams};
 

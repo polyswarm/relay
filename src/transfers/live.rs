@@ -8,8 +8,8 @@ use web3::futures::try_ready;
 use web3::types::{Address, FilterBuilder, TransactionReceipt, H256, U256};
 use web3::DuplexTransport;
 
-use super::eth::contracts::TRANSFER_EVENT_SIGNATURE;
 use super::relay::{Network, TransactionApprovalState};
+use super::transactions::contracts::TRANSFER_EVENT_SIGNATURE;
 use super::transfers::transfer::Transfer;
 use super::utils::{CheckLogRemoved, CheckRemoved};
 

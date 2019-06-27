@@ -30,10 +30,10 @@ extern crate rlp;
 
 pub mod anchors;
 pub mod errors;
-pub mod eth;
 pub mod relay;
 pub mod relay_config;
 pub mod server;
+pub mod transactions;
 pub mod transfers;
 pub mod utils;
 

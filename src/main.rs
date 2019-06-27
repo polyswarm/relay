@@ -28,19 +28,14 @@ extern crate ethkey;
 extern crate ethstore;
 extern crate rlp;
 
-pub mod anchor;
-pub mod consul_configs;
-pub mod contracts;
-pub mod endpoint;
+pub mod anchors;
 pub mod errors;
-pub mod logger;
-pub mod missed_transfer;
+pub mod eth;
 pub mod relay;
-pub mod settings;
-pub mod transaction;
-pub mod transfer;
+pub mod relay_config;
+pub mod server;
+pub mod transfers;
 pub mod utils;
-pub mod withdrawal;
 
 use clap::{App, Arg};
 use consul_configs::ConsulConfig;
@@ -61,6 +56,9 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
+
+use relay_config::{consul_configs, logger, settings};
+use server::endpoint;
 
 use log::Level;
 

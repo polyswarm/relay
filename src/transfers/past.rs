@@ -7,7 +7,7 @@ use web3::futures::try_ready;
 use web3::types::{Address, BlockNumber, FilterBuilder, U256};
 use web3::{DuplexTransport, ErrorKind};
 
-use super::contracts::TRANSFER_EVENT_SIGNATURE;
+use super::eth::contracts::TRANSFER_EVENT_SIGNATURE;
 use super::relay::Network;
 use super::transfer::Transfer;
 use super::utils::Timeout;
@@ -16,9 +16,9 @@ pub const LOOKBACK_RANGE: u64 = 1_000;
 pub const LOOKBACK_LEEWAY: u64 = 5;
 
 /// Stream of Transfer that were missed, either from downtime, or failed approvals
-pub struct FindMissedTransfers(mpsc::UnboundedReceiver<Transfer>);
+pub struct CheckPastTransfers(mpsc::UnboundedReceiver<Transfer>);
 
-impl FindMissedTransfers {
+impl CheckPastTransfers {
     /// Returns a newly created FindMissedTransfers Stream
     ///
     /// # Arguments
@@ -180,11 +180,11 @@ impl FindMissedTransfers {
             })
         };
         handle.spawn(future);
-        FindMissedTransfers(rx)
+        CheckPastTransfers(rx)
     }
 }
 
-impl Stream for FindMissedTransfers {
+impl Stream for CheckPastTransfers {
     type Item = Transfer;
     type Error = ();
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
@@ -210,7 +210,7 @@ impl RecheckPastTransferLogs {
     ) -> Self {
         let handle = handle.clone();
         let target = target.clone();
-        let future = FindMissedTransfers::new(source, &handle)
+        let future = CheckPastTransfers::new(source, &handle)
             .for_each(move |transfer| {
                 let target = target.clone();
                 let handle = handle.clone();

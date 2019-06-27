@@ -17,11 +17,11 @@ use web3::DuplexTransport;
 use actix_web::http::{Method, StatusCode};
 use actix_web::{middleware, server, HttpResponse, Path};
 
-use super::contracts::TRANSFER_EVENT_SIGNATURE;
 use super::errors::EndpointError;
-use super::missed_transfer::ValidateAndApproveTransfer;
+use super::eth::contracts::TRANSFER_EVENT_SIGNATURE;
 use super::relay::{Network, NetworkType};
-use super::transfer::Transfer;
+use super::transfers::past::ValidateAndApproveTransfer;
+use super::transfers::transfer::Transfer;
 use super::utils;
 
 pub const HOME: &str = "HOME";

@@ -1,4 +1,3 @@
-use relay::{Network, TransactionApprovalState};
 use std::ops::Add;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -7,6 +6,8 @@ use web3::api::SubscriptionStream;
 use web3::futures::prelude::*;
 use web3::types::H256;
 use web3::{DuplexTransport, ErrorKind};
+
+use relay::{Network, TransactionApprovalState};
 
 // From ethereum_types but not reexported by web3
 pub fn clean_0x(s: &str) -> &str {

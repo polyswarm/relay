@@ -1,10 +1,10 @@
 use parking_lot::Mutex;
-use relay::{Network, NetworkType};
 use rpc;
 use serde_json;
 use std::collections::BTreeMap;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{atomic, Arc};
+use tokio_core::reactor;
 use web3::api::SubscriptionId;
 use web3::futures::sync::mpsc;
 use web3::futures::{future, Future, Stream};
@@ -13,7 +13,7 @@ use web3::transports::Result;
 use web3::types::{BlockHeader, Log, H160, H2048, H256, U256};
 use web3::{BatchTransport, DuplexTransport, Error, ErrorKind, RequestId, Transport};
 
-use tokio_core::reactor;
+use relay::{Network, NetworkType};
 
 // Result from a MockTask
 pub type MockTask<T> = Box<Future<Item = T, Error = Error>>;

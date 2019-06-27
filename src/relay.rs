@@ -1,8 +1,3 @@
-use super::anchor::HandleAnchors;
-use super::endpoint::{HandleRequests, RequestType};
-use super::errors::OperationError;
-use super::missed_transfer::RecheckPastTransferLogs;
-use super::transfer::WatchTransferLogs;
 use failure::{Error, SyncFailure};
 use lru::LruCache;
 use std::process;
@@ -16,17 +11,15 @@ use web3::futures::Future;
 use web3::types::{Address, H256, U256};
 use web3::{DuplexTransport, Web3};
 
+use super::errors::OperationError;
+use super::anchors::anchor::HandleAnchors;
+use super::server::endpoint::{HandleRequests, RequestType};
+use super::transfers::live::WatchLiveTransfers;
+use super::transfers::past::RecheckPastTransferLogs;
+use super::utils::clean_0x;
+
 const FREE_GAS_PRICE: u64 = 0;
 const GAS_LIMIT: u64 = 200_000;
-
-// From ethereum_types but not reexported by web3
-fn clean_0x(s: &str) -> &str {
-    if s.starts_with("0x") {
-        &s[2..]
-    } else {
-        s
-    }
-}
 
 /// Token relay between two Ethereum networks
 pub struct Relay<T: DuplexTransport> {
@@ -312,8 +305,8 @@ impl<T: DuplexTransport + 'static> Network<T> {
     ///
     /// * `target` - Network where to anchor the block headers
     /// * `handle` - Handle to spawn new tasks
-    pub fn watch_transfer_logs(&self, target: &Rc<Network<T>>, handle: &reactor::Handle) -> WatchTransferLogs<T> {
-        WatchTransferLogs::new(self, target, handle)
+    pub fn watch_transfer_logs(&self, target: &Rc<Network<T>>, handle: &reactor::Handle) -> WatchLiveTransfers<T> {
+        WatchLiveTransfers::new(self, target, handle)
     }
 
     /// Returns a RecheckPastTransferLogs Future for this chain.

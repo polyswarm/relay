@@ -1,6 +1,3 @@
-use super::relay::Network;
-use super::transaction::SendTransaction;
-use super::utils::Timeout;
 use ethabi::Token;
 use std::fmt;
 use std::rc::Rc;
@@ -11,6 +8,10 @@ use web3::futures::sync::mpsc;
 use web3::futures::try_ready;
 use web3::types::{BlockId, BlockNumber, H256, U256};
 use web3::{DuplexTransport, ErrorKind};
+
+use super::eth::transaction::SendTransaction;
+use super::relay::Network;
+use super::utils::Timeout;
 
 /// Represents a block on the sidechain to be anchored to the homechain
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]

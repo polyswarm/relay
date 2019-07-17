@@ -30,12 +30,12 @@ extern crate rlp;
 
 pub mod anchors;
 pub mod errors;
+pub mod eth;
+pub mod extensions;
 pub mod relay;
 pub mod relay_config;
 pub mod server;
-pub mod transactions;
 pub mod transfers;
-pub mod utils;
 
 use clap::{App, Arg};
 use consul_configs::ConsulConfig;
@@ -154,7 +154,7 @@ fn run(
     side_ws: web3::transports::WebSocket,
     consul_config: ConsulConfig,
 ) -> impl Future<Item = (), Error = ()> {
-    let account = utils::clean_0x(&settings.relay.account)
+    let account = eth::utils::clean_0x(&settings.relay.account)
         .parse()
         .or_else(|_| Err(OperationError::InvalidAddress(settings.relay.account.clone())))
         .unwrap();

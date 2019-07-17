@@ -13,10 +13,10 @@ use web3::{DuplexTransport, Web3};
 
 use super::anchors::anchor::HandleAnchors;
 use super::errors::OperationError;
+use super::eth::utils::clean_0x;
 use super::server::endpoint::{HandleRequests, RequestType};
 use super::transfers::live::WatchLiveTransfers;
 use super::transfers::past::RecheckPastTransferLogs;
-use super::utils::clean_0x;
 use transfers::live::ProcessTransfer;
 
 const FREE_GAS_PRICE: u64 = 0;

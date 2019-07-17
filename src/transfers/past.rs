@@ -7,10 +7,10 @@ use web3::futures::try_ready;
 use web3::types::{Address, BlockNumber, FilterBuilder, U256};
 use web3::{DuplexTransport, ErrorKind};
 
+use super::eth::contracts::TRANSFER_EVENT_SIGNATURE;
+use super::extensions::timeout::Timeout;
 use super::relay::Network;
-use super::transactions::contracts::TRANSFER_EVENT_SIGNATURE;
 use super::transfer::Transfer;
-use super::utils::Timeout;
 
 pub const LOOKBACK_RANGE: u64 = 1_000;
 pub const LOOKBACK_LEEWAY: u64 = 5;

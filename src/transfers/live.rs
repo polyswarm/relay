@@ -9,10 +9,11 @@ use web3::futures::try_ready;
 use web3::types::{Address, FilterBuilder, Log, TransactionReceipt, H256, U256};
 use web3::{DuplexTransport, ErrorKind};
 
+use super::eth::contracts::TRANSFER_EVENT_SIGNATURE;
+use super::extensions::removed::{CheckLogRemoved, CheckRemoved};
+use super::extensions::timeout::{Timeout, TimeoutStream};
 use super::relay::{Network, NetworkType, TransferApprovalState};
-use super::transactions::contracts::TRANSFER_EVENT_SIGNATURE;
 use super::transfers::transfer::Transfer;
-use super::utils::{CheckLogRemoved, CheckRemoved, Timeout, TimeoutStream};
 
 /// Add CheckRemoved trait to SendTransactionWithConfirmation, which is returned by wait_for_transaction_confirmation()
 impl<T> CheckRemoved<T, TransactionReceipt, web3::Error> for SendTransactionWithConfirmation<T>

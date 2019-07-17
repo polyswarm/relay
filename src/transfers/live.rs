@@ -2,16 +2,17 @@ use std::rc::Rc;
 use std::time;
 use tokio_core::reactor;
 use web3::confirm::{wait_for_transaction_confirmation, SendTransactionWithConfirmation};
+use web3::futures::future::Either;
 use web3::futures::prelude::*;
 use web3::futures::sync::mpsc;
 use web3::futures::try_ready;
-use web3::types::{Address, FilterBuilder, TransactionReceipt, H256, U256};
-use web3::DuplexTransport;
+use web3::types::{Address, FilterBuilder, Log, TransactionReceipt, H256, U256};
+use web3::{DuplexTransport, ErrorKind};
 
-use super::relay::{Network, TransactionApprovalState};
+use super::relay::{Network, NetworkType, TransferApprovalState};
 use super::transactions::contracts::TRANSFER_EVENT_SIGNATURE;
 use super::transfers::transfer::Transfer;
-use super::utils::{CheckLogRemoved, CheckRemoved};
+use super::utils::{CheckLogRemoved, CheckRemoved, SubscriptionState, Timeout};
 
 /// Add CheckRemoved trait to SendTransactionWithConfirmation, which is returned by wait_for_transaction_confirmation()
 impl<T> CheckRemoved<T, TransactionReceipt, web3::Error> for SendTransactionWithConfirmation<T>
@@ -30,9 +31,9 @@ where
 /// Stream of transfer events that have been on the main chain for N blocks.
 /// N is confirmations per settings.
 pub struct WatchLiveTransfers<T: DuplexTransport + 'static> {
+    transaction_hash_processor: TransactionHashProcessor<T>,
+    state: SubscriptionState<Log>,
     handle: reactor::Handle,
-    rx: mpsc::UnboundedReceiver<Transfer>,
-    target: Rc<Network<T>>,
 }
 
 impl<T: DuplexTransport + 'static> WatchLiveTransfers<T> {
@@ -41,9 +42,13 @@ impl<T: DuplexTransport + 'static> WatchLiveTransfers<T> {
     /// # Arguments
     ///
     /// * `source` - Network where the transfers are performed
-    /// * `handle` - Handle to spawn new futures
-    pub fn new(source: &Network<T>, target: &Rc<Network<T>>, handle: &reactor::Handle) -> Self {
-        let (tx, rx) = mpsc::unbounded();
+    /// * `handle` - Handle to spawn naew futures
+    pub fn new(
+        tx: &mpsc::UnboundedSender<Transfer>,
+        source: &Network<T>,
+        target: &Rc<Network<T>>,
+        handle: &reactor::Handle,
+    ) -> Self {
         let filter = FilterBuilder::default()
             .address(vec![source.token.address()])
             .topics(
@@ -54,204 +59,282 @@ impl<T: DuplexTransport + 'static> WatchLiveTransfers<T> {
             )
             .build();
 
-        let future = {
-            let network_type = source.network_type;
-            let confirmations = source.confirmations as usize;
-            let handle = handle.clone();
-            let transport = source.web3.transport().clone();
-            let web3 = source.web3.clone();
-            let target = target.clone();
-            source
-                .web3
-                .eth_subscribe()
-                .subscribe_logs(filter)
-                .and_then(move |sub| {
-                    sub.for_each(move |log| {
-                        log.transaction_hash.map_or_else(
-                            || {
-                                warn!("log missing transaction hash on {:?}", network_type);
-                                Ok(())
-                            },
-                            |tx_hash| {
-                                let tx = tx.clone();
-                                let destination: Address = log.topics[1].into();
-                                let amount: U256 = log.data.0[..32].into();
-
-                                if Some(true) == log.removed {
-                                    handle.spawn(
-                                        web3.eth()
-                                            .transaction_receipt(tx_hash)
-                                            .and_then(move |receipt_option| {
-                                                receipt_option.map_or_else(
-                                                    || {
-                                                        error!(
-                                                            "no receipt found for transaction hash {} on {:?}",
-                                                            &tx_hash, network_type
-                                                        );
-                                                        Ok(())
-                                                    },
-                                                    |receipt| {
-                                                        let transfer_result =
-                                                            Transfer::from_receipt(destination, amount, true, &receipt);
-                                                        match transfer_result {
-                                                            Ok(transfer) => {
-                                                                info!(
-                                                                    "transfer event on {:?} confirmed, approving {}",
-                                                                    network_type, &transfer
-                                                                );
-                                                                tx.unbounded_send(transfer).unwrap();
-                                                            }
-                                                            Err(msg) => error!(
-                                                                "error producing transfer from receipt on {:?}: {}",
-                                                                network_type, msg
-                                                            ),
-                                                        }
-                                                        Ok(())
-                                                    },
-                                                )
-                                            })
-                                            .map_err(move |e| {
-                                                error!(
-                                                    "error getting removed transaction receipt on {:?}: {:?}",
-                                                    network_type, e
-                                                );
-                                            }),
-                                    );
-                                    return Ok(());
-                                }
-
-                                info!(
-                                    "received transfer event in tx hash {:?} on {:?}, waiting for confirmations",
-                                    &tx_hash, network_type
-                                );
-
-                                handle.spawn(
-                                    wait_for_transaction_confirmation(
-                                        transport.clone(),
-                                        tx_hash,
-                                        time::Duration::from_secs(1),
-                                        confirmations,
-                                    )
-                                    .check_log_removed(&target, tx_hash)
-                                    .and_then(move |receipt_option| {
-                                        receipt_option.map_or_else(
-                                            || {
-                                                warn!(
-                                                    "log removed before transaction confirmed on {:?}, skipping",
-                                                    network_type
-                                                );
-                                                Ok(())
-                                            },
-                                            |receipt| {
-                                                let transfer_result =
-                                                    Transfer::from_receipt(destination, amount, false, &receipt);
-
-                                                match transfer_result {
-                                                    Ok(transfer) => {
-                                                        info!(
-                                                            "transfer event on {:?} confirmed, approving {}",
-                                                            network_type, &transfer
-                                                        );
-                                                        tx.unbounded_send(transfer).unwrap();
-                                                    }
-                                                    Err(msg) => error!(
-                                                        "error producing transfer from receipt on {:?}: {}",
-                                                        network_type, msg
-                                                    ),
-                                                }
-
-                                                Ok(())
-                                            },
-                                        )
-                                    })
-                                    .or_else(move |e| {
-                                        error!("error waiting for transfer confirmations on {:?}: {}", network_type, e);
-                                        Ok(())
-                                    }),
-                                );
-
-                                Ok(())
-                            },
-                        )
-                    })
+        let timeout = source.timeout;
+        let inner_handle = handle.clone();
+        let future = source
+            .web3
+            .clone()
+            .eth_subscribe()
+            .subscribe_logs(filter)
+            .and_then(move |subscription| {
+                let handle = inner_handle.clone();
+                subscription.timeout(timeout, &handle).map_err(|_| {
+                    web3::Error::from_kind(ErrorKind::Msg("Unable to start head subscription".to_string()))
                 })
-                .map_err(move |e| {
-                    error!("error in transfer stream on {:?}: {}", network_type, e);
-                })
-        };
+            });
 
-        handle.spawn(future);
+        let transaction_processor = TransactionHashProcessor::new(
+            source.network_type,
+            source.confirmations,
+            &target,
+            &source.web3.transport().clone(),
+            tx,
+        );
 
         WatchLiveTransfers {
+            transaction_hash_processor: transaction_processor,
+            state: SubscriptionState::Subscribing(Box::new(future)),
             handle: handle.clone(),
-            rx,
-            target: target.clone(),
         }
+    }
+
+    fn process_log(
+        log: &Log,
+        transaction_hash_processor: &TransactionHashProcessor<T>,
+    ) -> Option<Box<Future<Item = (), Error = ()>>> {
+        let destination: Address = log.topics[1].into();
+        let amount: U256 = log.data.0[..32].into();
+        let removed = log.removed;
+        let processor = transaction_hash_processor.clone();
+        log.transaction_hash.map_or_else(
+            || {
+                warn!("log missing transaction hash on {:?}", processor.network_type);
+                None
+            },
+            |tx_hash| Some(processor.process(destination, amount, removed, tx_hash)),
+        )
     }
 }
 
 impl<T: DuplexTransport + 'static> Future for WatchLiveTransfers<T> {
     type Item = ();
+    type Error = web3::Error;
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        loop {
+            let handle = self.handle.clone();
+            let processor = self.transaction_hash_processor.clone();
+            // FIXME This should exists in the Timeout Future, See CheckLogRemoved as example
+            let next = match self.state {
+                SubscriptionState::Subscribing(ref mut future) => {
+                    let stream = try_ready!(future.poll());
+                    Some(SubscriptionState::Subscribed(stream))
+                }
+                SubscriptionState::Subscribed(ref mut stream) => {
+                    match stream.poll() {
+                        Ok(Async::Ready(Some(log))) => {
+                            let process_future = WatchLiveTransfers::<T>::process_log(&log, &processor);
+                            if let Some(future) = process_future {
+                                handle.spawn(future);
+                            }
+                        }
+                        Ok(Async::Ready(None)) => {
+                            self.transaction_hash_processor.tx.close().map_err(move |_| {
+                                web3::Error::from_kind(ErrorKind::Msg("Unable to close sender".to_string()))
+                            })?;
+                            return Ok(Async::Ready(()));
+                        }
+                        Ok(Async::NotReady) => {
+                            return Ok(Async::NotReady);
+                        }
+                        Err(e) => {
+                            error!("error reading transfer logs. {:?}", e);
+                            self.transaction_hash_processor.tx.close().map_err(move |_| {
+                                web3::Error::from_kind(ErrorKind::Msg("Unable to close sender".to_string()))
+                            })?;
+                            return Err(e);
+                        }
+                    };
+                    None
+                }
+            };
+            if let Some(next_state) = next {
+                self.state = next_state;
+            }
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct TransactionHashProcessor<T: DuplexTransport + 'static> {
+    network_type: NetworkType,
+    confirmations: u64,
+    transport: T,
+    target: Rc<Network<T>>,
+    tx: mpsc::UnboundedSender<Transfer>,
+}
+
+impl<T: DuplexTransport + 'static> TransactionHashProcessor<T> {
+    pub fn new(
+        network_type: NetworkType,
+        confirmations: u64,
+        target: &Rc<Network<T>>,
+        transport: &T,
+        tx: &mpsc::UnboundedSender<Transfer>,
+    ) -> Self {
+        TransactionHashProcessor {
+            network_type,
+            confirmations,
+            target: target.clone(),
+            transport: transport.clone(),
+            tx: tx.clone(),
+        }
+    }
+
+    fn process(
+        &self,
+        destination: Address,
+        amount: U256,
+        removed: Option<bool>,
+        transaction_hash: H256,
+    ) -> Box<Future<Item = (), Error = ()>> {
+        let network_type = self.network_type;
+        let target = self.target.clone();
+        let transport = self.transport.clone();
+        let confirmations = self.confirmations;
+        let tx = self.tx.clone();
+        let removed = removed.unwrap_or(false);
+
+        let either = if removed {
+            Either::A(target.web3.eth().transaction_receipt(transaction_hash))
+        } else {
+            info!(
+                "received transfer event in tx hash {:?} on {:?}, waiting for confirmations",
+                &transaction_hash, network_type
+            );
+            Either::B(
+                wait_for_transaction_confirmation(
+                    transport,
+                    transaction_hash,
+                    time::Duration::from_secs(1),
+                    confirmations as usize,
+                )
+                .check_log_removed(&target, transaction_hash),
+            )
+        };
+
+        Box::new(
+            either
+                .map_err(move |e| {
+                    error!("error checking transaction on {:?}: {:?}", network_type, e);
+                })
+                .and_then(move |receipt| {
+                    let transfer_result = Transfer::from_receipt(destination, amount, removed, &receipt.ok_or(())?);
+                    match transfer_result {
+                        Ok(transfer) => {
+                            info!(
+                                "transfer event on {:?} confirmed, approving {}",
+                                network_type, &transfer
+                            );
+                            tx.unbounded_send(transfer).unwrap();
+                            Ok(())
+                        }
+                        Err(msg) => {
+                            error!("error producing transfer from receipt on {:?}: {}", network_type, msg);
+                            Err(())
+                        }
+                    }
+                })
+                .map_err(move |e| {
+                    error!(
+                        "error getting removed transaction receipt on {:?}: {:?}",
+                        network_type, e
+                    );
+                }),
+        )
+    }
+}
+
+pub struct ProcessTransfer<T: DuplexTransport + 'static> {
+    rx: mpsc::UnboundedReceiver<Transfer>,
+    handle: reactor::Handle,
+    target: Rc<Network<T>>,
+}
+
+impl<T: DuplexTransport + 'static> ProcessTransfer<T> {
+    pub fn new(rx: mpsc::UnboundedReceiver<Transfer>, target: &Rc<Network<T>>, handle: &reactor::Handle) -> Self {
+        ProcessTransfer {
+            rx,
+            target: target.clone(),
+            handle: handle.clone(),
+        }
+    }
+
+    pub fn advance_transfer_approval(&self, transfer: Transfer, state: Option<&TransferApprovalState>) {
+        match state {
+            Some(TransferApprovalState::Approved) => {
+                if transfer.removed {
+                    self.target
+                        .pending
+                        .write()
+                        .unwrap()
+                        .put(transfer.tx_hash, TransferApprovalState::Removed);
+                    self.handle.spawn(transfer.unapprove_withdrawal(&self.target));
+                }
+            }
+            Some(TransferApprovalState::WaitApproval) => {
+                if transfer.removed {
+                    self.target
+                        .pending
+                        .write()
+                        .unwrap()
+                        .put(transfer.tx_hash, TransferApprovalState::Removed);
+                    self.handle.spawn(transfer.unapprove_withdrawal(&self.target));
+                }
+            }
+            Some(TransferApprovalState::Removed) => {
+                // Remove logs can be added again
+                if !transfer.removed {
+                    self.target
+                        .pending
+                        .write()
+                        .unwrap()
+                        .put(transfer.tx_hash, TransferApprovalState::WaitApproval);
+                    self.handle.spawn(transfer.approve_withdrawal(&self.target));
+                }
+            }
+            None => {
+                if transfer.removed {
+                    self.target
+                        .pending
+                        .write()
+                        .unwrap()
+                        .put(transfer.tx_hash, TransferApprovalState::Removed);
+                } else {
+                    self.target
+                        .pending
+                        .write()
+                        .unwrap()
+                        .put(transfer.tx_hash, TransferApprovalState::WaitApproval);
+                    self.handle.spawn(transfer.approve_withdrawal(&self.target));
+                }
+            }
+        }
+    }
+}
+
+impl<T: DuplexTransport + 'static> Future for ProcessTransfer<T> {
+    type Item = ();
     type Error = ();
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         loop {
             let transfer = try_ready!(self.rx.poll());
-            if let Some(t) = transfer {
-                let state: Option<TransactionApprovalState> = match self.target.pending.read().unwrap().peek(&t.tx_hash)
-                {
-                    Some(value) => Some(value.clone()),
-                    None => None,
-                };
-                match state {
-                    Some(TransactionApprovalState::Approved) => {
-                        if t.removed {
-                            self.target
-                                .pending
-                                .write()
-                                .unwrap()
-                                .put(t.tx_hash, TransactionApprovalState::Removed);
-                            self.handle.spawn(t.unapprove_withdrawal(&self.target));
+            match transfer {
+                Some(t) => {
+                    match self.target.pending.read() {
+                        Ok(lock) => {
+                            let value = lock.peek(&t.tx_hash);
+                            self.advance_transfer_approval(t, value);
                         }
-                    }
-                    Some(TransactionApprovalState::WaitApproval) => {
-                        if t.removed {
-                            self.target
-                                .pending
-                                .write()
-                                .unwrap()
-                                .put(t.tx_hash, TransactionApprovalState::Removed);
-                            self.handle.spawn(t.unapprove_withdrawal(&self.target));
+                        Err(e) => {
+                            error!("error acquiring rwlock for transactions {:?}", e);
+                            return Err(());
                         }
-                    }
-                    Some(TransactionApprovalState::Removed) => {
-                        // Remove logs can be added again
-                        if !t.removed {
-                            self.target
-                                .pending
-                                .write()
-                                .unwrap()
-                                .put(t.tx_hash, TransactionApprovalState::WaitApproval);
-                            self.handle.spawn(t.approve_withdrawal(&self.target));
-                        }
-                    }
-                    None => {
-                        if t.removed {
-                            self.target
-                                .pending
-                                .write()
-                                .unwrap()
-                                .put(t.tx_hash, TransactionApprovalState::Removed);
-                        } else {
-                            self.target
-                                .pending
-                                .write()
-                                .unwrap()
-                                .put(t.tx_hash, TransactionApprovalState::WaitApproval);
-                            self.handle.spawn(t.approve_withdrawal(&self.target));
-                        }
-                    }
-                };
-            }
+                    };
+                }
+                None => {
+                    return Ok(Async::Ready(()));
+                }
+            };
         }
     }
 }

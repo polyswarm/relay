@@ -17,6 +17,7 @@ use super::server::endpoint::{HandleRequests, RequestType};
 use super::transfers::live::WatchLiveTransfers;
 use super::transfers::past::RecheckPastTransferLogs;
 use super::utils::clean_0x;
+use transfers::live::ProcessTransfer;
 
 const FREE_GAS_PRICE: u64 = 0;
 const GAS_LIMIT: u64 = 200_000;
@@ -78,7 +79,7 @@ impl<T: DuplexTransport + 'static> Relay<T> {
 }
 
 #[derive(Clone)]
-pub enum TransactionApprovalState {
+pub enum TransferApprovalState {
     Approved,
     Removed,
     WaitApproval,
@@ -110,7 +111,7 @@ pub struct Network<T: DuplexTransport> {
     pub keydir: String,
     pub password: String,
     pub nonce: AtomicUsize,
-    pub pending: RwLock<LruCache<H256, TransactionApprovalState>>,
+    pub pending: RwLock<LruCache<H256, TransferApprovalState>>,
     pub retries: u64,
 }
 
@@ -305,8 +306,12 @@ impl<T: DuplexTransport + 'static> Network<T> {
     ///
     /// * `target` - Network where to anchor the block headers
     /// * `handle` - Handle to spawn new tasks
-    pub fn watch_transfer_logs(&self, target: &Rc<Network<T>>, handle: &reactor::Handle) -> WatchLiveTransfers<T> {
-        WatchLiveTransfers::new(self, target, handle)
+    pub fn watch_transfer_logs(&self, target: &Rc<Network<T>>, handle: &reactor::Handle) -> ProcessTransfer<T> {
+        let (tx, rx) = mpsc::unbounded();
+        let watch = WatchLiveTransfers::new(&tx, self, target, handle)
+            .map_err(move |e| error!("error watching transaction logs {:?}", e));
+        handle.spawn(watch);
+        ProcessTransfer::new(rx, target, handle)
     }
 
     /// Returns a RecheckPastTransferLogs Future for this chain.

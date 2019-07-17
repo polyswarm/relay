@@ -323,13 +323,12 @@ impl HandleRequests {
                                 Ok(StatusResponse::new(home, side))
                             })
                             .and_then(move |response| {
-                                info!("Status response: {:?}", response);
+                                debug!("Status response: {:?}", response);
                                 let tx: mpsc::UnboundedSender<Result<StatusResponse, ()>> = tx.clone();
                                 let send_result = tx.unbounded_send(Ok(response));
                                 if send_result.is_err() {
                                     error!("error sending status response");
                                 }
-                                info!("sent response");
                                 Ok(())
                             })
                             .or_else(move |e| {
@@ -518,7 +517,7 @@ impl Detokenize for BalanceOf {
                 "cannot parse balance from contract response".to_string(),
             ))
         })?;
-        info!("balance of: {:?}", balance);
+        debug!("balance of: {:?}", balance);
         Ok(BalanceOf(balance))
     }
 }

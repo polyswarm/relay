@@ -7,7 +7,7 @@ use web3::futures::prelude::*;
 use web3::types::H256;
 use web3::{DuplexTransport, ErrorKind};
 
-use relay::{Network, TransactionApprovalState};
+use relay::{Network, TransferApprovalState};
 
 // From ethereum_types but not reexported by web3
 pub fn clean_0x(s: &str) -> &str {
@@ -16,6 +16,14 @@ pub fn clean_0x(s: &str) -> &str {
     } else {
         s
     }
+}
+
+/// Enum for the two stages of subscribing to a timeout stream
+/// Subscribing is holds future that returns a TimeoutStream
+/// Subscribed is holds a TimeoutStream
+pub enum SubscriptionState<T> {
+    Subscribing(Box<Future<Item = TimeoutStream<T>, Error = web3::Error>>),
+    Subscribed(TimeoutStream<T>),
 }
 
 /// TimeoutStream adds a timeout to an existing Stream.
@@ -136,7 +144,7 @@ where
             Ok(Async::NotReady) => {
                 // Check removed status
                 match self.target.pending.read().unwrap().peek(&self.tx_hash) {
-                    Some(TransactionApprovalState::Removed) => Ok(Async::Ready(None)),
+                    Some(TransferApprovalState::Removed) => Ok(Async::Ready(None)),
                     _ => Ok(Async::NotReady),
                 }
             }

@@ -14,6 +14,8 @@ use super::extensions::removed::{CheckLogRemoved, CheckRemoved};
 use super::extensions::timeout::{Timeout, TimeoutStream};
 use super::relay::{Network, NetworkType, TransferApprovalState};
 use super::transfers::transfer::Transfer;
+use lru::LruCache;
+use std::sync::{PoisonError, RwLockWriteGuard};
 
 /// Add CheckRemoved trait to SendTransactionWithConfirmation, which is returned by wait_for_transaction_confirmation()
 impl<T> CheckRemoved<T, TransactionReceipt, web3::Error> for SendTransactionWithConfirmation<T>
@@ -241,14 +243,17 @@ impl<T: DuplexTransport + 'static> ProcessTransfer<T> {
         }
     }
 
-    pub fn advance_transfer_approval(&self, transfer: Transfer, state: Option<&TransferApprovalState>) {
+    pub fn advance_transfer_approval(
+        &self,
+        transfer: Transfer,
+        state: Option<&TransferApprovalState>,
+    ) -> Result<(), PoisonError<RwLockWriteGuard<'_, LruCache<H256, TransferApprovalState>>>> {
         match state {
             Some(TransferApprovalState::Approved) => {
                 if transfer.removed {
                     self.target
                         .pending
-                        .write()
-                        .unwrap()
+                        .write()?
                         .put(transfer.tx_hash, TransferApprovalState::Removed);
                     self.handle.spawn(transfer.unapprove_withdrawal(&self.target));
                 }
@@ -257,8 +262,7 @@ impl<T: DuplexTransport + 'static> ProcessTransfer<T> {
                 if transfer.removed {
                     self.target
                         .pending
-                        .write()
-                        .unwrap()
+                        .write()?
                         .put(transfer.tx_hash, TransferApprovalState::Removed);
                     self.handle.spawn(transfer.unapprove_withdrawal(&self.target));
                 }
@@ -268,8 +272,7 @@ impl<T: DuplexTransport + 'static> ProcessTransfer<T> {
                 if !transfer.removed {
                     self.target
                         .pending
-                        .write()
-                        .unwrap()
+                        .write()?
                         .put(transfer.tx_hash, TransferApprovalState::WaitApproval);
                     self.handle.spawn(transfer.approve_withdrawal(&self.target));
                 }
@@ -278,19 +281,18 @@ impl<T: DuplexTransport + 'static> ProcessTransfer<T> {
                 if transfer.removed {
                     self.target
                         .pending
-                        .write()
-                        .unwrap()
+                        .write()?
                         .put(transfer.tx_hash, TransferApprovalState::Removed);
                 } else {
                     self.target
                         .pending
-                        .write()
-                        .unwrap()
+                        .write()?
                         .put(transfer.tx_hash, TransferApprovalState::WaitApproval);
                     self.handle.spawn(transfer.approve_withdrawal(&self.target));
                 }
             }
-        }
+        };
+        Ok(())
     }
 }
 
@@ -302,16 +304,13 @@ impl<T: DuplexTransport + 'static> Future for ProcessTransfer<T> {
             let transfer = try_ready!(self.rx.poll());
             match transfer {
                 Some(t) => {
-                    match self.target.pending.read() {
-                        Ok(lock) => {
-                            let value = lock.peek(&t.tx_hash);
-                            self.advance_transfer_approval(t, value);
-                        }
-                        Err(e) => {
-                            error!("error acquiring rwlock for transactions {:?}", e);
-                            return Err(());
-                        }
-                    };
+                    let lock = self.target.pending.read().map_err(|e| {
+                        error!("Failed to acquire read lock {:?}", e);
+                    })?;
+                    let value = lock.peek(&t.tx_hash).clone();
+                    self.advance_transfer_approval(t, value).map_err(|e| {
+                        error!("Failed to acquire write lock {:?}", e);
+                    })?;
                 }
                 None => {
                     return Ok(Async::Ready(()));

@@ -7,7 +7,7 @@ use web3::futures::prelude::*;
 use web3::futures::sync::mpsc;
 use web3::futures::try_ready;
 use web3::types::{BlockId, BlockNumber, H256, U256};
-use web3::{DuplexTransport, ErrorKind};
+use web3::DuplexTransport;
 
 use super::relay::Network;
 use super::transactions::transaction::SendTransaction;
@@ -113,91 +113,78 @@ impl FindAnchors {
                 .web3
                 .eth_subscribe()
                 .subscribe_new_heads()
-                .and_then(move |subscription| {
-                    subscription.timeout(timeout, &h).map_err(|_| {
-                        web3::Error::from_kind(ErrorKind::Msg("Unable to start head subscription".to_string()))
-                    })
-                })
-                .and_then(move |timed| {
-                    timed.for_each(move |head| {
-                        head.number.map_or_else(
-                            || {
-                                warn!("no block number in block head event on {:?}", network_type);
-                                Ok(())
-                            },
-                            |block_number| {
-                                let tx = tx.clone();
+                .timeout(timeout, &h)
+                .for_each(move |head| {
+                    head.number.map_or_else(
+                        || {
+                            warn!("no block number in block head event on {:?}", network_type);
+                            Ok(())
+                        },
+                        |block_number| {
+                            let tx = tx.clone();
 
-                                match block_number.checked_rem(anchor_frequency.into()).map(|u| u.low_u64()) {
-                                    Some(c) if c == confirmations => {
-                                        let block_id = BlockId::Number(BlockNumber::Number(
-                                            block_number.low_u64() - confirmations,
-                                        ));
+                            match block_number.checked_rem(anchor_frequency.into()).map(|u| u.low_u64()) {
+                                Some(c) if c == confirmations => {
+                                    let block_id =
+                                        BlockId::Number(BlockNumber::Number(block_number.low_u64() - confirmations));
 
-                                        handle.spawn(
-                                            web3.eth()
-                                                .block(block_id)
-                                                .and_then(move |block| match block {
-                                                    Some(b) => {
-                                                        if b.number.is_none() {
-                                                            warn!(
-                                                                "no block number in anchor block on {:?}",
-                                                                network_type
-                                                            );
-                                                            return Ok(());
-                                                        }
-
-                                                        if b.hash.is_none() {
-                                                            warn!(
-                                                                "no block hash in anchor block on {:?}",
-                                                                network_type
-                                                            );
-                                                            return Ok(());
-                                                        }
-
-                                                        let block_hash: H256 = b.hash.unwrap();
-                                                        let block_number: U256 = b.number.unwrap().into();
-
-                                                        let anchor = Anchor {
-                                                            block_hash,
-                                                            block_number,
-                                                        };
-
-                                                        info!(
-                                                            "anchor block confirmed, anchoring on {:?}: {}",
-                                                            network_type, &anchor
-                                                        );
-
-                                                        tx.unbounded_send(anchor).unwrap();
-                                                        Ok(())
+                                    handle.spawn(
+                                        web3.eth()
+                                            .block(block_id)
+                                            .and_then(move |block| match block {
+                                                Some(b) => {
+                                                    if b.number.is_none() {
+                                                        warn!("no block number in anchor block on {:?}", network_type);
+                                                        return Ok(());
                                                     }
-                                                    None => {
-                                                        warn!(
-                                                            "no block found for anchor confirmations on {:?}",
-                                                            network_type
-                                                        );
-                                                        Ok(())
+
+                                                    if b.hash.is_none() {
+                                                        warn!("no block hash in anchor block on {:?}", network_type);
+                                                        return Ok(());
                                                     }
-                                                })
-                                                .or_else(move |e| {
-                                                    error!(
-                                                        "error waiting for anchor confirmations on {:?}: {:?}",
-                                                        network_type, e
+
+                                                    let block_hash: H256 = b.hash.unwrap();
+                                                    let block_number: U256 = b.number.unwrap().into();
+
+                                                    let anchor = Anchor {
+                                                        block_hash,
+                                                        block_number,
+                                                    };
+
+                                                    info!(
+                                                        "anchor block confirmed, anchoring on {:?}: {}",
+                                                        network_type, &anchor
+                                                    );
+
+                                                    tx.unbounded_send(anchor).unwrap();
+                                                    Ok(())
+                                                }
+                                                None => {
+                                                    warn!(
+                                                        "no block found for anchor confirmations on {:?}",
+                                                        network_type
                                                     );
                                                     Ok(())
-                                                }),
-                                        );
-                                    }
-                                    _ => (),
-                                };
+                                                }
+                                            })
+                                            .or_else(move |e| {
+                                                error!(
+                                                    "error waiting for anchor confirmations on {:?}: {:?}",
+                                                    network_type, e
+                                                );
+                                                Ok(())
+                                            }),
+                                    );
+                                }
+                                _ => (),
+                            };
 
-                                Ok(())
-                            },
-                        )
-                    })
+                            Ok(())
+                        },
+                    )
                 })
                 .map_err(move |e| {
-                    error!("error in anchor stream on {:?}: {}", network_type, e);
+                    error!("error in anchor stream on {:?}: {:?}", network_type, e);
                 })
         };
 

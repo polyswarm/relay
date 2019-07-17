@@ -27,7 +27,6 @@ impl CheckPastTransfers {
     /// * `handle` - Handle to spawn new futures
     pub fn new<T: DuplexTransport + 'static>(source: &Network<T>, handle: &reactor::Handle) -> Self {
         let (tx, rx) = mpsc::unbounded();
-        let h = handle.clone();
         let token_address = source.token.address();
         let relay_address = source.relay.address();
         let network_type = source.network_type;
@@ -43,16 +42,8 @@ impl CheckPastTransfers {
             .clone()
             .eth_subscribe()
             .subscribe_new_heads()
-            .and_then(move |subscription| {
-                subscription.timeout(timeout, &handle).map_err(|_| {
-                    web3::Error::from_kind(ErrorKind::Msg("Unable to start head subscription".to_string()))
-                })
-            })
-            .and_then(move |timed| {
-                let handle = h.clone();
-                let tx = tx.clone();
-                let web3 = web3.clone();
-                timed.for_each(move |head| {
+            .timeout(timeout, &handle)
+            .for_each(move |head| {
                     let web3 = web3.clone();
                     let handle = handle.clone();
                     let tx = tx.clone();
@@ -174,9 +165,8 @@ impl CheckPastTransfers {
                                 }))
                         })
                     })
-                })
             }).map_err(move |e| {
-                error!("error in block head stream on {:?}: {}", network_type, e);
+                error!("error in block head stream on {:?}: {:?}", network_type, e);
             })
         };
         handle.spawn(future);

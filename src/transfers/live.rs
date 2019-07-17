@@ -12,7 +12,7 @@ use web3::{DuplexTransport, ErrorKind};
 use super::relay::{Network, NetworkType, TransferApprovalState};
 use super::transactions::contracts::TRANSFER_EVENT_SIGNATURE;
 use super::transfers::transfer::Transfer;
-use super::utils::{CheckLogRemoved, CheckRemoved, SubscriptionState, Timeout};
+use super::utils::{CheckLogRemoved, CheckRemoved, Timeout, TimeoutStream};
 
 /// Add CheckRemoved trait to SendTransactionWithConfirmation, which is returned by wait_for_transaction_confirmation()
 impl<T> CheckRemoved<T, TransactionReceipt, web3::Error> for SendTransactionWithConfirmation<T>
@@ -32,7 +32,7 @@ where
 /// N is confirmations per settings.
 pub struct WatchLiveTransfers<T: DuplexTransport + 'static> {
     transaction_hash_processor: TransactionHashProcessor<T>,
-    state: SubscriptionState<Log>,
+    stream: TimeoutStream<T, Log>,
     handle: reactor::Handle,
 }
 
@@ -60,18 +60,12 @@ impl<T: DuplexTransport + 'static> WatchLiveTransfers<T> {
             .build();
 
         let timeout = source.timeout;
-        let inner_handle = handle.clone();
-        let future = source
+        let stream = source
             .web3
             .clone()
             .eth_subscribe()
             .subscribe_logs(filter)
-            .and_then(move |subscription| {
-                let handle = inner_handle.clone();
-                subscription.timeout(timeout, &handle).map_err(|_| {
-                    web3::Error::from_kind(ErrorKind::Msg("Unable to start head subscription".to_string()))
-                })
-            });
+            .timeout(timeout, &handle);
 
         let transaction_processor = TransactionHashProcessor::new(
             source.network_type,
@@ -83,7 +77,7 @@ impl<T: DuplexTransport + 'static> WatchLiveTransfers<T> {
 
         WatchLiveTransfers {
             transaction_hash_processor: transaction_processor,
-            state: SubscriptionState::Subscribing(Box::new(future)),
+            stream,
             handle: handle.clone(),
         }
     }
@@ -113,43 +107,30 @@ impl<T: DuplexTransport + 'static> Future for WatchLiveTransfers<T> {
         loop {
             let handle = self.handle.clone();
             let processor = self.transaction_hash_processor.clone();
-            // FIXME This should exists in the Timeout Future, See CheckLogRemoved as example
-            let next = match self.state {
-                SubscriptionState::Subscribing(ref mut future) => {
-                    let stream = try_ready!(future.poll());
-                    Some(SubscriptionState::Subscribed(stream))
+            match self.stream.poll() {
+                Ok(Async::Ready(Some(log))) => {
+                    let process_future = WatchLiveTransfers::<T>::process_log(&log, &processor);
+                    if let Some(future) = process_future {
+                        handle.spawn(future);
+                    }
                 }
-                SubscriptionState::Subscribed(ref mut stream) => {
-                    match stream.poll() {
-                        Ok(Async::Ready(Some(log))) => {
-                            let process_future = WatchLiveTransfers::<T>::process_log(&log, &processor);
-                            if let Some(future) = process_future {
-                                handle.spawn(future);
-                            }
-                        }
-                        Ok(Async::Ready(None)) => {
-                            self.transaction_hash_processor.tx.close().map_err(move |_| {
-                                web3::Error::from_kind(ErrorKind::Msg("Unable to close sender".to_string()))
-                            })?;
-                            return Ok(Async::Ready(()));
-                        }
-                        Ok(Async::NotReady) => {
-                            return Ok(Async::NotReady);
-                        }
-                        Err(e) => {
-                            error!("error reading transfer logs. {:?}", e);
-                            self.transaction_hash_processor.tx.close().map_err(move |_| {
-                                web3::Error::from_kind(ErrorKind::Msg("Unable to close sender".to_string()))
-                            })?;
-                            return Err(e);
-                        }
-                    };
-                    None
+                Ok(Async::Ready(None)) => {
+                    self.transaction_hash_processor.tx.close().map_err(move |_| {
+                        web3::Error::from_kind(ErrorKind::Msg("Unable to close sender".to_string()))
+                    })?;
+                    return Ok(Async::Ready(()));
+                }
+                Ok(Async::NotReady) => {
+                    return Ok(Async::NotReady);
+                }
+                Err(e) => {
+                    error!("error reading transfer logs. {:?}", e);
+                    self.transaction_hash_processor.tx.close().map_err(move |_| {
+                        web3::Error::from_kind(ErrorKind::Msg("Unable to close sender".to_string()))
+                    })?;
+                    return Err(e);
                 }
             };
-            if let Some(next_state) = next {
-                self.state = next_state;
-            }
         }
     }
 }

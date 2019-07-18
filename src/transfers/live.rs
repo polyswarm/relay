@@ -252,7 +252,7 @@ impl<T: DuplexTransport + 'static> ProcessTransfer<T> {
     pub fn advance_transfer_approval(
         &self,
         transfer: Transfer,
-        state: Option<&TransferApprovalState>,
+        state: Option<TransferApprovalState>,
     ) -> Result<(), PoisonError<RwLockWriteGuard<'_, LruCache<H256, TransferApprovalState>>>> {
         match state {
             Some(TransferApprovalState::Approved) => {
@@ -310,10 +310,15 @@ impl<T: DuplexTransport + 'static> Future for ProcessTransfer<T> {
             let transfer = try_ready!(self.rx.poll());
             match transfer {
                 Some(t) => {
-                    let lock = self.target.pending.read().map_err(|e| {
-                        error!("Failed to acquire read lock {:?}", e);
-                    })?;
-                    let value = lock.peek(&t.tx_hash);
+                    let value = {
+                        let lock = self.target.pending.read().map_err(|e| {
+                            error!("Failed to acquire read lock {:?}", e);
+                        })?;
+
+                        lock.peek(&t.tx_hash).map(|value| {
+                            *value
+                        })
+                    };
                     self.advance_transfer_approval(t, value).map_err(|e| {
                         error!("Failed to acquire write lock {:?}", e);
                     })?;

@@ -50,7 +50,21 @@ where
             timeout,
         }
     }
+
+    /// Reset the given timeout
+    ///
+    /// # Arguments
+    ///
+    /// * `timeout` - reactor::Timeout that you want to be reset
+    /// * `duration` - Duration of the timeout
+    pub fn reset_timeout(timeout: &mut reactor::Timeout, duration: &Duration) {
+        let mut at = Instant::now();
+        at = at.add(duration.clone());
+        timeout.reset(at);
+    }
 }
+
+
 
 impl<T, I> Stream for TimeoutStream<T, I>
 where
@@ -63,7 +77,7 @@ where
     /// Returns Items from the stream, or Err if timed out
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
         loop {
-            let next = match &mut self.state {
+            let next = match self.state {
                 SubscriptionState::Subscribing(ref mut future) => {
                     let stream = try_ready!(future.poll());
                     Some(SubscriptionState::Subscribed(stream))
@@ -89,9 +103,7 @@ where
                         },
                         // If the stream returns an item, reset timeout and return the item
                         Ok(Async::Ready(Some(msg))) => {
-                            let mut at = Instant::now();
-                            at = at.add(self.duration);
-                            self.timeout.reset(at);
+                            TimeoutStream::<T, I>::reset_timeout(&mut self.timeout, &self.duration);
                             return Ok(Async::Ready(Some(msg)));
                         }
                         // Forward stream done
@@ -108,6 +120,7 @@ where
             // If the Future finished, set the state to subscribed
             if let Some(next_state) = next {
                 self.state = next_state;
+                TimeoutStream::<T, I>::reset_timeout(&mut self.timeout, &self.duration);
             }
         }
     }

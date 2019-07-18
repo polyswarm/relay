@@ -129,7 +129,7 @@ impl fmt::Display for Transfer {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "({} -> {:?}, hash: {:?})",
+            "({} → {:?}, hash: {:?})",
             self.amount, self.destination, self.tx_hash
         )
     }

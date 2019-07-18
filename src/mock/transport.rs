@@ -13,7 +13,8 @@ use web3::transports::Result;
 use web3::types::{BlockHeader, Log, H160, H2048, H256, U256};
 use web3::{BatchTransport, DuplexTransport, Error, ErrorKind, RequestId, Transport};
 
-use relay::{Network, NetworkType};
+use crate::relay::{Network, NetworkType};
+use crate::errors::OperationError;
 
 // Result from a MockTask
 pub type MockTask<T> = Box<Future<Item = T, Error = Error>>;
@@ -29,7 +30,7 @@ pub struct MockTransport {
 }
 
 impl MockTransport {
-    fn new() -> Self {
+    pub fn new() -> Self {
         let id = Arc::new(atomic::AtomicUsize::new(1));
         let responses: Arc<Mutex<Vec<Vec<rpc::Value>>>> = Default::default();
         let subscriptions: Arc<Mutex<BTreeMap<SubscriptionId, Subscription>>> = Default::default();
@@ -40,29 +41,76 @@ impl MockTransport {
         }
     }
 
-    fn emit_log(&self, log: Log) {
+    pub fn new_network(&self, network_type: NetworkType) -> std::result::Result<Network<MockTransport>, OperationError> {
+        let tx_count = AtomicUsize::new(0);
+        let mock_abi = format!(
+            r#"[
+            {{
+              "constant": true,
+              "inputs": [
+                {{
+                  "name": "_state",
+                  "type": "bytes"
+                }}
+              ],
+              "name": "mockConstant",
+              "outputs": [
+                {{
+                  "name": "_flag",
+                  "type": "uint8"
+                }}
+              ],
+              "payable": false,
+              "stateMutability": "pure",
+              "type": "function"
+            }}
+        ]"#
+        );
+
+        Network::new(
+            network_type,
+            self.clone(),
+            "0x5af8bcc6127afde967279dc04661f599a5c0cafa",
+            "0x7e7087c25df885f97aeacbfae84ea12016799eee",
+            &mock_abi,
+            "0x7e7087c25df885f97aeacbfae84ea12016799eee",
+            &mock_abi,
+            true,
+            0,
+            0,
+            30,
+            30,
+            1338,
+            "../",
+            "password",
+            tx_count,
+            0,
+        )
+    }
+
+    pub fn emit_log(&self, log: Log) {
         let value: rpc::Value = serde_json::to_string(&log).unwrap().into();
         for (_id, tx) in self.subscriptions.lock().iter() {
             tx.unbounded_send(value.clone()).unwrap();
         }
     }
 
-    fn emit_head(&self, head: BlockHeader) {
+    pub fn emit_head(&self, head: BlockHeader) {
         let value: rpc::Value = serde_json::to_string(&head).unwrap().into();
         for (_id, tx) in self.subscriptions.lock().iter() {
             tx.unbounded_send(value.clone()).unwrap();
         }
     }
 
-    fn add_rpc_response(&mut self, response: rpc::Value) {
+    pub fn add_rpc_response(&mut self, response: rpc::Value) {
         self.add_batch_rpc_response(vec![response]);
     }
 
-    fn add_batch_rpc_response(&mut self, responses: Vec<rpc::Value>) {
+    pub fn add_batch_rpc_response(&mut self, responses: Vec<rpc::Value>) {
         self.responses.lock().push(responses);
     }
 
-    fn clear_rpc(&mut self) {
+    pub fn clear_rpc(&mut self) {
         let mut vec = self.responses.lock();
         *vec = Vec::new();
     }

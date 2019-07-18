@@ -78,7 +78,7 @@ impl<T: DuplexTransport + 'static> Relay<T> {
     }
 }
 
-#[derive(Clone, Debug, Copy)]
+#[derive(Clone, Debug, Copy, PartialEq, Eq)]
 pub enum TransferApprovalState {
     Approved,
     Removed,

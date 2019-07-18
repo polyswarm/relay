@@ -330,3 +330,230 @@ impl<T: DuplexTransport + 'static> Future for ProcessTransfer<T> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mock::transport::MockTransport;
+
+    #[test]
+    fn should_build_network_with_mock() {
+        let mock = MockTransport::new();
+        Rc::new(mock.new_network(NetworkType::Home).unwrap());
+        Rc::new(mock.new_network(NetworkType::Side).unwrap());
+    }
+
+    #[test]
+    fn process_transfer_should_process_create_transfer_state_on_tx() {
+        // arrange
+        let mut eloop = tokio_core::reactor::Core::new().unwrap();
+        let handle = eloop.handle();
+        let mock = MockTransport::new();
+        let target = Rc::new(mock.new_network(NetworkType::Side).unwrap());
+        let (tx, rx) = mpsc::unbounded();
+        let processor = ProcessTransfer::new(rx, &target, &handle);
+        let transfer = Transfer {
+            destination: Address::zero(),
+            amount: U256::zero(),
+            tx_hash: H256::zero(),
+            block_hash: H256::zero(),
+            block_number: U256::zero(),
+            removed: false,
+        };
+        // act
+        let send_and_close = move |mut tx: mpsc::UnboundedSender<Transfer>| {
+            tx.unbounded_send(transfer).unwrap();
+            tx.close().unwrap();
+        };
+        send_and_close(tx);
+
+        // assert
+        assert!(eloop.run(processor).is_ok());
+        assert!(target.pending.read().unwrap().peek(&transfer.tx_hash).is_some());
+    }
+
+    #[test]
+    fn advance_transfer_approval_should_change_transfer_state_to_wait_approval_on_first_non_removal() {
+        // arrange
+        let eloop = tokio_core::reactor::Core::new().unwrap();
+        let handle = eloop.handle();
+        let mock = MockTransport::new();
+        let target = Rc::new(mock.new_network(NetworkType::Side).unwrap());
+        let (_tx, rx) = mpsc::unbounded();
+        let processor = ProcessTransfer::new(rx, &target, &handle);
+        let transfer = Transfer {
+            destination: Address::zero(),
+            amount: U256::zero(),
+            tx_hash: H256::zero(),
+            block_hash: H256::zero(),
+            block_number: U256::zero(),
+            removed: false,
+        };
+        // act
+        processor.advance_transfer_approval(transfer, None).unwrap();
+        // assert
+        assert_eq!(target.pending.read().unwrap().peek(&transfer.tx_hash), Some(&TransferApprovalState::WaitApproval));
+    }
+
+    #[test]
+    fn fn advance_transfer_approval_should_do_nothing_with_approved_repeat_transfer() {
+        // arrange
+        let eloop = tokio_core::reactor::Core::new().unwrap();
+        let handle = eloop.handle();
+        let mock = MockTransport::new();
+        let target = Rc::new(mock.new_network(NetworkType::Side).unwrap());
+        let (_tx, rx) = mpsc::unbounded();
+        let processor = ProcessTransfer::new(rx, &target, &handle);
+        let transfer = Transfer {
+            destination: Address::zero(),
+            amount: U256::zero(),
+            tx_hash: H256::zero(),
+            block_hash: H256::zero(),
+            block_number: U256::zero(),
+            removed: false,
+        };
+        // act
+        processor.advance_transfer_approval(transfer, Some(TransferApprovalState::Approved)).unwrap();
+        // assert
+        assert_eq!(target.pending.read().unwrap().peek(&transfer.tx_hash), None);
+    }
+
+    #[test]
+    fn fn advance_transfer_approval_should_do_nothing_with_waitapproval_repeat_transfer() {
+        // arrange
+        let eloop = tokio_core::reactor::Core::new().unwrap();
+        let handle = eloop.handle();
+        let mock = MockTransport::new();
+        let target = Rc::new(mock.new_network(NetworkType::Side).unwrap());
+        let (_tx, rx) = mpsc::unbounded();
+        let processor = ProcessTransfer::new(rx, &target, &handle);
+        let transfer = Transfer {
+            destination: Address::zero(),
+            amount: U256::zero(),
+            tx_hash: H256::zero(),
+            block_hash: H256::zero(),
+            block_number: U256::zero(),
+            removed: false,
+        };
+        // act
+        processor.advance_transfer_approval(transfer, Some(TransferApprovalState::WaitApproval)).unwrap();
+        // assert
+        assert_eq!(target.pending.read().unwrap().peek(&transfer.tx_hash), None);
+    }
+
+    #[test]
+    fn fn advance_transfer_approval_should_waitapproved_with_previously_removed_repeat_transfer() {
+        // arrange
+        let eloop = tokio_core::reactor::Core::new().unwrap();
+        let handle = eloop.handle();
+        let mock = MockTransport::new();
+        let target = Rc::new(mock.new_network(NetworkType::Side).unwrap());
+        let (_tx, rx) = mpsc::unbounded();
+        let processor = ProcessTransfer::new(rx, &target, &handle);
+        let transfer = Transfer {
+            destination: Address::zero(),
+            amount: U256::zero(),
+            tx_hash: H256::zero(),
+            block_hash: H256::zero(),
+            block_number: U256::zero(),
+            removed: false,
+        };
+        // act
+        processor.advance_transfer_approval(transfer, Some(TransferApprovalState::Removed)).unwrap();
+        // assert
+        assert_eq!(target.pending.read().unwrap().peek(&transfer.tx_hash), Some(&TransferApprovalState::WaitApproval));
+    }
+
+    #[test]
+    fn fn advance_transfer_approval_should_remove_approved_on_remove() {
+        // arrange
+        let eloop = tokio_core::reactor::Core::new().unwrap();
+        let handle = eloop.handle();
+        let mock = MockTransport::new();
+        let target = Rc::new(mock.new_network(NetworkType::Side).unwrap());
+        let (_tx, rx) = mpsc::unbounded();
+        let processor = ProcessTransfer::new(rx, &target, &handle);
+        let transfer = Transfer {
+            destination: Address::zero(),
+            amount: U256::zero(),
+            tx_hash: H256::zero(),
+            block_hash: H256::zero(),
+            block_number: U256::zero(),
+            removed: true,
+        };
+        // act
+        processor.advance_transfer_approval(transfer, Some(TransferApprovalState::Approved)).unwrap();
+        // assert
+        assert_eq!(target.pending.read().unwrap().peek(&transfer.tx_hash), Some(&TransferApprovalState::Removed));
+    }
+
+    #[test]
+    fn fn advance_transfer_approval_should_remove_waitapproved_on_remove() {
+        // arrange
+        let eloop = tokio_core::reactor::Core::new().unwrap();
+        let handle = eloop.handle();
+        let mock = MockTransport::new();
+        let target = Rc::new(mock.new_network(NetworkType::Side).unwrap());
+        let (_tx, rx) = mpsc::unbounded();
+        let processor = ProcessTransfer::new(rx, &target, &handle);
+        let transfer = Transfer {
+            destination: Address::zero(),
+            amount: U256::zero(),
+            tx_hash: H256::zero(),
+            block_hash: H256::zero(),
+            block_number: U256::zero(),
+            removed: true,
+        };
+        // act
+        processor.advance_transfer_approval(transfer, Some(TransferApprovalState::WaitApproval)).unwrap();
+        // assert
+        assert_eq!(target.pending.read().unwrap().peek(&transfer.tx_hash), Some(&TransferApprovalState::Removed));
+    }
+
+    #[test]
+    fn fn advance_transfer_approval_should_remove_none_on_remove() {
+        // arrange
+        let eloop = tokio_core::reactor::Core::new().unwrap();
+        let handle = eloop.handle();
+        let mock = MockTransport::new();
+        let target = Rc::new(mock.new_network(NetworkType::Side).unwrap());
+        let (_tx, rx) = mpsc::unbounded();
+        let processor = ProcessTransfer::new(rx, &target, &handle);
+        let transfer = Transfer {
+            destination: Address::zero(),
+            amount: U256::zero(),
+            tx_hash: H256::zero(),
+            block_hash: H256::zero(),
+            block_number: U256::zero(),
+            removed: true,
+        };
+        // act
+        processor.advance_transfer_approval(transfer, None).unwrap();
+        // assert
+        assert_eq!(target.pending.read().unwrap().peek(&transfer.tx_hash), Some(&TransferApprovalState::Removed));
+    }
+
+    #[test]
+    fn fn advance_transfer_approval_should_do_nothing_on_removed_repeat_remove() {
+        // arrange
+        let eloop = tokio_core::reactor::Core::new().unwrap();
+        let handle = eloop.handle();
+        let mock = MockTransport::new();
+        let target = Rc::new(mock.new_network(NetworkType::Side).unwrap());
+        let (_tx, rx) = mpsc::unbounded();
+        let processor = ProcessTransfer::new(rx, &target, &handle);
+        let transfer = Transfer {
+            destination: Address::zero(),
+            amount: U256::zero(),
+            tx_hash: H256::zero(),
+            block_hash: H256::zero(),
+            block_number: U256::zero(),
+            removed: true,
+        };
+        // act
+        processor.advance_transfer_approval(transfer, Some(TransferApprovalState::Removed)).unwrap();
+        // assert
+        assert_eq!(target.pending.read().unwrap().peek(&transfer.tx_hash), None);
+
+    }
+}

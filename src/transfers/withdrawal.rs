@@ -227,7 +227,7 @@ impl<T: DuplexTransport + 'static> Future for DoesRequireApproval<T> {
                         if withdrawal.processed {
                             return Ok(Async::Ready(false));
                         } else {
-                            info!("transaction not processed on {:?} - checking approvers", network_type);
+                            debug!("transaction not processed on {:?} - checking approvers", network_type);
                             let approval_hash = Self::get_withdrawal_hash(&self.transfer);
                             let approval_future = GetWithdrawalApprovals::new(&self.target, &approval_hash, &0.into());
                             CheckWithdrawalState::GetWithdrawalApprovals(0, approval_future)
@@ -256,7 +256,7 @@ impl<T: DuplexTransport + 'static> Future for DoesRequireApproval<T> {
                             return Ok(Async::NotReady);
                         }
                         Err(()) => {
-                            info!("this relay missing from approvers");
+                            debug!("have not approved transaction");
                             return Ok(Async::Ready(true));
                         }
                     }

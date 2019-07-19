@@ -64,8 +64,6 @@ where
     }
 }
 
-
-
 impl<T, I> Stream for TimeoutStream<T, I>
 where
     T: DuplexTransport + 'static,

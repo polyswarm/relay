@@ -10,7 +10,7 @@ use web3::types::{Address, FilterBuilder, Log, TransactionReceipt, H256, U256};
 use web3::{DuplexTransport, ErrorKind};
 
 use super::eth::contracts::TRANSFER_EVENT_SIGNATURE;
-use super::extensions::removed::{CheckLogRemoved, CheckRemoved};
+use super::extensions::removed::{CancelRemoved, ExitOnLogRemoved};
 use super::extensions::timeout::SubscriptionState;
 use super::relay::{Network, NetworkType, TransferApprovalState};
 use super::transfers::transfer::Transfer;
@@ -18,16 +18,16 @@ use lru::LruCache;
 use std::sync::{PoisonError, RwLockWriteGuard};
 
 /// Add CheckRemoved trait to SendTransactionWithConfirmation, which is returned by wait_for_transaction_confirmation()
-impl<T> CheckRemoved<T, TransactionReceipt, web3::Error> for SendTransactionWithConfirmation<T>
+impl<T> CancelRemoved<T, TransactionReceipt, web3::Error> for SendTransactionWithConfirmation<T>
 where
     T: DuplexTransport + 'static,
 {
-    fn check_log_removed(
+    fn cancel_removed(
         self,
         target: &Rc<Network<T>>,
         tx_hash: H256,
-    ) -> CheckLogRemoved<T, TransactionReceipt, web3::Error> {
-        CheckLogRemoved::new(target.clone(), tx_hash, Box::new(self))
+    ) -> ExitOnLogRemoved<T, TransactionReceipt, web3::Error> {
+        ExitOnLogRemoved::new(target.clone(), tx_hash, Box::new(self))
     }
 }
 
@@ -198,7 +198,7 @@ impl<T: DuplexTransport + 'static> TransactionHashProcessor<T> {
                     time::Duration::from_secs(1),
                     confirmations as usize,
                 )
-                .check_log_removed(&target, transaction_hash),
+                .cancel_removed(&target, transaction_hash),
             )
         };
 
@@ -315,9 +315,7 @@ impl<T: DuplexTransport + 'static> Future for ProcessTransfer<T> {
                             error!("Failed to acquire read lock {:?}", e);
                         })?;
 
-                        lock.peek(&t.tx_hash).map(|value| {
-                            *value
-                        })
+                        lock.peek(&t.tx_hash).map(|value| *value)
                     };
                     self.advance_transfer_approval(t, value).map_err(|e| {
                         error!("Failed to acquire write lock {:?}", e);
@@ -392,11 +390,14 @@ mod tests {
         // act
         processor.advance_transfer_approval(transfer, None).unwrap();
         // assert
-        assert_eq!(target.pending.read().unwrap().peek(&transfer.tx_hash), Some(&TransferApprovalState::WaitApproval));
+        assert_eq!(
+            target.pending.read().unwrap().peek(&transfer.tx_hash),
+            Some(&TransferApprovalState::WaitApproval)
+        );
     }
 
     #[test]
-    fn fn advance_transfer_approval_should_do_nothing_with_approved_repeat_transfer() {
+    fn advance_transfer_approval_should_do_nothing_with_approved_repeat_transfer() {
         // arrange
         let eloop = tokio_core::reactor::Core::new().unwrap();
         let handle = eloop.handle();
@@ -413,13 +414,15 @@ mod tests {
             removed: false,
         };
         // act
-        processor.advance_transfer_approval(transfer, Some(TransferApprovalState::Approved)).unwrap();
+        processor
+            .advance_transfer_approval(transfer, Some(TransferApprovalState::Approved))
+            .unwrap();
         // assert
         assert_eq!(target.pending.read().unwrap().peek(&transfer.tx_hash), None);
     }
 
     #[test]
-    fn fn advance_transfer_approval_should_do_nothing_with_waitapproval_repeat_transfer() {
+    fn advance_transfer_approval_should_do_nothing_with_waitapproval_repeat_transfer() {
         // arrange
         let eloop = tokio_core::reactor::Core::new().unwrap();
         let handle = eloop.handle();
@@ -436,13 +439,15 @@ mod tests {
             removed: false,
         };
         // act
-        processor.advance_transfer_approval(transfer, Some(TransferApprovalState::WaitApproval)).unwrap();
+        processor
+            .advance_transfer_approval(transfer, Some(TransferApprovalState::WaitApproval))
+            .unwrap();
         // assert
         assert_eq!(target.pending.read().unwrap().peek(&transfer.tx_hash), None);
     }
 
     #[test]
-    fn fn advance_transfer_approval_should_waitapproved_with_previously_removed_repeat_transfer() {
+    fn advance_transfer_approval_should_waitapproved_with_previously_removed_repeat_transfer() {
         // arrange
         let eloop = tokio_core::reactor::Core::new().unwrap();
         let handle = eloop.handle();
@@ -459,13 +464,18 @@ mod tests {
             removed: false,
         };
         // act
-        processor.advance_transfer_approval(transfer, Some(TransferApprovalState::Removed)).unwrap();
+        processor
+            .advance_transfer_approval(transfer, Some(TransferApprovalState::Removed))
+            .unwrap();
         // assert
-        assert_eq!(target.pending.read().unwrap().peek(&transfer.tx_hash), Some(&TransferApprovalState::WaitApproval));
+        assert_eq!(
+            target.pending.read().unwrap().peek(&transfer.tx_hash),
+            Some(&TransferApprovalState::WaitApproval)
+        );
     }
 
     #[test]
-    fn fn advance_transfer_approval_should_remove_approved_on_remove() {
+    fn advance_transfer_approval_should_remove_approved_on_remove() {
         // arrange
         let eloop = tokio_core::reactor::Core::new().unwrap();
         let handle = eloop.handle();
@@ -482,13 +492,18 @@ mod tests {
             removed: true,
         };
         // act
-        processor.advance_transfer_approval(transfer, Some(TransferApprovalState::Approved)).unwrap();
+        processor
+            .advance_transfer_approval(transfer, Some(TransferApprovalState::Approved))
+            .unwrap();
         // assert
-        assert_eq!(target.pending.read().unwrap().peek(&transfer.tx_hash), Some(&TransferApprovalState::Removed));
+        assert_eq!(
+            target.pending.read().unwrap().peek(&transfer.tx_hash),
+            Some(&TransferApprovalState::Removed)
+        );
     }
 
     #[test]
-    fn fn advance_transfer_approval_should_remove_waitapproved_on_remove() {
+    fn advance_transfer_approval_should_remove_waitapproved_on_remove() {
         // arrange
         let eloop = tokio_core::reactor::Core::new().unwrap();
         let handle = eloop.handle();
@@ -505,13 +520,18 @@ mod tests {
             removed: true,
         };
         // act
-        processor.advance_transfer_approval(transfer, Some(TransferApprovalState::WaitApproval)).unwrap();
+        processor
+            .advance_transfer_approval(transfer, Some(TransferApprovalState::WaitApproval))
+            .unwrap();
         // assert
-        assert_eq!(target.pending.read().unwrap().peek(&transfer.tx_hash), Some(&TransferApprovalState::Removed));
+        assert_eq!(
+            target.pending.read().unwrap().peek(&transfer.tx_hash),
+            Some(&TransferApprovalState::Removed)
+        );
     }
 
     #[test]
-    fn fn advance_transfer_approval_should_remove_none_on_remove() {
+    fn advance_transfer_approval_should_remove_none_on_remove() {
         // arrange
         let eloop = tokio_core::reactor::Core::new().unwrap();
         let handle = eloop.handle();
@@ -530,11 +550,14 @@ mod tests {
         // act
         processor.advance_transfer_approval(transfer, None).unwrap();
         // assert
-        assert_eq!(target.pending.read().unwrap().peek(&transfer.tx_hash), Some(&TransferApprovalState::Removed));
+        assert_eq!(
+            target.pending.read().unwrap().peek(&transfer.tx_hash),
+            Some(&TransferApprovalState::Removed)
+        );
     }
 
     #[test]
-    fn fn advance_transfer_approval_should_do_nothing_on_removed_repeat_remove() {
+    fn advance_transfer_approval_should_do_nothing_on_removed_repeat_remove() {
         // arrange
         let eloop = tokio_core::reactor::Core::new().unwrap();
         let handle = eloop.handle();
@@ -551,9 +574,10 @@ mod tests {
             removed: true,
         };
         // act
-        processor.advance_transfer_approval(transfer, Some(TransferApprovalState::Removed)).unwrap();
+        processor
+            .advance_transfer_approval(transfer, Some(TransferApprovalState::Removed))
+            .unwrap();
         // assert
         assert_eq!(target.pending.read().unwrap().peek(&transfer.tx_hash), None);
-
     }
 }

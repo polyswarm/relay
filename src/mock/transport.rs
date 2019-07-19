@@ -13,8 +13,8 @@ use web3::transports::Result;
 use web3::types::{BlockHeader, Log, H160, H2048, H256, U256};
 use web3::{BatchTransport, DuplexTransport, Error, ErrorKind, RequestId, Transport};
 
-use crate::relay::{Network, NetworkType};
 use crate::errors::OperationError;
+use crate::relay::{Network, NetworkType};
 
 // Result from a MockTask
 pub type MockTask<T> = Box<Future<Item = T, Error = Error>>;
@@ -41,7 +41,10 @@ impl MockTransport {
         }
     }
 
-    pub fn new_network(&self, network_type: NetworkType) -> std::result::Result<Network<MockTransport>, OperationError> {
+    pub fn new_network(
+        &self,
+        network_type: NetworkType,
+    ) -> std::result::Result<Network<MockTransport>, OperationError> {
         let tx_count = AtomicUsize::new(0);
         let mock_abi = format!(
             r#"[

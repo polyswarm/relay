@@ -6,18 +6,18 @@ use web3::types::{Address, TransactionReceipt, H256, U256};
 use web3::DuplexTransport;
 
 use super::eth::transaction::SendTransaction;
-use super::extensions::removed::{CheckLogRemoved, CheckRemoved};
+use super::extensions::removed::{CancelRemoved, ExitOnLogRemoved};
 use super::relay::Network;
 use super::withdrawal::{ApproveParams, DoesRequireApproval, UnapproveParams};
 
 /// Add CheckRemoved trait to SendTransaction, which is called by Transfer::approve_withdrawal
-impl<T, P> CheckRemoved<T, (), ()> for SendTransaction<T, P>
+impl<T, P> CancelRemoved<T, (), ()> for SendTransaction<T, P>
 where
     T: DuplexTransport + 'static,
     P: Tokenize + Clone + 'static,
 {
-    fn check_log_removed(self, target: &Rc<Network<T>>, tx_hash: H256) -> CheckLogRemoved<T, (), ()> {
-        CheckLogRemoved::new(target.clone(), tx_hash, Box::new(self))
+    fn cancel_removed(self, target: &Rc<Network<T>>, tx_hash: H256) -> ExitOnLogRemoved<T, (), ()> {
+        ExitOnLogRemoved::new(target.clone(), tx_hash, Box::new(self))
     }
 }
 
@@ -95,7 +95,7 @@ impl Transfer {
                 &ApproveParams::from(*self),
                 target.retries,
             )
-            .check_log_removed(&target, self.tx_hash)
+            .cancel_removed(&target, self.tx_hash)
             .and_then(move |success| {
                 success.map_or_else(
                     || {

@@ -5,7 +5,7 @@ use web3::DuplexTransport;
 
 use relay::{Network, TransferApprovalState};
 
-pub struct CheckLogRemoved<T, I, E>
+pub struct ExitOnLogRemoved<T, I, E>
 where
     T: DuplexTransport + 'static,
 {
@@ -14,12 +14,12 @@ where
     future: Box<Future<Item = I, Error = E>>,
 }
 
-impl<T, I, E> CheckLogRemoved<T, I, E>
+impl<T, I, E> ExitOnLogRemoved<T, I, E>
 where
     T: DuplexTransport + 'static,
 {
     pub fn new(target: Rc<Network<T>>, tx_hash: H256, future: Box<Future<Item = I, Error = E>>) -> Self {
-        CheckLogRemoved {
+        ExitOnLogRemoved {
             target,
             tx_hash,
             future,
@@ -27,7 +27,7 @@ where
     }
 }
 
-impl<T, I, E> Future for CheckLogRemoved<T, I, E>
+impl<T, I, E> Future for ExitOnLogRemoved<T, I, E>
 where
     T: DuplexTransport + 'static,
 {
@@ -50,7 +50,7 @@ where
 }
 
 /// Trait to add to any Stream for creating a CheckLogRemoved via check_log_removed()
-pub trait CheckRemoved<T, I, E>
+pub trait CancelRemoved<T, I, E>
 where
     T: DuplexTransport + 'static,
 {
@@ -58,8 +58,130 @@ where
     ///
     /// # Arguments
     ///
-    /// * `self` - Existing Stream that this is added to. Consumes self.
+    /// * `self` - Existing Future that this is added to. Consumes self.
     /// * `target` - Target network to check against
     /// * `tx_hash` - Tx hash to check for removal
-    fn check_log_removed(self, target: &Rc<Network<T>>, tx_hash: H256) -> CheckLogRemoved<T, I, E>;
+    fn cancel_removed(self, target: &Rc<Network<T>>, tx_hash: H256) -> ExitOnLogRemoved<T, I, E>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mock::transport::MockTransport;
+    use relay::NetworkType;
+    use std::time::Duration;
+    use tokio_core::reactor;
+    use web3::futures::try_ready;
+
+    struct TestCheckRemoved {
+        inner: Box<Future<Item = (), Error = ()>>,
+    }
+
+    impl TestCheckRemoved {
+        fn new(handle: &reactor::Handle) -> Self {
+            TestCheckRemoved {
+                inner: Box::new(
+                    reactor::Timeout::new(Duration::from_secs(1), handle)
+                        .unwrap()
+                        .map_err(|_| {}),
+                ),
+            }
+        }
+    }
+
+    impl Future for TestCheckRemoved {
+        type Item = ();
+        type Error = ();
+
+        fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+            loop {
+                try_ready!(self.inner.poll());
+                return Ok(Async::Ready(()));
+            }
+        }
+    }
+
+    impl<T> CancelRemoved<T, (), ()> for TestCheckRemoved
+    where
+        T: DuplexTransport + 'static,
+    {
+        fn cancel_removed(self, target: &Rc<Network<T>>, tx_hash: H256) -> ExitOnLogRemoved<T, (), ()> {
+            ExitOnLogRemoved::<T, (), ()>::new(target.clone(), tx_hash, Box::new(self))
+        }
+    }
+
+    #[test]
+    fn check_log_removed_future_should_return_none_if_removed() {
+        // arrange
+        let mut eloop = tokio_core::reactor::Core::new().unwrap();
+        let handle = eloop.handle();
+        let mock = MockTransport::new();
+        let target = Rc::new(mock.new_network(NetworkType::Home).unwrap());
+        let future = ExitOnLogRemoved::<MockTransport, (), std::io::Error>::new(
+            target.clone(),
+            H256::zero(),
+            Box::new(reactor::Timeout::new(Duration::from_secs(1), &handle).unwrap()),
+        );
+        target
+            .pending
+            .write()
+            .unwrap()
+            .put(H256::zero(), TransferApprovalState::Removed);
+        // act
+        let result = eloop.run(future).unwrap();
+        // assert
+        assert_eq!(result, None)
+    }
+
+    #[test]
+    fn check_log_removed_future_should_return_some_if_not_removed() {
+        // arrange
+        let mut eloop = tokio_core::reactor::Core::new().unwrap();
+        let handle = eloop.handle();
+        let mock = MockTransport::new();
+        let target = Rc::new(mock.new_network(NetworkType::Home).unwrap());
+        let future = ExitOnLogRemoved::<MockTransport, (), std::io::Error>::new(
+            target.clone(),
+            H256::zero(),
+            Box::new(reactor::Timeout::new(Duration::from_secs(1), &handle).unwrap()),
+        );
+        // act
+        let result = eloop.run(future).unwrap();
+        // assert
+        assert_eq!(result, Some(()))
+    }
+
+    #[test]
+    fn check_log_removed_impl_should_return_none_if_not_removed() {
+        // arrange
+        let mut eloop = tokio_core::reactor::Core::new().unwrap();
+        let handle = eloop.handle();
+        let mock = MockTransport::new();
+        let target = Rc::new(mock.new_network(NetworkType::Home).unwrap());
+        let future = TestCheckRemoved::new(&handle).cancel_removed(&target, H256::zero());
+        // act
+        target
+            .pending
+            .write()
+            .unwrap()
+            .put(H256::zero(), TransferApprovalState::Removed);
+        let result = eloop.run(future);
+        // assert
+        assert_eq!(result, Ok(None))
+    }
+
+    #[test]
+    fn check_log_removed_impl_should_return_some_if_not_removed() {
+        // arrange
+        let mut eloop = tokio_core::reactor::Core::new().unwrap();
+        let handle = eloop.handle();
+        let mock = MockTransport::new();
+        let target = Rc::new(mock.new_network(NetworkType::Home).unwrap());
+        let future = TestCheckRemoved::new(&handle).cancel_removed(&target, H256::zero());
+
+        // act
+        let result = eloop.run(future);
+        // assert
+        assert_eq!(result, Ok(Some(())))
+    }
 }

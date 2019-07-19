@@ -315,7 +315,7 @@ impl<T: DuplexTransport + 'static> Future for ProcessTransfer<T> {
                             error!("Failed to acquire read lock {:?}", e);
                         })?;
 
-                        lock.peek(&t.tx_hash).map(|value| *value)
+                        lock.peek(&t.tx_hash).copied()
                     };
                     self.advance_transfer_approval(t, value).map_err(|e| {
                         error!("Failed to acquire write lock {:?}", e);

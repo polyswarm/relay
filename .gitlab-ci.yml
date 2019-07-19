@@ -56,7 +56,7 @@ test-coverage:
   coverage: '/\d+\.\d+% coverage/'
   script:
     - docker pull $REPO_URL/$BASE_IMAGE_NAME:$CI_COMMIT_SHA
-    - docker run $REPO_URL/$BASE_IMAGE_NAME:$CI_COMMIT_SHA rustup install beta && cargo +beta install cargo-tarpaulin && cargo tarpaulin
+    - docker run $REPO_URL/$BASE_IMAGE_NAME:$CI_COMMIT_SHA ./coverage.sh
 
 ###############################################################
 # End-to-end Stage

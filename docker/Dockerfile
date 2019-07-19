@@ -28,7 +28,7 @@ RUN rm -r src/
 COPY ./src ./src
 
 RUN find ./src -type f -exec touch {} \; \
-    && cargo +beta install cargo-tarpaulin
+    && cargo +beta install cargo-tarpaulin \
     && cargo build --release \
     && cp /polyswarm-relay/target/release/polyswarm-relay /usr/local/bin
 

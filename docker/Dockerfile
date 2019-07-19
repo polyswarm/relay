@@ -28,6 +28,7 @@ RUN rm -r src/
 COPY ./src ./src
 
 RUN find ./src -type f -exec touch {} \; \
+    && cargo +beta install cargo-tarpaulin
     && cargo build --release \
     && cp /polyswarm-relay/target/release/polyswarm-relay /usr/local/bin
 
@@ -36,6 +37,6 @@ RUN find ./src -type f -exec touch {} \; \
 COPY ./docker/config.toml ./config.toml
 COPY ./docker/keyfiles /keyfiles
 
-COPY ./lint.sh ./test.sh ./coverage.sh ./testutils/collect_coverage.sh ./
+COPY ./lint.sh ./test.sh ./
 
 CMD ["polyswarm-relay", "--config", "config.toml"]

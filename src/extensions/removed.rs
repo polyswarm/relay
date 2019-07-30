@@ -184,4 +184,22 @@ mod tests {
         // assert
         assert_eq!(result, Ok(Some(())))
     }
+
+    #[test]
+    fn check_log_removed_impl_should_forward_err() {
+        // arrange
+        let mut eloop = tokio_core::reactor::Core::new().unwrap();
+        let mock = MockTransport::new();
+        let target = Rc::new(mock.new_network(NetworkType::Home).unwrap());
+        let future = TestCheckRemoved {
+            inner: Box::new(web3::futures::future::err(())),
+        }
+        .cancel_removed(&target, H256::zero());
+
+        // act
+        let result = eloop.run(future);
+        // assert
+        assert_eq!(result, Err(()))
+    }
+
 }

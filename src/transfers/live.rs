@@ -1,4 +1,6 @@
+use lru::LruCache;
 use std::rc::Rc;
+use std::sync::{PoisonError, RwLockWriteGuard};
 use std::time;
 use tokio_core::reactor;
 use web3::confirm::{wait_for_transaction_confirmation, SendTransactionWithConfirmation};
@@ -14,8 +16,6 @@ use super::extensions::removed::{CancelRemoved, ExitOnLogRemoved};
 use super::extensions::timeout::SubscriptionState;
 use super::relay::{Network, NetworkType, TransferApprovalState};
 use super::transfers::transfer::Transfer;
-use lru::LruCache;
-use std::sync::{PoisonError, RwLockWriteGuard};
 
 /// Add CheckRemoved trait to SendTransactionWithConfirmation, which is returned by wait_for_transaction_confirmation()
 impl<T> CancelRemoved<T, TransactionReceipt, web3::Error> for SendTransactionWithConfirmation<T>
@@ -333,6 +333,7 @@ impl<T: DuplexTransport + 'static> Future for ProcessTransfer<T> {
 mod tests {
     use super::*;
     use crate::mock::transport::MockTransport;
+    use web3::types::{H256, U256};
 
     #[test]
     fn should_build_network_with_mock() {

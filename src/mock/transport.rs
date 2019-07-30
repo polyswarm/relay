@@ -1,9 +1,10 @@
-use parking_lot::Mutex;
 use rpc;
 use serde_json;
+use std::cell::RefCell;
+use std::collections::vec_deque::VecDeque;
 use std::collections::BTreeMap;
-use std::sync::atomic::AtomicUsize;
-use std::sync::{atomic, Arc};
+use std::rc::Rc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio_core::reactor;
 use web3::api::SubscriptionId;
 use web3::futures::sync::mpsc;
@@ -24,16 +25,16 @@ type Subscription = mpsc::UnboundedSender<rpc::Value>;
 
 #[derive(Debug, Clone)]
 pub struct MockTransport {
-    id: Arc<atomic::AtomicUsize>,
-    responses: Arc<Mutex<Vec<Vec<rpc::Value>>>>,
-    subscriptions: Arc<Mutex<BTreeMap<SubscriptionId, Subscription>>>,
+    id: Rc<AtomicUsize>,
+    responses: Rc<RefCell<VecDeque<rpc::Value>>>,
+    subscriptions: Rc<RefCell<BTreeMap<SubscriptionId, Subscription>>>,
 }
 
 impl MockTransport {
     pub fn new() -> Self {
-        let id = Arc::new(atomic::AtomicUsize::new(1));
-        let responses: Arc<Mutex<Vec<Vec<rpc::Value>>>> = Default::default();
-        let subscriptions: Arc<Mutex<BTreeMap<SubscriptionId, Subscription>>> = Default::default();
+        let id = Rc::new(AtomicUsize::new(1));
+        let responses: Rc<RefCell<VecDeque<rpc::Value>>> = Default::default();
+        let subscriptions: Rc<RefCell<BTreeMap<SubscriptionId, Subscription>>> = Default::default();
         MockTransport {
             id,
             responses,
@@ -93,29 +94,30 @@ impl MockTransport {
 
     pub fn emit_log(&self, log: Log) {
         let value: rpc::Value = serde_json::to_string(&log).unwrap().into();
-        for (_id, tx) in self.subscriptions.lock().iter() {
+        for (_id, tx) in self.subscriptions.borrow_mut().iter() {
             tx.unbounded_send(value.clone()).unwrap();
         }
     }
 
     pub fn emit_head(&self, head: BlockHeader) {
         let value: rpc::Value = serde_json::to_string(&head).unwrap().into();
-        for (_id, tx) in self.subscriptions.lock().iter() {
+        for (_id, tx) in self.subscriptions.borrow_mut().iter() {
             tx.unbounded_send(value.clone()).unwrap();
         }
     }
 
     pub fn add_rpc_response(&mut self, response: rpc::Value) {
-        self.add_batch_rpc_response(vec![response]);
+        self.responses.borrow_mut().push_back(response)
     }
 
     pub fn add_batch_rpc_response(&mut self, responses: Vec<rpc::Value>) {
-        self.responses.lock().push(responses);
+        for response in responses {
+            self.add_rpc_response(response);
+        }
     }
 
     pub fn clear_rpc(&mut self) {
-        let mut vec = self.responses.lock();
-        *vec = Vec::new();
+        *self.responses.borrow_mut() = VecDeque::new();
     }
 }
 
@@ -123,21 +125,15 @@ impl Transport for MockTransport {
     type Out = MockTask<rpc::Value>;
 
     fn prepare(&self, method: &str, params: Vec<rpc::Value>) -> (RequestId, rpc::Call) {
-        let id = self.id.fetch_add(1, atomic::Ordering::AcqRel);
+        let id = self.id.fetch_add(1, Ordering::AcqRel);
         let call = helpers::build_request(id, method, params);
         (id, call)
     }
 
     fn send(&self, _id: RequestId, _request: rpc::Call) -> Self::Out {
-        let mut responses = self.responses.lock();
-        if responses.len() > 0 {
-            let response = responses.remove(0);
-            match response.into_iter().next() {
-                Some(value) => Box::new(future::ok(value)),
-                None => Box::new(future::err(ErrorKind::Transport("No data available".into()).into())),
-            }
-        } else {
-            Box::new(future::err(ErrorKind::Transport("No data available".into()).into()))
+        match self.responses.borrow_mut().pop_front() {
+            Some(v) => Box::new(future::finished(v)),
+            None => Box::new(future::failed(ErrorKind::Unreachable.into())),
         }
     }
 }
@@ -149,20 +145,14 @@ impl BatchTransport for MockTransport {
     where
         T: IntoIterator<Item = (RequestId, rpc::Call)>,
     {
-        let requests: Vec<(usize, rpc::Call)> = requests.into_iter().collect();
-        let mut responses = self.responses.lock();
-        if responses.len() > 0 {
-            let mut batch = Vec::new();
-            for value in responses.remove(0) {
-                batch.push(Ok(value));
-            }
-            for _i in batch.len()..requests.len() {
-                batch.push(Err(ErrorKind::Transport("No data available".into()).into()));
-            }
-            Box::new(future::ok(batch))
-        } else {
-            Box::new(future::err(ErrorKind::Transport("No data available".into()).into()))
+        let mut response = Vec::new();
+        for _ in requests {
+            response.push(match self.responses.borrow_mut().pop_front() {
+                Some(v) => Ok(v),
+                None => Err(ErrorKind::Unreachable.into()),
+            })
         }
+        Box::new(future::finished(response))
     }
 }
 
@@ -171,14 +161,14 @@ impl DuplexTransport for MockTransport {
 
     fn subscribe(&self, id: &SubscriptionId) -> Self::NotificationStream {
         let (tx, rx) = mpsc::unbounded();
-        if self.subscriptions.lock().insert(id.clone(), tx).is_some() {
+        if self.subscriptions.borrow_mut().insert(id.clone(), tx).is_some() {
             warn!("replacing subscription with id {:?}", id);
         }
         Box::new(rx.map_err(|()| ErrorKind::Transport("No data available".into()).into()))
     }
 
     fn unsubscribe(&self, id: &SubscriptionId) {
-        self.subscriptions.lock().remove(id);
+        self.subscriptions.borrow_mut().remove(id);
     }
 }
 
@@ -291,7 +281,7 @@ mod tests {
     }
 
     #[test]
-    fn should_respond_with_error_when_no_added_batch_response() {
+    fn should_return_error_per_request_if_no_responses() {
         let mut eloop = reactor::Core::new().unwrap();
         let mut mock = MockTransport::new();
         mock.clear_rpc();
@@ -300,8 +290,10 @@ mod tests {
             mock.prepare("eth_accounts", vec![rpc::Value::String("1".into())]),
             mock.prepare("eth_accounts", vec![rpc::Value::String("1".into())]),
         ];
-        let finished = eloop.run(mock.send_batch(requests));
-        assert!(finished.is_err());
+        let finished = eloop.run(mock.send_batch(requests)).unwrap();
+        for i in 0..finished.len() {
+            assert!(finished[i].is_err());
+        }
     }
 
     #[test]

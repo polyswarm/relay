@@ -27,6 +27,7 @@ extern crate ethcore_transaction;
 extern crate ethkey;
 extern crate ethstore;
 extern crate rlp;
+extern crate serde;
 
 pub mod anchors;
 pub mod errors;

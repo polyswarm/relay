@@ -80,9 +80,8 @@ impl<T: DuplexTransport + 'static> Relay<T> {
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq)]
 pub enum TransferApprovalState {
-    Approved,
+    Sent,
     Removed,
-    WaitApproval,
 }
 
 /// Networks are considered either the homechain or the sidechain for the purposes of relaying

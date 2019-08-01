@@ -387,7 +387,7 @@ impl<I> Stream for TimeoutStream<I> {
         match self.stream.poll() {
             Ok(Async::NotReady) => match self.timeout.poll() {
                 Ok(Async::Ready(_)) => Err(web3::Error::from_kind(ErrorKind::Msg(
-                    "Geth connection unavailable".to_string(),
+                    "Ethereum connection unavailable".to_string(),
                 ))),
                 Ok(Async::NotReady) => Ok(Async::NotReady),
                 Err(_) => Err(web3::Error::from_kind(ErrorKind::Msg("Timeout broken".to_string()))),

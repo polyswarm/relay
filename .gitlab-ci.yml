@@ -53,10 +53,10 @@ test-coverage:
   tags:
     - kube
   allow_failure: true
-  coverage: '/COVERAGE:\d+\.\d+/'
+  coverage: '/\d+\.\d+% coverage/'
   script:
     - docker pull $REPO_URL/$BASE_IMAGE_NAME:$CI_COMMIT_SHA
-    - docker run $REPO_URL/$BASE_IMAGE_NAME:$CI_COMMIT_SHA ./coverage.sh
+    - docker run --security-opt seccomp=unconfined $REPO_URL/$BASE_IMAGE_NAME:$CI_COMMIT_SHA ./coverage.sh
 
 ###############################################################
 # End-to-end Stage

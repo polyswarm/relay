@@ -5,7 +5,7 @@ use std::ffi::OsString;
 use std::path::Path;
 
 use super::errors::ConfigError;
-use super::missed_transfer::{LOOKBACK_LEEWAY, LOOKBACK_RANGE};
+use super::transfers::past::{LOOKBACK_LEEWAY, LOOKBACK_RANGE};
 
 /// Settings for the application
 #[derive(Debug, Deserialize)]

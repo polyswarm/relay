@@ -17,12 +17,12 @@ use web3::DuplexTransport;
 use actix_web::http::{Method, StatusCode};
 use actix_web::{middleware, server, HttpResponse, Path};
 
-use super::contracts::TRANSFER_EVENT_SIGNATURE;
 use super::errors::EndpointError;
-use super::missed_transfer::ValidateAndApproveTransfer;
+use super::eth::contracts::TRANSFER_EVENT_SIGNATURE;
+use super::eth::utils;
 use super::relay::{Network, NetworkType};
-use super::transfer::Transfer;
-use super::utils;
+use super::transfers::past::ValidateAndApproveTransfer;
+use super::transfers::transfer::Transfer;
 
 pub const HOME: &str = "HOME";
 pub const SIDE: &str = "SIDE";
@@ -323,13 +323,12 @@ impl HandleRequests {
                                 Ok(StatusResponse::new(home, side))
                             })
                             .and_then(move |response| {
-                                info!("Status response: {:?}", response);
+                                debug!("Status response: {:?}", response);
                                 let tx: mpsc::UnboundedSender<Result<StatusResponse, ()>> = tx.clone();
                                 let send_result = tx.unbounded_send(Ok(response));
                                 if send_result.is_err() {
                                     error!("error sending status response");
                                 }
-                                info!("sent response");
                                 Ok(())
                             })
                             .or_else(move |e| {
@@ -459,6 +458,7 @@ impl<T: DuplexTransport + 'static> Future for FindTransferInTransaction<T> {
                                                                 tx_hash: hash,
                                                                 block_hash,
                                                                 block_number: receipt_block,
+                                                                removed: false,
                                                             };
                                                             transfers.push(transfer);
                                                         }
@@ -517,7 +517,7 @@ impl Detokenize for BalanceOf {
                 "cannot parse balance from contract response".to_string(),
             ))
         })?;
-        info!("balance of: {:?}", balance);
+        debug!("balance of: {:?}", balance);
         Ok(BalanceOf(balance))
     }
 }

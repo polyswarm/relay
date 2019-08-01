@@ -32,6 +32,74 @@ impl Tokenize for ApprovalQuery {
     }
 }
 
+/// Parameters for the approveWithdrawal function.
+///
+/// Implements Tokenize so it can be passed to SendTransaction
+///
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct ApproveParams {
+    pub destination: Address,
+    pub amount: U256,
+    pub tx_hash: H256,
+    pub block_hash: H256,
+    pub block_number: U256,
+}
+
+impl Tokenize for ApproveParams {
+    fn into_tokens(self) -> Vec<Token> {
+        let mut tokens = Vec::new();
+        tokens.push(Token::Address(self.destination));
+        tokens.push(Token::Uint(self.amount));
+        tokens.push(Token::FixedBytes(self.tx_hash.to_vec()));
+        tokens.push(Token::FixedBytes(self.block_hash.to_vec()));
+        tokens.push(Token::Uint(self.block_number));
+        tokens
+    }
+}
+
+impl From<Transfer> for ApproveParams {
+    fn from(transfer: Transfer) -> Self {
+        ApproveParams {
+            destination: transfer.destination,
+            amount: transfer.amount,
+            tx_hash: transfer.tx_hash,
+            block_hash: transfer.block_hash,
+            block_number: transfer.block_number,
+        }
+    }
+}
+
+/// Parameters for the unapproveWithdrawal function.
+///
+/// Implements Tokenize so it can be passed to SendTransaction
+///
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct UnapproveParams {
+    pub tx_hash: H256,
+    pub block_hash: H256,
+    pub block_number: U256,
+}
+
+impl Tokenize for UnapproveParams {
+    fn into_tokens(self) -> Vec<Token> {
+        let mut tokens = Vec::new();
+        tokens.push(Token::FixedBytes(self.tx_hash.to_vec()));
+        tokens.push(Token::FixedBytes(self.block_hash.to_vec()));
+        tokens.push(Token::Uint(self.block_number));
+        tokens
+    }
+}
+
+impl From<Transfer> for UnapproveParams {
+    fn from(transfer: Transfer) -> Self {
+        UnapproveParams {
+            tx_hash: transfer.tx_hash,
+            block_hash: transfer.block_hash,
+            block_number: transfer.block_number,
+        }
+    }
+}
+
 /// Withdrawal event added to contract after a transfer
 #[derive(Debug, Clone)]
 pub struct Withdrawal {
@@ -159,7 +227,7 @@ impl<T: DuplexTransport + 'static> Future for DoesRequireApproval<T> {
                         if withdrawal.processed {
                             return Ok(Async::Ready(false));
                         } else {
-                            info!("transaction not processed on {:?} - checking approvers", network_type);
+                            debug!("transaction not processed on {:?} - checking approvers", network_type);
                             let approval_hash = Self::get_withdrawal_hash(&self.transfer);
                             let approval_future = GetWithdrawalApprovals::new(&self.target, &approval_hash, &0.into());
                             CheckWithdrawalState::GetWithdrawalApprovals(0, approval_future)
@@ -188,7 +256,7 @@ impl<T: DuplexTransport + 'static> Future for DoesRequireApproval<T> {
                             return Ok(Async::NotReady);
                         }
                         Err(()) => {
-                            info!("this relay missing from approvers");
+                            debug!("have not approved transaction");
                             return Ok(Async::Ready(true));
                         }
                     }

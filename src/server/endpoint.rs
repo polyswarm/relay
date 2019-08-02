@@ -317,7 +317,7 @@ impl HandleRequests {
                     future::Either::B(
                         future::join_all(futures)
                             .and_then(move |results| {
-                                info!("results from status futures: {:?}", results);
+                                debug!("results from status futures: {:?}", results);
                                 let home = NetworkStatus::new(results[0], results[1], results[2]);
                                 let side = NetworkStatus::new(results[3], results[4], results[5]);
                                 Ok(StatusResponse::new(home, side))

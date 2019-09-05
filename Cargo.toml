@@ -1,11 +1,10 @@
 [package]
 name = "polyswarm-relay"
-version = "1.0.0"
+version = "1.0.1"
 authors = ["PolySwarm Developers <info@polyswarm.io>"]
 
 [dependencies]
-actix = "0.7.9"
-actix-web = "0.7.18"
+actix-web = "1.0.7"
 base64 = "0.9.3"
 clap = "2.31"
 config = "0.8"

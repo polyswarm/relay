@@ -15,7 +15,7 @@ use web3::types::{Address, BlockNumber, TransactionReceipt, H256, U256};
 use web3::DuplexTransport;
 
 use actix_web::http::{Method, StatusCode};
-use actix_web::{middleware, server, HttpResponse, Path};
+use actix_web::{web, App, HttpServer, HttpResponse, middleware};
 
 use super::errors::EndpointError;
 use super::eth::contracts::TRANSFER_EVENT_SIGNATURE;
@@ -91,30 +91,30 @@ impl Endpoint {
     pub fn start_server(self) {
         let port = self.port.clone();
         thread::spawn(move || {
-            let sys = actix::System::new("relay-endpoint");
-            server::new(move || {
+            HttpServer::new(move || {
                 let status_tx = self.tx.clone();
                 let hash_tx = self.tx.clone();
-                actix_web::App::new()
-                    .middleware(middleware::Logger::default())
-                    .resource("/status", move |r| {
-                        r.method(Method::GET).f(move |_| {
-                            let tx = status_tx.clone();
-                            status(&tx)
-                        })
-                    })
-                    .resource("/{chain}/{tx_hash}", move |r| {
-                        r.method(Method::POST).with(move |info: Path<(String, String)>| {
-                            let tx = hash_tx.clone();
-                            search(&tx, &info)
-                        })
-                    })
-                    .finish()
+                App::new()
+                    .wrap(middleware::Logger::default())
+                    .service(
+                        web::resource("/status")
+                            .route(web::get().to(move || {
+                                let tx = status_tx.clone();
+                                status(&tx)
+                            }))
+                    )
+                    .service(
+                        web::resource("/{chain}/{tx_hash}")
+                            .route(web::post().to(move |info: web::Path<(String, String)>| {
+                                let tx = hash_tx.clone();
+                                search(&tx, &info)
+                            }))
+                    )
             })
             .bind(format!("0.0.0.0:{}", port))
             .unwrap()
-            .start();
-            let _ = sys.run();
+            .run()
+            .unwrap();
         });
     }
 }
@@ -171,7 +171,7 @@ fn status(tx: &mpsc::UnboundedSender<RequestType>) -> Box<Future<Item = HttpResp
 /// * `info` - Tuple of two strings. The chain and tx hash.
 fn search(
     tx: &mpsc::UnboundedSender<RequestType>,
-    info: &Path<(String, String)>,
+    info: &web::Path<(String, String)>,
 ) -> Result<HttpResponse, EndpointError> {
     let clean = utils::clean_0x(&info.1);
     let tx_hash: H256 = H256::from_str(&clean[..]).map_err(|e| {

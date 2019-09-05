@@ -5,7 +5,7 @@ authors = ["PolySwarm Developers <info@polyswarm.io>"]
 
 [dependencies]
 actix = "0.7.9"
-actix-web = "0.7.19"
+actix-web = "0.7.18"
 base64 = "0.9.3"
 clap = "2.31"
 config = "0.8"
@@ -24,9 +24,9 @@ tiny-keccak = "1.4.2"
 tokio-core = "0.1"
 openssl = "0.10.23"
 rlp = { version = "0.3.0", features = ["ethereum"] }
-ethcore-transaction = { git = "https://github.com/paritytech/parity-ethereum", rev="1a2fc03083c89e8a60ae55f54b85521fd0ec1389" }
-ethstore = { git = "https://github.com/paritytech/parity-ethereum", rev="1a2fc03083c89e8a60ae55f54b85521fd0ec1389" }
-ethkey = { git = "https://github.com/paritytech/parity-ethereum", rev="1a2fc03083c89e8a60ae55f54b85521fd0ec1389" }
+ethcore-transaction = { git = "https://github.com/paritytech/parity-ethereum" }
+ethstore = { git = "https://github.com/paritytech/parity-ethereum" }
+ethkey = { git = "https://github.com/paritytech/parity-ethereum" }
 web3 = { git = "https://github.com/polyswarm/rust-web3", branch = "relay" }
 consul = { git = "https://github.com/polyswarm/consul-rust", branch = "master" }
 

@@ -44,18 +44,31 @@ test:
   stage: test
   tags:
     - kube
-  script:
+  allow_failure: false
+  before_script:
     - docker pull $REPO_URL/$BASE_IMAGE_NAME:$CI_COMMIT_SHA
-    - docker run $REPO_URL/$BASE_IMAGE_NAME:$CI_COMMIT_SHA ./test.sh
+  script:
+    - docker run $REPO_URL/$BASE_IMAGE_NAME:$CI_COMMIT_SHA cargo test --verbose
 
 test-lint:
   stage: test
   tags:
     - kube
   allow_failure: true
-  script:
+  before_script:
     - docker pull $REPO_URL/$BASE_IMAGE_NAME:$CI_COMMIT_SHA
+  script:
     - docker run $REPO_URL/$BASE_IMAGE_NAME:$CI_COMMIT_SHA ./lint.sh
+
+test-audit:
+  stage: test
+  tags:
+    - kube
+  allow_failure: false
+  before_script:
+    - docker pull $REPO_URL/$BASE_IMAGE_NAME:$CI_COMMIT_SHA
+  script:
+    - docker run $REPO_URL/$BASE_IMAGE_NAME:$CI_COMMIT_SHA ./audit.sh
 
 test-coverage:
   stage: test
@@ -63,8 +76,9 @@ test-coverage:
     - kube
   allow_failure: true
   coverage: '/\d+\.\d+% coverage/'
-  script:
+  before_script:
     - docker pull $REPO_URL/$BASE_IMAGE_NAME:$CI_COMMIT_SHA
+  script:
     - docker run --security-opt seccomp=unconfined $REPO_URL/$BASE_IMAGE_NAME:$CI_COMMIT_SHA ./coverage.sh
 
 ###############################################################

@@ -18,7 +18,7 @@ RUN wget https://github.com/mozilla/sccache/releases/download/$SCCACHE_VERSION/s
 WORKDIR /polyswarm-relay
 
 ## Copy over your manifests
-COPY Cargo.lock Cargo.toml rustfmt.toml clippy.toml ./
+COPY Cargo.lock Cargo.toml rustfmt.toml ./
 
 # This build step will cache your dependencies
 RUN cargo build --release \

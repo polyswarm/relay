@@ -54,7 +54,7 @@ test-lint:
   stage: test
   tags:
     - kube
-  allow_failure: false
+  allow_failure: true
   before_script:
     - docker pull $REPO_URL/$BASE_IMAGE_NAME:$CI_COMMIT_SHA
   script:

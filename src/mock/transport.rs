@@ -47,29 +47,28 @@ impl MockTransport {
         network_type: NetworkType,
     ) -> std::result::Result<Network<MockTransport>, OperationError> {
         let tx_count = AtomicUsize::new(0);
-        let mock_abi = format!(
-            r#"[
-            {{
+        let mock_abi = r#"[
+            {
               "constant": true,
               "inputs": [
-                {{
+                {
                   "name": "_state",
                   "type": "bytes"
-                }}
+                }
               ],
               "name": "mockConstant",
               "outputs": [
-                {{
+                {
                   "name": "_flag",
                   "type": "uint8"
-                }}
+                }
               ],
               "payable": false,
               "stateMutability": "pure",
               "type": "function"
-            }}
+            }
         ]"#
-        );
+        .to_string();
 
         Network::new(
             network_type,
@@ -179,30 +178,28 @@ mod tests {
     #[test]
     fn should_build_network_with_mock() {
         let tx_count = AtomicUsize::new(0);
-
-        let mock_abi = format!(
-            r#"[
-            {{
+        let mock_abi = r#"[
+            {
               "constant": true,
               "inputs": [
-                {{
+                {
                   "name": "_state",
                   "type": "bytes"
-                }}
+                }
               ],
               "name": "mockConstant",
               "outputs": [
-                {{
+                {
                   "name": "_flag",
                   "type": "uint8"
-                }}
+                }
               ],
               "payable": false,
               "stateMutability": "pure",
               "type": "function"
-            }}
+            }
         ]"#
-        );
+        .to_string();
 
         Network::new(
             NetworkType::Home,
@@ -291,8 +288,8 @@ mod tests {
             mock.prepare("eth_accounts", vec![rpc::Value::String("1".into())]),
         ];
         let finished = eloop.run(mock.send_batch(requests)).unwrap();
-        for i in 0..finished.len() {
-            assert!(finished[i].is_err());
+        for value in finished {
+            assert!(value.is_err());
         }
     }
 

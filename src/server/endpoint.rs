@@ -14,7 +14,7 @@ use web3::futures::try_ready;
 use web3::types::{Address, BlockNumber, TransactionReceipt, H256, U256};
 use web3::DuplexTransport;
 
-use actix_web::http::{Method, StatusCode};
+use actix_web::http::StatusCode;
 use actix_web::{middleware, web, App, HttpResponse, HttpServer};
 
 use super::errors::EndpointError;

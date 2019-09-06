@@ -48,7 +48,7 @@ test:
   before_script:
     - docker pull $REPO_URL/$BASE_IMAGE_NAME:$CI_COMMIT_SHA
   script:
-    - docker run $REPO_URL/$BASE_IMAGE_NAME:$CI_COMMIT_SHA cargo test --verbose
+    - docker run $REPO_URL/$BASE_IMAGE_NAME:$CI_COMMIT_SHA ./test.sh
 
 test-lint:
   stage: test

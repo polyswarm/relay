@@ -15,7 +15,7 @@ use web3::types::{Address, BlockNumber, TransactionReceipt, H256, U256};
 use web3::DuplexTransport;
 
 use actix_web::http::{Method, StatusCode};
-use actix_web::{web, App, HttpServer, HttpResponse, middleware};
+use actix_web::{middleware, web, App, HttpResponse, HttpServer};
 
 use super::errors::EndpointError;
 use super::eth::contracts::TRANSFER_EVENT_SIGNATURE;
@@ -96,20 +96,16 @@ impl Endpoint {
                 let hash_tx = self.tx.clone();
                 App::new()
                     .wrap(middleware::Logger::default())
-                    .service(
-                        web::resource("/status")
-                            .route(web::get().to(move || {
-                                let tx = status_tx.clone();
-                                status(&tx)
-                            }))
-                    )
-                    .service(
-                        web::resource("/{chain}/{tx_hash}")
-                            .route(web::post().to(move |info: web::Path<(String, String)>| {
-                                let tx = hash_tx.clone();
-                                search(&tx, &info)
-                            }))
-                    )
+                    .service(web::resource("/status").route(web::get().to(move || {
+                        let tx = status_tx.clone();
+                        status(&tx)
+                    })))
+                    .service(web::resource("/{chain}/{tx_hash}").route(web::post().to(
+                        move |info: web::Path<(String, String)>| {
+                            let tx = hash_tx.clone();
+                            search(&tx, &info)
+                        },
+                    )))
             })
             .bind(format!("0.0.0.0:{}", port))
             .unwrap()

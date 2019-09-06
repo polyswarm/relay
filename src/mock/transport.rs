@@ -47,8 +47,7 @@ impl MockTransport {
         network_type: NetworkType,
     ) -> std::result::Result<Network<MockTransport>, OperationError> {
         let tx_count = AtomicUsize::new(0);
-        let mock_abi =
-            r#"[
+        let mock_abi = r#"[
             {{
               "constant": true,
               "inputs": [
@@ -179,8 +178,7 @@ mod tests {
     fn should_build_network_with_mock() {
         let tx_count = AtomicUsize::new(0);
 
-        let mock_abi =
-            r#"[
+        let mock_abi = r#"[
             {{
               "constant": true,
               "inputs": [

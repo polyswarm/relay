@@ -4,7 +4,7 @@ use std::sync::{PoisonError, RwLockWriteGuard};
 use std::time;
 use tokio_core::reactor;
 use web3::confirm::{wait_for_transaction_confirmation, SendTransactionWithConfirmation};
-use web3::futures::future::{Either, ok};
+use web3::futures::future::{ok, Either};
 use web3::futures::prelude::*;
 use web3::futures::sync::mpsc;
 use web3::futures::try_ready;

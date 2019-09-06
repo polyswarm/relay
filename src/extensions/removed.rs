@@ -94,10 +94,8 @@ mod tests {
         type Error = ();
 
         fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-            loop {
-                try_ready!(self.inner.poll());
-                return Ok(Async::Ready(()));
-            }
+            try_ready!(self.inner.poll());
+            Ok(Async::Ready(()))
         }
     }
 

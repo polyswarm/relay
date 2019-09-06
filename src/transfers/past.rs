@@ -110,7 +110,6 @@ impl CheckPastTransfers {
                                             log.transaction_hash.map_or_else(
                                                 || {
                                                     warn!("log missing transaction hash on {:?}", network_type);
-                                                    return;
                                                 },
                                                 |tx_hash| {
                                                     let tx = tx.clone();

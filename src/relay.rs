@@ -1,34 +1,26 @@
-use super::anchor::HandleAnchors;
-use super::endpoint::{HandleRequests, RequestType};
-use super::errors::OperationError;
-use super::missed_transfer::HandleMissedTransfers;
-use super::transfer::HandleTransfers;
 use failure::{Error, SyncFailure};
-use std::ops::Add;
+use lru::LruCache;
 use std::process;
 use std::rc::Rc;
 use std::sync::atomic::AtomicUsize;
-use std::time::{Duration, Instant};
+use std::sync::RwLock;
 use tokio_core::reactor;
-use web3::api::SubscriptionStream;
 use web3::contract::Contract;
-use web3::futures::prelude::*;
 use web3::futures::sync::mpsc;
-use web3::futures::{stream::Stream, Future};
-use web3::types::{Address, U256};
-use web3::{DuplexTransport, ErrorKind, Web3};
+use web3::futures::Future;
+use web3::types::{Address, H256, U256};
+use web3::{DuplexTransport, Web3};
+
+use super::anchors::anchor::HandleAnchors;
+use super::errors::OperationError;
+use super::eth::utils::clean_0x;
+use super::server::endpoint::{HandleRequests, RequestType};
+use super::transfers::live::WatchLiveTransfers;
+use super::transfers::past::RecheckPastTransferLogs;
+use transfers::live::ProcessTransfer;
 
 const FREE_GAS_PRICE: u64 = 0;
 const GAS_LIMIT: u64 = 200_000;
-
-// From ethereum_types but not reexported by web3
-fn clean_0x(s: &str) -> &str {
-    if s.starts_with("0x") {
-        &s[2..]
-    } else {
-        s
-    }
-}
 
 /// Token relay between two Ethereum networks
 pub struct Relay<T: DuplexTransport> {
@@ -74,16 +66,22 @@ impl<T: DuplexTransport + 'static> Relay<T> {
     ) -> impl Future<Item = (), Error = ()> {
         self.sidechain
             .handle_anchors(&self.homechain, handle)
-            .join(self.homechain.handle_transfers(&self.sidechain, handle))
-            .join(self.sidechain.handle_transfers(&self.homechain, handle))
-            .join(self.homechain.handle_missed_transfers(&self.sidechain, handle))
-            .join(self.sidechain.handle_missed_transfers(&self.homechain, handle))
+            .join(self.homechain.watch_transfer_logs(&self.sidechain, handle))
+            .join(self.sidechain.watch_transfer_logs(&self.homechain, handle))
+            .join(self.homechain.recheck_past_transfer_logs(&self.sidechain, handle))
+            .join(self.sidechain.recheck_past_transfer_logs(&self.homechain, handle))
             .join(self.handle_requests(rx, handle))
             .and_then(|_| Ok(()))
             .map_err(|_| {
                 process::exit(-1);
             })
     }
+}
+
+#[derive(Clone, Debug, Copy, PartialEq, Eq)]
+pub enum TransferApprovalState {
+    Sent,
+    Removed,
 }
 
 /// Networks are considered either the homechain or the sidechain for the purposes of relaying
@@ -112,6 +110,7 @@ pub struct Network<T: DuplexTransport> {
     pub keydir: String,
     pub password: String,
     pub nonce: AtomicUsize,
+    pub pending: RwLock<LruCache<H256, TransferApprovalState>>,
     pub retries: u64,
 }
 
@@ -180,6 +179,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
             keydir: keydir.to_string(),
             password: password.to_string(),
             nonce,
+            pending: RwLock::new(LruCache::new(1024)),
             retries,
         })
     }
@@ -298,26 +298,34 @@ impl<T: DuplexTransport + 'static> Network<T> {
             })
     }
 
-    /// Returns a HandleTransfers Future for this chain.
+    /// Returns a WatchTransferLogs Future for this chain.
     /// Will anchor to the given target
     ///
     /// # Arguments
     ///
     /// * `target` - Network where to anchor the block headers
     /// * `handle` - Handle to spawn new tasks
-    pub fn handle_transfers(&self, target: &Rc<Network<T>>, handle: &reactor::Handle) -> HandleTransfers<T> {
-        HandleTransfers::new(self, target, handle)
+    pub fn watch_transfer_logs(&self, target: &Rc<Network<T>>, handle: &reactor::Handle) -> ProcessTransfer<T> {
+        let (tx, rx) = mpsc::unbounded();
+        let watch = WatchLiveTransfers::new(&tx, self, target, handle)
+            .map_err(move |e| error!("error watching transaction logs {:?}", e));
+        handle.spawn(watch);
+        ProcessTransfer::new(rx, target, handle)
     }
 
-    /// Returns a HandleMissedTransfers Future for this chain.
+    /// Returns a RecheckPastTransferLogs Future for this chain.
     /// Will approve Transfers found in this network, to the target network.
     ///
     /// # Arguments
     ///
     /// * `target` - Network where to anchor the block headers
     /// * `handle` - Handle to spawn new tasks
-    pub fn handle_missed_transfers(&self, target: &Rc<Network<T>>, handle: &reactor::Handle) -> HandleMissedTransfers {
-        HandleMissedTransfers::new(self, target, handle)
+    pub fn recheck_past_transfer_logs(
+        &self,
+        target: &Rc<Network<T>>,
+        handle: &reactor::Handle,
+    ) -> RecheckPastTransferLogs {
+        RecheckPastTransferLogs::new(self, target, handle)
     }
 
     /// Returns a HandleAnchors Future for this chain.
@@ -343,88 +351,5 @@ impl<T: DuplexTransport + 'static> Network<T> {
             return FREE_GAS_PRICE.into();
         }
         potential_gas_price
-    }
-}
-
-/// TimeoutStream adds a timeout to an existing Stream.
-/// returns Err if too much time has passed since the last object from the stream
-pub struct TimeoutStream<I> {
-    stream: Box<Stream<Item = I, Error = web3::Error>>,
-    duration: Duration,
-    timeout: reactor::Timeout,
-}
-
-impl<I> TimeoutStream<I> {
-    /// Returns a newly created TimeoutStream Stream
-    ///
-    /// # Arguments
-    ///
-    /// * `stream` - Boxed stream to timeout
-    /// * `duration` - Duration of time to trigger the timeout
-    /// * `handle` - Handle to create a reactor::Timeout Future
-    pub fn new(
-        stream: Box<Stream<Item = I, Error = web3::Error>>,
-        duration: Duration,
-        handle: &reactor::Handle,
-    ) -> Result<Self, ()> {
-        let timeout = reactor::Timeout::new(duration, handle).map_err(move |e| {
-            error!("error creating timeout: {:?}", e);
-        })?;
-        Ok(TimeoutStream {
-            stream,
-            duration,
-            timeout,
-        })
-    }
-}
-
-impl<I> Stream for TimeoutStream<I> {
-    type Item = I;
-    type Error = web3::Error;
-
-    /// Returns Items from the stream, or Err if timed out
-    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        match self.stream.poll() {
-            Ok(Async::NotReady) => match self.timeout.poll() {
-                Ok(Async::Ready(_)) => Err(web3::Error::from_kind(ErrorKind::Msg(
-                    "Ethereum connection unavailable".to_string(),
-                ))),
-                Ok(Async::NotReady) => Ok(Async::NotReady),
-                Err(_) => Err(web3::Error::from_kind(ErrorKind::Msg("Timeout broken".to_string()))),
-            },
-            Ok(Async::Ready(Some(msg))) => {
-                let mut at = Instant::now();
-                at = at.add(self.duration);
-                self.timeout.reset(at);
-                Ok(Async::Ready(Some(msg)))
-            }
-            Ok(Async::Ready(None)) => Ok(Async::Ready(None)),
-            Err(e) => Err(e),
-        }
-    }
-}
-
-/// Trait to add to any Stream for creating a TimeoutStream via timeout()
-pub trait Timeout<I> {
-    ///Returns a TimeoutStream that wraps the existing stream
-    ///
-    /// # Arguments
-    ///
-    /// * `self` - Existing Stream that this is added to. Consumes self.
-    /// * `duration` - Time in seconds to trigger a timeout
-    /// # `handle` - Tokio reactor::Handle for Creating Timeout Future
-    fn timeout(self, duration: u64, handle: &reactor::Handle) -> Result<TimeoutStream<I>, ()>;
-}
-
-/// Add Timeout trait to SubscribtionStream, which is returned by web3.eth_subscribe()
-impl<T, I> Timeout<I> for SubscriptionStream<T, I>
-where
-    T: DuplexTransport + 'static,
-    I: serde::de::DeserializeOwned + 'static,
-{
-    fn timeout(self, duration: u64, handle: &reactor::Handle) -> Result<TimeoutStream<I>, ()> {
-        let timeout = Duration::from_secs(duration);
-        let handle = handle.clone();
-        TimeoutStream::new(Box::new(self), timeout, &handle)
     }
 }

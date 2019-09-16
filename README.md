@@ -1,7 +1,7 @@
 # Polyswarm Relay
 
-[![pipeline status](https://gitlab.polyswarm.io/externalci/relay/badges/feature/coverage-tests/pipeline.svg)](https://gitlab.polyswarm.io/externalci/relay/commits/feature/coverage-tests)
-[![coverage report](https://gitlab.polyswarm.io/externalci/relay/badges/feature/coverage-tests/coverage.svg)](https://gitlab.polyswarm.io/externalci/relay/commits/feature/coverage-tests)
+[![pipeline status](https://gitlab.polyswarm.io/externalci/relay/badges/feature/coverage-tests/pipeline.svg)](https://gitlab.polyswarm.io/externalci/relay/commits/master)
+[![coverage report](https://gitlab.polyswarm.io/externalci/relay/badges/feature/coverage-tests/coverage.svg)](https://gitlab.polyswarm.io/externalci/relay/commits/master)
 
 This acts as a relay between two networks so deposited ERC20 tokens can be transferred between networks.
 

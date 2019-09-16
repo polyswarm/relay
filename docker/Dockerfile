@@ -1,4 +1,4 @@
-FROM rust:1.31.1
+FROM rust:1.36.0
 LABEL maintainer="PolySwarm Developers <info@polyswarm.io>"
 
 ENV RUSTC_WRAPPER=sccache
@@ -18,7 +18,7 @@ RUN wget https://github.com/mozilla/sccache/releases/download/$SCCACHE_VERSION/s
 WORKDIR /polyswarm-relay
 
 ## Copy over your manifests
-COPY Cargo.lock Cargo.toml ./
+COPY Cargo.lock Cargo.toml rustfmt.toml ./
 
 # This build step will cache your dependencies
 RUN cargo build --release \
@@ -36,6 +36,6 @@ RUN find ./src -type f -exec touch {} \; \
 COPY ./docker/config.toml ./config.toml
 COPY ./docker/keyfiles /keyfiles
 
-COPY ./lint.sh ./test.sh ./coverage.sh ./testutils/collect_coverage.sh ./
+COPY lint.sh test.sh coverage.sh audit.sh ./
 
 CMD ["polyswarm-relay", "--config", "config.toml"]

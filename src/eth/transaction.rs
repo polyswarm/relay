@@ -1,5 +1,3 @@
-use super::errors::OperationError;
-use super::relay::Network;
 use ethcore_transaction::{Action, Transaction as RawTransactionRequest};
 use ethstore::accounts_dir::RootDiskDirectory;
 use ethstore::{EthStore, SimpleSecretStore, StoreAccountRef};
@@ -11,6 +9,9 @@ use web3::futures::prelude::*;
 use web3::futures::try_ready;
 use web3::types::{TransactionReceipt, U256};
 use web3::DuplexTransport;
+
+use super::errors::OperationError;
+use super::relay::Network;
 
 pub enum TransactionState<T, P>
 where

@@ -14,15 +14,15 @@ use web3::futures::try_ready;
 use web3::types::{Address, BlockNumber, TransactionReceipt, H256, U256};
 use web3::DuplexTransport;
 
-use actix_web::http::{Method, StatusCode};
-use actix_web::{middleware, server, HttpResponse, Path};
+use actix_web::http::StatusCode;
+use actix_web::{middleware, web, App, HttpResponse, HttpServer};
 
-use super::contracts::TRANSFER_EVENT_SIGNATURE;
 use super::errors::EndpointError;
-use super::missed_transfer::ValidateAndApproveTransfer;
+use super::eth::contracts::TRANSFER_EVENT_SIGNATURE;
+use super::eth::utils;
 use super::relay::{Network, NetworkType};
-use super::transfer::Transfer;
-use super::utils;
+use super::transfers::past::ValidateAndApproveTransfer;
+use super::transfers::transfer::Transfer;
 
 pub const HOME: &str = "HOME";
 pub const SIDE: &str = "SIDE";
@@ -91,30 +91,26 @@ impl Endpoint {
     pub fn start_server(self) {
         let port = self.port.clone();
         thread::spawn(move || {
-            let sys = actix::System::new("relay-endpoint");
-            server::new(move || {
+            HttpServer::new(move || {
                 let status_tx = self.tx.clone();
                 let hash_tx = self.tx.clone();
-                actix_web::App::new()
-                    .middleware(middleware::Logger::default())
-                    .resource("/status", move |r| {
-                        r.method(Method::GET).f(move |_| {
-                            let tx = status_tx.clone();
-                            status(&tx)
-                        })
-                    })
-                    .resource("/{chain}/{tx_hash}", move |r| {
-                        r.method(Method::POST).with(move |info: Path<(String, String)>| {
+                App::new()
+                    .wrap(middleware::Logger::default())
+                    .service(web::resource("/status").route(web::get().to(move || {
+                        let tx = status_tx.clone();
+                        status(&tx)
+                    })))
+                    .service(web::resource("/{chain}/{tx_hash}").route(web::post().to(
+                        move |info: web::Path<(String, String)>| {
                             let tx = hash_tx.clone();
                             search(&tx, &info)
-                        })
-                    })
-                    .finish()
+                        },
+                    )))
             })
             .bind(format!("0.0.0.0:{}", port))
             .unwrap()
-            .start();
-            let _ = sys.run();
+            .run()
+            .unwrap();
         });
     }
 }
@@ -171,7 +167,7 @@ fn status(tx: &mpsc::UnboundedSender<RequestType>) -> Box<Future<Item = HttpResp
 /// * `info` - Tuple of two strings. The chain and tx hash.
 fn search(
     tx: &mpsc::UnboundedSender<RequestType>,
-    info: &Path<(String, String)>,
+    info: &web::Path<(String, String)>,
 ) -> Result<HttpResponse, EndpointError> {
     let clean = utils::clean_0x(&info.1);
     let tx_hash: H256 = H256::from_str(&clean[..]).map_err(|e| {
@@ -317,19 +313,18 @@ impl HandleRequests {
                     future::Either::B(
                         future::join_all(futures)
                             .and_then(move |results| {
-                                info!("results from status futures: {:?}", results);
+                                debug!("results from status futures: {:?}", results);
                                 let home = NetworkStatus::new(results[0], results[1], results[2]);
                                 let side = NetworkStatus::new(results[3], results[4], results[5]);
                                 Ok(StatusResponse::new(home, side))
                             })
                             .and_then(move |response| {
-                                info!("Status response: {:?}", response);
+                                debug!("Status response: {:?}", response);
                                 let tx: mpsc::UnboundedSender<Result<StatusResponse, ()>> = tx.clone();
                                 let send_result = tx.unbounded_send(Ok(response));
                                 if send_result.is_err() {
                                     error!("error sending status response");
                                 }
-                                info!("sent response");
                                 Ok(())
                             })
                             .or_else(move |e| {
@@ -459,6 +454,7 @@ impl<T: DuplexTransport + 'static> Future for FindTransferInTransaction<T> {
                                                                 tx_hash: hash,
                                                                 block_hash,
                                                                 block_number: receipt_block,
+                                                                removed: false,
                                                             };
                                                             transfers.push(transfer);
                                                         }
@@ -517,7 +513,7 @@ impl Detokenize for BalanceOf {
                 "cannot parse balance from contract response".to_string(),
             ))
         })?;
-        info!("balance of: {:?}", balance);
+        debug!("balance of: {:?}", balance);
         Ok(BalanceOf(balance))
     }
 }

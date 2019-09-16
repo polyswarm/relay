@@ -1,4 +1,3 @@
-extern crate actix;
 extern crate actix_web;
 extern crate base64;
 extern crate clap;
@@ -15,30 +14,28 @@ extern crate failure_derive;
 #[macro_use]
 extern crate log;
 extern crate jsonrpc_core as rpc;
+extern crate lru;
 extern crate parking_lot;
 #[macro_use]
 extern crate serde_derive;
 #[macro_use]
 extern crate serde_json;
 
+extern crate core;
 extern crate ethcore_transaction;
 extern crate ethkey;
 extern crate ethstore;
 extern crate rlp;
+extern crate serde;
 
-pub mod anchor;
-pub mod consul_configs;
-pub mod contracts;
-pub mod endpoint;
+pub mod anchors;
 pub mod errors;
-pub mod logger;
-pub mod missed_transfer;
+pub mod eth;
+pub mod extensions;
 pub mod relay;
-pub mod settings;
-pub mod transaction;
-pub mod transfer;
-pub mod utils;
-pub mod withdrawal;
+pub mod relay_config;
+pub mod server;
+pub mod transfers;
 
 use clap::{App, Arg};
 use consul_configs::ConsulConfig;
@@ -59,6 +56,9 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
+
+use relay_config::{consul_configs, logger, settings};
+use server::endpoint;
 
 use log::Level;
 
@@ -154,7 +154,7 @@ fn run(
     side_ws: web3::transports::WebSocket,
     consul_config: ConsulConfig,
 ) -> impl Future<Item = (), Error = ()> {
-    let account = utils::clean_0x(&settings.relay.account)
+    let account = eth::utils::clean_0x(&settings.relay.account)
         .parse()
         .or_else(|_| Err(OperationError::InvalidAddress(settings.relay.account.clone())))
         .unwrap();

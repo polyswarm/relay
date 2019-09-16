@@ -7,17 +7,18 @@ use web3::futures::try_ready;
 use web3::types::{Address, BlockNumber, FilterBuilder, U256};
 use web3::{DuplexTransport, ErrorKind};
 
-use super::contracts::TRANSFER_EVENT_SIGNATURE;
-use super::relay::{Network, Timeout};
+use super::eth::contracts::TRANSFER_EVENT_SIGNATURE;
+use super::extensions::timeout::Timeout;
+use super::relay::Network;
 use super::transfer::Transfer;
 
 pub const LOOKBACK_RANGE: u64 = 1_000;
 pub const LOOKBACK_LEEWAY: u64 = 5;
 
 /// Stream of Transfer that were missed, either from downtime, or failed approvals
-pub struct FindMissedTransfers(mpsc::UnboundedReceiver<Transfer>);
+pub struct CheckPastTransfers(mpsc::UnboundedReceiver<Transfer>);
 
-impl FindMissedTransfers {
+impl CheckPastTransfers {
     /// Returns a newly created FindMissedTransfers Stream
     ///
     /// # Arguments
@@ -26,7 +27,6 @@ impl FindMissedTransfers {
     /// * `handle` - Handle to spawn new futures
     pub fn new<T: DuplexTransport + 'static>(source: &Network<T>, handle: &reactor::Handle) -> Self {
         let (tx, rx) = mpsc::unbounded();
-        let h = handle.clone();
         let token_address = source.token.address();
         let relay_address = source.relay.address();
         let network_type = source.network_type;
@@ -42,16 +42,8 @@ impl FindMissedTransfers {
             .clone()
             .eth_subscribe()
             .subscribe_new_heads()
-            .and_then(move |subscription| {
-                subscription.timeout(timeout, &handle).map_err(|_| {
-                    web3::Error::from_kind(ErrorKind::Msg("Unable to start head subscription".to_string()))
-                })
-            })
-            .and_then(move |timed| {
-                let handle = h.clone();
-                let tx = tx.clone();
-                let web3 = web3.clone();
-                timed.for_each(move |head| {
+            .timeout(timeout, &handle)
+            .for_each(move |head| {
                     let web3 = web3.clone();
                     let handle = handle.clone();
                     let tx = tx.clone();
@@ -118,7 +110,6 @@ impl FindMissedTransfers {
                                             log.transaction_hash.map_or_else(
                                                 || {
                                                     warn!("log missing transaction hash on {:?}", network_type);
-                                                    return;
                                                 },
                                                 |tx_hash| {
                                                     let tx = tx.clone();
@@ -144,35 +135,22 @@ impl FindMissedTransfers {
                                                                         Ok(())
                                                                     },
                                                                     |receipt| {
-                                                                        if receipt.block_number.is_none() {
-                                                                            warn!("no block number in transfer receipt on {:?}", network_type);
-                                                                            return Ok(());
-                                                                        }
+                                                                        let transfer_result = Transfer::from_receipt(destination, amount, false, &receipt);
 
-                                                                        if receipt.block_hash.is_none() {
-                                                                            warn!("no block hash in transfer receipton {:?}", network_type);
-                                                                            return Ok(());
-                                                                        }
-
-                                                                        let block_hash = receipt.block_hash.unwrap();
-                                                                        let block_number = receipt.block_number.unwrap();
-
-                                                                        let transfer = Transfer {
-                                                                            destination,
-                                                                            amount,
-                                                                            tx_hash,
-                                                                            block_hash,
-                                                                            block_number,
+                                                                        match transfer_result {
+                                                                            Ok(transfer) => {
+                                                                                info!(
+                                                                                    "transfer event on {:?} confirmed, approving {}",
+                                                                                    network_type, &transfer
+                                                                                );
+                                                                                tx.unbounded_send(transfer).unwrap();
+                                                                            }
+                                                                            Err(msg) => {
+                                                                                error!("error producing transfer from receipt on {:?}: {}", network_type, msg)
+                                                                            }
                                                                         };
-                                                                        info!(
-                                                                            "transfer event {} found on {:?}, checking for approval ",
-                                                                            &transfer,
-                                                                            network_type
-                                                                        );
-                                                                        tx.unbounded_send(transfer).unwrap();
                                                                         Ok(())
-                                                                    },
-                                                                )
+                                                                })
                                                             }).or_else(move |e| {
                                                                 error!("error approving transaction on {:?}: {}", network_type, e);
                                                                 Ok(())
@@ -186,17 +164,16 @@ impl FindMissedTransfers {
                                 }))
                         })
                     })
-                })
             }).map_err(move |e| {
-                error!("error in block head stream on {:?}: {}", network_type, e);
+                error!("error in block head stream on {:?}: {:?}", network_type, e);
             })
         };
         handle.spawn(future);
-        FindMissedTransfers(rx)
+        CheckPastTransfers(rx)
     }
 }
 
-impl Stream for FindMissedTransfers {
+impl Stream for CheckPastTransfers {
     type Item = Transfer;
     type Error = ();
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
@@ -205,9 +182,9 @@ impl Stream for FindMissedTransfers {
 }
 
 /// Future to handle the Stream of missed transfers by checking them, and approving them
-pub struct HandleMissedTransfers(Box<Future<Item = (), Error = ()>>);
+pub struct RecheckPastTransferLogs(Box<Future<Item = (), Error = ()>>);
 
-impl HandleMissedTransfers {
+impl RecheckPastTransferLogs {
     /// Returns a newly created HandleMissedTransfers Future
     ///
     /// # Arguments
@@ -222,7 +199,7 @@ impl HandleMissedTransfers {
     ) -> Self {
         let handle = handle.clone();
         let target = target.clone();
-        let future = FindMissedTransfers::new(source, &handle)
+        let future = CheckPastTransfers::new(source, &handle)
             .for_each(move |transfer| {
                 let target = target.clone();
                 let handle = handle.clone();
@@ -232,11 +209,11 @@ impl HandleMissedTransfers {
                 // This is only ever triggered when the FindMissedTransfers has an error, and closes the Sender.
                 Err(())
             });
-        HandleMissedTransfers(Box::new(future))
+        RecheckPastTransferLogs(Box::new(future))
     }
 }
 
-impl Future for HandleMissedTransfers {
+impl Future for RecheckPastTransferLogs {
     type Item = ();
     type Error = ();
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {

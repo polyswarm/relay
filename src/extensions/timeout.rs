@@ -87,7 +87,7 @@ where
                             // If the timeout is triggered, error out
                             Ok(Async::Ready(_)) => {
                                 return Err(web3::Error::from_kind(ErrorKind::Msg(
-                                    "Geth connection unavailable".to_string(),
+                                    "Ethereum connection unavailable".to_string(),
                                 )));
                             }
                             // If timeout not triggered, return NotReady

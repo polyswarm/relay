@@ -14,7 +14,7 @@ use web3::{DuplexTransport, Web3};
 use super::anchors::anchor::HandleAnchors;
 use super::errors::OperationError;
 use super::eth::utils::clean_0x;
-use super::server::endpoint::{HandleRequests, RequestType};
+use super::server::{HandleRequests, RequestType};
 use super::transfers::live::WatchLiveTransfers;
 use super::transfers::past::RecheckPastTransferLogs;
 use transfers::live::ProcessTransfer;
@@ -42,7 +42,7 @@ impl<T: DuplexTransport + 'static> Relay<T> {
         }
     }
 
-    fn handle_requests(&self, rx: mpsc::UnboundedReceiver<RequestType>, handle: &reactor::Handle) -> HandleRequests {
+    fn handle_requests(&self, rx: mpsc::UnboundedReceiver<RequestType>, handle: &reactor::Handle) -> HandleRequests<T> {
         HandleRequests::new(&self.homechain, &self.sidechain, rx, handle)
     }
 

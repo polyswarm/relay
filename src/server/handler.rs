@@ -130,6 +130,7 @@ impl<T: DuplexTransport + 'static> Future for HandleRequests<T> {
                         NetworkType::Home => homechain,
                         NetworkType::Side => sidechain,
                     };
+                    info!("Checking all token balances");
                     Some(Box::new(BalanceCheck::new(&source, tx)))
                 }
                 None => None,
@@ -174,7 +175,7 @@ impl<T: DuplexTransport + 'static> Future for BalanceCheck<T> {
             let next = match &mut self.state {
                 BalanceCheckState::BuildFilter(future) => {
                     let block = try_ready!(future.poll());
-                    let token_address = source.token.address();
+                    let token_address: Address = source.token.address();
                     let filter = FilterBuilder::default()
                         .address(vec![token_address])
                         .from_block(BlockNumber::from(0))
@@ -189,6 +190,7 @@ impl<T: DuplexTransport + 'static> Future for BalanceCheck<T> {
                 }
                 BalanceCheckState::GetLogs(future) => {
                     let logs = try_ready!(future.poll());
+                    info!("found {} logs with token transfers", logs.len());
                     let mut results: HashMap<Address, U256> = HashMap::new();
                     logs.iter().for_each(|log| {
                         if Some(true) == log.removed {
@@ -198,6 +200,7 @@ impl<T: DuplexTransport + 'static> Future for BalanceCheck<T> {
                         let sender_address: Address = log.topics[1].into();
                         let receiver_address: Address = log.topics[2].into();
                         let amount: U256 = log.data.0[..32].into();
+                        info!("{} transferred {} to {}", sender_address, amount, receiver_address);
                         // Don't care if source doesn't exist, because it is likely a mint in that case
                         results
                             .entry(sender_address)

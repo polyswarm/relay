@@ -89,13 +89,10 @@ impl<T: DuplexTransport + 'static> Future for HandleRequests<T> {
     type Error = ();
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         loop {
-            match &mut self.in_progress {
-                Some(future) => {
-                    try_ready!(future.poll());
-                    self.in_progress = None;
-                }
-                _ => {}
-            };
+            if let Some(future) = &mut self.in_progress {
+                try_ready!(future.poll());
+                self.in_progress = None;
+            }
 
             let homechain = self.homechain.clone();
             let sidechain = self.sidechain.clone();

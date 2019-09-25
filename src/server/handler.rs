@@ -198,27 +198,20 @@ impl<T: DuplexTransport + 'static> Future for BalanceCheck<T> {
                             return;
                         }
 
-                        log.transaction_hash.map_or_else(
-                            || {
-                                warn!("log missing transaction hash on {:?}", source.network_type);
-                            },
-                            |tx_hash| {
-                                let sender_address: Address = log.topics[1].into();
-                                let receiver_address: Address = log.topics[2].into();
-                                let amount: U256 = log.data.0[..32].into();
-                                // Don't care if source doesn't exist, because it is likely a mint in that case
-                                let source_balance = results
-                                    .entry(sender_address)
-                                    .and_modify(|v| {
-                                        if !v.is_zero() {
-                                            *v -= amount;
-                                        }
-                                    })
-                                    .or_insert(0.into());
-                                let dest_balance = results.entry(receiver_address).or_insert(0.into());
-                                *dest_balance += amount;
-                            },
-                        );
+                        let sender_address: Address = log.topics[1].into();
+                        let receiver_address: Address = log.topics[2].into();
+                        let amount: U256 = log.data.0[..32].into();
+                        // Don't care if source doesn't exist, because it is likely a mint in that case
+                        results
+                            .entry(sender_address)
+                            .and_modify(|v| {
+                                if !v.is_zero() {
+                                    *v -= amount;
+                                }
+                            })
+                            .or_insert(0.into());
+                        let dest_balance = results.entry(receiver_address).or_insert(0.into());
+                        *dest_balance += amount;
                     });
                     let send_result = tx.unbounded_send(Ok(BalanceResponse::new(&results)));
                     if send_result.is_err() {
@@ -331,7 +324,6 @@ impl Future for StatusCheck {
                     error!("error sending status response");
                 }
             }
-            _ => {}
         };
         Ok(Async::Ready(()))
     }

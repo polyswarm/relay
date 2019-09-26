@@ -2,9 +2,9 @@ use eth::contracts::TRANSFER_EVENT_SIGNATURE;
 use ethabi::Token;
 use relay::{Network, NetworkType};
 use server::endpoint::{BalanceResponse, NetworkStatus, RequestType, StatusResponse};
+use std::cmp;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::cmp;
 use tokio_core::reactor;
 use transfers::past::{FindTransferInTransaction, ValidateAndApproveTransfer};
 use web3::contract::tokens::{Detokenize, Tokenize};
@@ -129,7 +129,7 @@ impl<T: DuplexTransport + 'static> Future for HandleRequests<T> {
                     info!("Checking all token balances");
                     handle.spawn(BalanceCheck::new(&source, tx))
                 }
-                None => {},
+                None => {}
             };
         }
     }
@@ -161,7 +161,7 @@ impl<T: DuplexTransport + 'static> BalanceCheck<T> {
         }
     }
 
-    fn build_next_window(&self, start: u64, end: u64) -> Box<Future<Item=Vec<Log>, Error = ()>> {
+    fn build_next_window(&self, start: u64, end: u64) -> Box<Future<Item = Vec<Log>, Error = ()>> {
         let token_address: Address = self.source.token.address();
         let filter = FilterBuilder::default()
             .address(vec![token_address])

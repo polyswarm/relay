@@ -109,12 +109,14 @@ impl Endpoint {
                         web::resource("/{chain}/balances").route(web::get().to(move |info: web::Path<String>| {
                             let tx = balance_tx.clone();
                             balances(&tx, &info)
-                    })))
+                        })),
+                    )
                     .service(web::resource("/{chain}/{tx_hash}").route(web::post().to(
                         move |info: web::Path<(String, String)>| {
                             let tx = hash_tx.clone();
                             search(&tx, &info)
-                    })))
+                        },
+                    )))
             })
             .bind(format!("0.0.0.0:{}", port))
             .unwrap()

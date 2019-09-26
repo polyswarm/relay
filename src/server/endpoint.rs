@@ -26,14 +26,22 @@ pub enum RequestType {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct BalanceResponse {
-    balances: HashMap<Address, U256>,
+    balances: HashMap<Address, String>,
 }
 
 impl BalanceResponse {
     pub fn new(balances: &HashMap<Address, U256>) -> Self {
-        BalanceResponse {
-            balances: balances.clone(),
+        let mut converted: HashMap<Address, String> = HashMap::new();
+        for (key, value) in balances.iter() {
+            converted.entry(key.clone()).or_insert(BalanceResponse::convert(*value));
         }
+        BalanceResponse {
+            balances: converted,
+        }
+    }
+
+    fn convert(balance: U256) -> String {
+        format!("{}", balance).to_string()
     }
 }
 

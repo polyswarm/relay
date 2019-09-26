@@ -217,6 +217,7 @@ impl<T: DuplexTransport + 'static> Future for BalanceCheck<T> {
                         *dest_balance += amount;
                     });
 
+                    info!("Window end is {} of {} blocks", window_end, end);
                     // Setup next window
                     if window_end < end {
                         let next_window_end = cmp::min(end, window_end + 1000);

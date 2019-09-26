@@ -5,6 +5,7 @@ use server::endpoint::{BalanceResponse, NetworkStatus, RequestType, StatusRespon
 use std::cmp;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::time::Instant;
 use tokio_core::reactor;
 use transfers::past::{FindTransferInTransaction, ValidateAndApproveTransfer};
 use web3::contract::tokens::{Detokenize, Tokenize};
@@ -145,6 +146,7 @@ pub struct BalanceCheck<T: DuplexTransport + 'static> {
     state: BalanceCheckState,
     tx: mpsc::UnboundedSender<Result<BalanceResponse, ()>>,
     balances: HashMap<Address, U256>,
+    start: Instant,
 }
 
 impl<T: DuplexTransport + 'static> BalanceCheck<T> {
@@ -158,6 +160,7 @@ impl<T: DuplexTransport + 'static> BalanceCheck<T> {
             tx: tx.clone(),
             state: BalanceCheckState::GetEndingBlock(Box::new(future)),
             balances: HashMap::new(),
+            start: Instant::now(),
         }
     }
 
@@ -192,7 +195,7 @@ impl<T: DuplexTransport + 'static> Future for BalanceCheck<T> {
                 }
                 BalanceCheckState::GetLogWindow(end, window_end, ref mut future) => {
                     let logs = try_ready!(future.poll());
-                    info!("found {} logs with token transfers", logs.len());
+                    info!("found {} logs with transfers between {} and {}", logs.len(), window_end, end);
                     // Process existing logs
                     logs.iter().for_each(|log| {
                         if Some(true) == log.removed {
@@ -202,7 +205,7 @@ impl<T: DuplexTransport + 'static> Future for BalanceCheck<T> {
                         let sender_address: Address = log.topics[1].into();
                         let receiver_address: Address = log.topics[2].into();
                         let amount: U256 = log.data.0[..32].into();
-                        info!("{} transferred {} to {}", sender_address, amount, receiver_address);
+                        debug!("{} transferred {} to {}", sender_address, amount, receiver_address);
                         // Don't care if source doesn't exist, because it is likely a mint in that case
                         let zero = U256::zero();
                         self.balances
@@ -217,14 +220,14 @@ impl<T: DuplexTransport + 'static> Future for BalanceCheck<T> {
                         *dest_balance += amount;
                     });
 
-                    info!("Window end is {} of {} blocks", window_end, end);
+                    debug!("Window end is {} of {} blocks", window_end, end);
                     // Setup next window
                     if window_end < end {
                         let next_window_end = cmp::min(end, window_end + 1000);
                         let future = self.build_next_window(window_end + 1, next_window_end);
                         BalanceCheckState::GetLogWindow(end, next_window_end, future)
                     } else {
-                        let send_result = tx.unbounded_send(Ok(BalanceResponse::new(&self.balances.clone())));
+                        let send_result = tx.unbounded_send(Ok(BalanceResponse::new(&Instant::now().duration_since(self.start), &self.balances.clone())));
                         if send_result.is_err() {
                             error!("error sending balance response");
                         }

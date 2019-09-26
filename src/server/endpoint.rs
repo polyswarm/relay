@@ -1,6 +1,7 @@
 use serde_derive::{Deserialize, Serialize};
 use std::str::FromStr;
 use std::thread;
+use std::time::Duration;
 use web3::futures::future;
 use web3::futures::prelude::*;
 use web3::futures::sync::mpsc;
@@ -26,16 +27,18 @@ pub enum RequestType {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct BalanceResponse {
+    duration: u64,
     balances: HashMap<Address, String>,
 }
 
 impl BalanceResponse {
-    pub fn new(balances: &HashMap<Address, U256>) -> Self {
+    pub fn new(duration: &Duration, balances: &HashMap<Address, U256>) -> Self {
         let mut converted: HashMap<Address, String> = HashMap::new();
         for (key, value) in balances.iter() {
             converted.entry(key.clone()).or_insert(BalanceResponse::convert(*value));
         }
         BalanceResponse {
+            duration: duration.as_secs(),
             balances: converted,
         }
     }

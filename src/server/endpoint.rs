@@ -206,14 +206,14 @@ fn search(
 /// * `info` - Tuple of two strings. The chain and tx hash.
 fn balances(
     tx: &mpsc::UnboundedSender<RequestType>,
-    info: &String,
+    info: &str,
 ) -> Box<Future<Item = HttpResponse, Error = EndpointError>> {
     let chain = if info.to_uppercase() == "HOME" {
         NetworkType::Home
     } else if info.to_uppercase() == "SIDE" {
         NetworkType::Side
     } else {
-        return Box::new(future::err(EndpointError::BadChain(info.clone())));
+        return Box::new(future::err(EndpointError::BadChain(info.to_string())));
     };
 
     let (balance_tx, balance_rx) = mpsc::unbounded();

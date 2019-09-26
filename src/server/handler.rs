@@ -4,6 +4,7 @@ use relay::{Network, NetworkType};
 use server::endpoint::{BalanceResponse, NetworkStatus, RequestType, StatusResponse};
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::cmp;
 use tokio_core::reactor;
 use transfers::past::{FindTransferInTransaction, ValidateAndApproveTransfer};
 use web3::contract::tokens::{Detokenize, Tokenize};
@@ -53,7 +54,6 @@ impl Detokenize for BalanceOf {
 
 pub struct HandleRequests<T: DuplexTransport + 'static> {
     listen: mpsc::UnboundedReceiver<RequestType>,
-    in_progress: Option<Box<Future<Item = (), Error = ()>>>,
     homechain: Rc<Network<T>>,
     sidechain: Rc<Network<T>>,
     handle: reactor::Handle,
@@ -76,7 +76,6 @@ impl<T: DuplexTransport + 'static> HandleRequests<T> {
     ) -> Self {
         HandleRequests {
             listen: rx,
-            in_progress: None,
             homechain: homechain.clone(),
             sidechain: sidechain.clone(),
             handle: handle.clone(),
@@ -89,23 +88,20 @@ impl<T: DuplexTransport + 'static> Future for HandleRequests<T> {
     type Error = ();
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         loop {
-            if let Some(future) = &mut self.in_progress {
-                try_ready!(future.poll());
-                self.in_progress = None;
-            }
-
             let homechain = self.homechain.clone();
             let sidechain = self.sidechain.clone();
             let handle = self.handle.clone();
             let request = try_ready!(self.listen.poll());
-            let next: Option<Box<Future<Item = (), Error = ()>>> = match request {
+            match request {
                 Some(RequestType::Hash(chain, tx_hash)) => {
+                    let handle = self.handle.clone();
                     let (source, target) = match chain {
                         NetworkType::Home => (homechain, sidechain),
                         NetworkType::Side => (sidechain, homechain),
                     };
                     let future = FindTransferInTransaction::new(&source, &tx_hash)
                         .and_then(move |transfers| {
+                            let handle = handle.clone();
                             let target = target.clone();
                             let futures: Vec<ValidateAndApproveTransfer<T>> = transfers
                                 .iter()
@@ -122,33 +118,33 @@ impl<T: DuplexTransport + 'static> Future for HandleRequests<T> {
                             // No log here, errors are caught in Futures
                             Ok(())
                         });
-                    Some(Box::new(future))
+                    self.handle.spawn(future);
                 }
-                Some(RequestType::Status(ref tx)) => Some(Box::new(StatusCheck::new(&homechain, &sidechain, tx))),
+                Some(RequestType::Status(ref tx)) => handle.spawn(StatusCheck::new(&homechain, &sidechain, tx)),
                 Some(RequestType::Balance(chain, ref tx)) => {
                     let source = match chain {
                         NetworkType::Home => homechain,
                         NetworkType::Side => sidechain,
                     };
                     info!("Checking all token balances");
-                    Some(Box::new(BalanceCheck::new(&source, tx)))
+                    handle.spawn(BalanceCheck::new(&source, tx))
                 }
-                None => None,
+                None => {},
             };
-            self.in_progress = next;
         }
     }
 }
 
 pub enum BalanceCheckState {
-    BuildFilter(Box<Future<Item = U256, Error = ()>>),
-    GetLogs(Box<Future<Item = Vec<Log>, Error = ()>>),
+    GetEndingBlock(Box<Future<Item = U256, Error = ()>>),
+    GetLogWindow(u64, u64, Box<Future<Item = Vec<Log>, Error = ()>>),
 }
 
 pub struct BalanceCheck<T: DuplexTransport + 'static> {
     source: Rc<Network<T>>,
     state: BalanceCheckState,
     tx: mpsc::UnboundedSender<Result<BalanceResponse, ()>>,
+    balances: HashMap<Address, U256>,
 }
 
 impl<T: DuplexTransport + 'static> BalanceCheck<T> {
@@ -160,8 +156,24 @@ impl<T: DuplexTransport + 'static> BalanceCheck<T> {
         BalanceCheck {
             source: source.clone(),
             tx: tx.clone(),
-            state: BalanceCheckState::BuildFilter(Box::new(future)),
+            state: BalanceCheckState::GetEndingBlock(Box::new(future)),
+            balances: HashMap::new(),
         }
+    }
+
+    fn build_next_window(&self, start: u64, end: u64) -> Box<Future<Item=Vec<Log>, Error = ()>> {
+        let token_address: Address = self.source.token.address();
+        let filter = FilterBuilder::default()
+            .address(vec![token_address])
+            .from_block(BlockNumber::from(start))
+            .to_block(BlockNumber::Number(end))
+            .topics(Some(vec![TRANSFER_EVENT_SIGNATURE.into()]), None, None, None)
+            .build();
+        //self.state = ;
+        let future = self.source.web3.eth().logs(filter).map_err(move |e| {
+            error!("error getting block number {:?}", e);
+        });
+        Box::new(future)
     }
 }
 
@@ -170,28 +182,18 @@ impl<T: DuplexTransport + 'static> Future for BalanceCheck<T> {
     type Error = ();
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         loop {
-            let source = self.source.clone();
             let tx = self.tx.clone();
-            let next = match &mut self.state {
-                BalanceCheckState::BuildFilter(future) => {
+            let next = match self.state {
+                BalanceCheckState::GetEndingBlock(ref mut future) => {
                     let block = try_ready!(future.poll());
-                    let token_address: Address = source.token.address();
-                    let filter = FilterBuilder::default()
-                        .address(vec![token_address])
-                        .from_block(BlockNumber::from(0))
-                        .to_block(BlockNumber::Number(block.as_u64()))
-                        .topics(Some(vec![TRANSFER_EVENT_SIGNATURE.into()]), None, None, None)
-                        .build();
-                    //self.state = ;
-                    let future = source.web3.eth().logs(filter).map_err(move |e| {
-                        error!("error getting block number {:?}", e);
-                    });
-                    BalanceCheckState::GetLogs(Box::new(future))
+                    let window_end = cmp::min(block.as_u64(), 1000);
+                    let future = self.build_next_window(0, window_end);
+                    BalanceCheckState::GetLogWindow(block.as_u64(), window_end, future)
                 }
-                BalanceCheckState::GetLogs(future) => {
+                BalanceCheckState::GetLogWindow(end, window_end, ref mut future) => {
                     let logs = try_ready!(future.poll());
                     info!("found {} logs with token transfers", logs.len());
-                    let mut results: HashMap<Address, U256> = HashMap::new();
+                    // Process existing logs
                     logs.iter().for_each(|log| {
                         if Some(true) == log.removed {
                             return;
@@ -202,22 +204,31 @@ impl<T: DuplexTransport + 'static> Future for BalanceCheck<T> {
                         let amount: U256 = log.data.0[..32].into();
                         info!("{} transferred {} to {}", sender_address, amount, receiver_address);
                         // Don't care if source doesn't exist, because it is likely a mint in that case
-                        results
+                        let zero = U256::zero();
+                        self.balances
                             .entry(sender_address)
                             .and_modify(|v| {
                                 if !v.is_zero() {
                                     *v -= amount;
                                 }
                             })
-                            .or_insert(0.into());
-                        let dest_balance = results.entry(receiver_address).or_insert(0.into());
+                            .or_insert(zero);
+                        let dest_balance = self.balances.entry(receiver_address).or_insert(zero);
                         *dest_balance += amount;
                     });
-                    let send_result = tx.unbounded_send(Ok(BalanceResponse::new(&results)));
-                    if send_result.is_err() {
-                        error!("error sending balance response");
+
+                    // Setup next window
+                    if window_end < end {
+                        let next_window_end = cmp::min(end, window_end + 1000);
+                        let future = self.build_next_window(window_end + 1, next_window_end);
+                        BalanceCheckState::GetLogWindow(end, next_window_end, future)
+                    } else {
+                        let send_result = tx.unbounded_send(Ok(BalanceResponse::new(&self.balances.clone())));
+                        if send_result.is_err() {
+                            error!("error sending balance response");
+                        }
+                        return Ok(Async::Ready(()));
                     }
-                    return Ok(Async::Ready(()));
                 }
             };
             self.state = next;

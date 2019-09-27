@@ -26,7 +26,7 @@ impl Anchor {
     /// # Arguments
     ///
     /// * `target` - Network to post the anchor
-    fn process<T: DuplexTransport + 'static>(&self, target: &Rc<Network<T>>) -> SendTransaction<T, Self> {
+    fn process<T: DuplexTransport + 'static>(&self, target: &Network<T>) -> SendTransaction<T, Self> {
         info!("anchoring block {} to {:?}", self, target.network_type);
         SendTransaction::new(target, "anchor", self, target.retries)
     }
@@ -49,7 +49,7 @@ impl fmt::Display for Anchor {
 
 /// Future to handle the Stream of anchors & post them to the chain
 pub struct HandleAnchors<T: DuplexTransport + 'static> {
-    target: Rc<Network<T>>,
+    target: Network<T>,
     stream: FindAnchors,
     handle: reactor::Handle,
 }
@@ -62,7 +62,7 @@ impl<T: DuplexTransport + 'static> HandleAnchors<T> {
     /// * `source` - Network where the block headers are captured
     /// * `target` - Network where the headers will be anchored
     /// * `handle` - Handle to spawn new futures
-    pub fn new(source: &Network<T>, target: &Rc<Network<T>>, handle: &reactor::Handle) -> Self {
+    pub fn new(source: &Network<T>, target: &Network<T>, handle: &reactor::Handle) -> Self {
         let handle = handle.clone();
         let target = target.clone();
         let stream = FindAnchors::new(source, &handle);

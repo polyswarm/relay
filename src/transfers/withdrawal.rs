@@ -164,13 +164,13 @@ pub enum CheckWithdrawalState {
 
 /// Future to check whether or not a withdrawal needs approval
 pub struct DoesRequireApproval<T: DuplexTransport + 'static> {
-    target: Rc<Network<T>>,
+    target: Network<T>,
     transfer: Transfer,
     state: CheckWithdrawalState,
 }
 
 impl<T: DuplexTransport + 'static> DoesRequireApproval<T> {
-    pub fn new(target: &Rc<Network<T>>, transfer: &Transfer) -> Self {
+    pub fn new(target: &Network<T>, transfer: &Transfer) -> Self {
         let approval_hash = Self::get_withdrawal_hash(transfer);
         let account = target.account;
         let network_type = target.network_type;
@@ -270,7 +270,7 @@ impl<T: DuplexTransport + 'static> Future for DoesRequireApproval<T> {
 pub struct GetWithdrawalApprovals(Box<Future<Item = WithdrawalApprovals, Error = ()>>);
 
 impl GetWithdrawalApprovals {
-    pub fn new<T: DuplexTransport + 'static>(target: &Rc<Network<T>>, approval_hash: &H256, index: &U256) -> Self {
+    pub fn new<T: DuplexTransport + 'static>(target: &Network<T>, approval_hash: &H256, index: &U256) -> Self {
         let target = target.clone();
         let account = target.account;
         let network_type = target.network_type;

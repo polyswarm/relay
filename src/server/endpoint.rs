@@ -22,30 +22,6 @@ pub const SIDE: &str = "SIDE";
 pub enum RequestType {
     Hash(NetworkType, H256),
     Status(mpsc::UnboundedSender<Result<StatusResponse, ()>>),
-    Balance(NetworkType, mpsc::UnboundedSender<Result<BalanceResponse, ()>>),
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct BalanceResponse {
-    duration: u64,
-    balances: HashMap<Address, String>,
-}
-
-impl BalanceResponse {
-    pub fn new(duration: &Duration, balances: &HashMap<Address, U256>) -> Self {
-        let mut converted: HashMap<Address, String> = HashMap::new();
-        for (key, value) in balances.iter() {
-            converted.entry(key.clone()).or_insert(BalanceResponse::convert(*value));
-        }
-        BalanceResponse {
-            duration: duration.as_secs(),
-            balances: converted,
-        }
-    }
-
-    fn convert(balance: U256) -> String {
-        format!("{}", balance).to_string()
-    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -62,9 +38,9 @@ impl StatusResponse {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct NetworkStatus {
-    relay_eth_balance: Option<U256>,
-    relay_last_block: Option<U256>,
-    contract_nct_balance: Option<U256>,
+    relay_eth_balance: Option<String>,
+    relay_last_block: Option<String>,
+    contract_nct_balance: Option<String>,
 }
 
 impl NetworkStatus {
@@ -74,9 +50,9 @@ impl NetworkStatus {
         contract_nct_balance: Option<U256>,
     ) -> Self {
         NetworkStatus {
-            relay_eth_balance,
-            relay_last_block,
-            contract_nct_balance,
+            relay_eth_balance: relay_eth_balance.map(|v| v.to_string()),
+            relay_last_block: relay_last_block.map(|v| v.to_string()),
+            contract_nct_balance: contract_nct_balance.map(|v| v.to_string()),
         }
     }
 }
@@ -116,12 +92,6 @@ impl Endpoint {
                         let tx = status_tx.clone();
                         status(&tx)
                     })))
-                    .service(
-                        web::resource("/{chain}/balances").route(web::get().to(move |info: web::Path<String>| {
-                            let tx = balance_tx.clone();
-                            balances(&tx, &info)
-                        })),
-                    )
                     .service(web::resource("/{chain}/{tx_hash}").route(web::post().to(
                         move |info: web::Path<(String, String)>| {
                             let tx = hash_tx.clone();
@@ -209,60 +179,4 @@ fn search(
         EndpointError::UnableToSend
     })?;
     Ok(HttpResponse::new(StatusCode::OK))
-}
-
-/// Return an HttpResponse with the list of current balances for all non-contract token holders
-///
-/// # Arguments
-///
-/// * `tx` - Sender to report new requests
-/// * `info` - Tuple of two strings. The chain and tx hash.
-fn balances(
-    tx: &mpsc::UnboundedSender<RequestType>,
-    info: &str,
-) -> Box<Future<Item = HttpResponse, Error = EndpointError>> {
-    let chain = if info.to_uppercase() == "HOME" {
-        NetworkType::Home
-    } else if info.to_uppercase() == "SIDE" {
-        NetworkType::Side
-    } else {
-        return Box::new(future::err(EndpointError::BadChain(info.to_string())));
-    };
-
-    let (balance_tx, balance_rx) = mpsc::unbounded();
-    let request_future: Box<Future<Item = HttpResponse, Error = EndpointError>> = Box::new(
-        balance_rx
-            .take(1)
-            .collect()
-            .and_then(move |messages: Vec<Result<BalanceResponse, ()>>| {
-                if !messages.is_empty() {
-                    Ok(messages[0].clone())
-                } else {
-                    Err(())
-                }
-            })
-            .and_then(move |msg| match msg {
-                Ok(response) => {
-                    let body = serde_json::to_string(&response).map_err(move |e| {
-                        error!("error parsing response: {:?}", e);
-                    })?;
-
-                    Ok(HttpResponse::Ok().content_type("application/json").body(body))
-                }
-                Err(_) => Err(()),
-            })
-            .map_err(|_| {
-                error!("error receiving message");
-                EndpointError::UnableToGetBalances
-            }),
-    );
-
-    let request = RequestType::Balance(chain, balance_tx);
-    let send_result = tx.unbounded_send(request);
-    if send_result.is_err() {
-        error!("error sending balance request: {:?}", send_result.err());
-        return Box::new(future::err(EndpointError::UnableToGetBalances));
-    }
-
-    Box::new(request_future)
 }

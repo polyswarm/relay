@@ -1,14 +1,16 @@
 use failure::{Error, SyncFailure};
 use lru::LruCache;
-use std::process;
 use std::rc::Rc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::RwLock;
+use std::{process, time};
 use tokio_core::reactor;
+use web3::confirm::{wait_for_transaction_confirmation, SendTransactionWithConfirmation};
 use web3::contract::Contract;
+use web3::futures::future::Either;
 use web3::futures::sync::mpsc;
 use web3::futures::Future;
-use web3::types::{Address, H256, U256};
+use web3::types::{Address, TransactionReceipt, H256, U256};
 use web3::{DuplexTransport, Web3};
 
 use super::anchors::anchor::HandleAnchors;
@@ -17,15 +19,31 @@ use super::eth::utils::clean_0x;
 use super::server::{HandleRequests, RequestType};
 use super::transfers::live::WatchLiveTransfers;
 use super::transfers::past::RecheckPastTransferLogs;
-use transfers::live::ProcessTransfer;
+//use transfers::flush::WatchFlush;
+use super::extensions::removed::{CancelRemoved, ExitOnLogRemoved};
+use super::transfers::live::ProcessTransfer;
 
 const FREE_GAS_PRICE: u64 = 0;
 const GAS_LIMIT: u64 = 200_000;
 
+/// Add CheckRemoved trait to SendTransactionWithConfirmation, which is called by Transfer::approve_withdrawal
+impl<T> CancelRemoved<T, TransactionReceipt, web3::Error> for SendTransactionWithConfirmation<T>
+where
+    T: DuplexTransport + 'static,
+{
+    fn cancel_removed(
+        self,
+        target: &Network<T>,
+        tx_hash: H256,
+    ) -> ExitOnLogRemoved<T, TransactionReceipt, web3::Error> {
+        ExitOnLogRemoved::new(target, tx_hash, Box::new(self))
+    }
+}
+
 /// Token relay between two Ethereum networks
-pub struct Relay<T: DuplexTransport> {
-    homechain: Rc<Network<T>>,
-    sidechain: Rc<Network<T>>,
+pub struct Relay<T: DuplexTransport + 'static> {
+    homechain: Network<T>,
+    sidechain: Network<T>,
 }
 
 impl<T: DuplexTransport + 'static> Relay<T> {
@@ -36,10 +54,7 @@ impl<T: DuplexTransport + 'static> Relay<T> {
     /// * `homechain` - Network to be used as the home chain
     /// * `sidechain` - Network to be used as the side chain
     pub fn new(homechain: Network<T>, sidechain: Network<T>) -> Self {
-        Self {
-            homechain: Rc::new(homechain),
-            sidechain: Rc::new(sidechain),
-        }
+        Self { homechain, sidechain }
     }
 
     fn handle_requests(&self, rx: mpsc::UnboundedReceiver<RequestType>, handle: &reactor::Handle) -> HandleRequests<T> {
@@ -64,6 +79,7 @@ impl<T: DuplexTransport + 'static> Relay<T> {
         rx: mpsc::UnboundedReceiver<RequestType>,
         handle: &reactor::Handle,
     ) -> impl Future<Item = (), Error = ()> {
+        //            .join(self.sidechain.clone().watch_flush_logs(&self.homechain, handle))
         self.sidechain
             .handle_anchors(&self.homechain, handle)
             .join(self.homechain.watch_transfer_logs(&self.sidechain, handle))
@@ -95,12 +111,13 @@ pub enum NetworkType {
 }
 
 /// Represents an Ethereum network with a deployed ERC20Relay contract
-pub struct Network<T: DuplexTransport> {
+#[derive(Clone)]
+pub struct Network<T: DuplexTransport + 'static> {
     pub network_type: NetworkType,
     pub web3: Web3<T>,
     pub account: Address,
-    pub token: Contract<T>,
-    pub relay: Contract<T>,
+    pub token: Rc<Contract<T>>,
+    pub relay: Rc<Contract<T>>,
     pub free: bool,
     pub confirmations: u64,
     pub anchor_frequency: u64,
@@ -109,8 +126,8 @@ pub struct Network<T: DuplexTransport> {
     pub chain_id: u64,
     pub keydir: String,
     pub password: String,
-    pub nonce: AtomicUsize,
-    pub pending: RwLock<LruCache<H256, TransferApprovalState>>,
+    pub nonce: Rc<AtomicUsize>,
+    pub pending: Rc<RwLock<LruCache<H256, TransferApprovalState>>>,
     pub retries: u64,
 }
 
@@ -158,11 +175,15 @@ impl<T: DuplexTransport + 'static> Network<T> {
             .parse()
             .or_else(|_| Err(OperationError::InvalidAddress(relay.into())))?;
 
-        let token = Contract::from_json(web3.eth(), token_address, token_abi.as_bytes())
-            .or(Err(OperationError::InvalidContractAbi))?;
+        let token = Rc::new(
+            Contract::from_json(web3.eth(), token_address, token_abi.as_bytes())
+                .or(Err(OperationError::InvalidContractAbi))?,
+        );
 
-        let relay = Contract::from_json(web3.eth(), relay_address, relay_abi.as_bytes())
-            .or(Err(OperationError::InvalidContractAbi))?;
+        let relay = Rc::new(
+            Contract::from_json(web3.eth(), relay_address, relay_abi.as_bytes())
+                .or(Err(OperationError::InvalidContractAbi))?,
+        );
 
         Ok(Self {
             network_type,
@@ -178,8 +199,8 @@ impl<T: DuplexTransport + 'static> Network<T> {
             chain_id,
             keydir: keydir.to_string(),
             password: password.to_string(),
-            nonce,
-            pending: RwLock::new(LruCache::new(1024)),
+            nonce: Rc::new(nonce),
+            pending: Rc::new(RwLock::new(LruCache::new(1024))),
             retries,
         })
     }
@@ -298,19 +319,33 @@ impl<T: DuplexTransport + 'static> Network<T> {
             })
     }
 
-    /// Returns a WatchTransferLogs Future for this chain.
-    /// Will anchor to the given target
+    /// Returns a WatchFlush Future for this chain.
+    /// Watches the self (which should only be sidechain), and sends to the target, which should be
+    /// homechain
     ///
     /// # Arguments
     ///
     /// * `target` - Network where to anchor the block headers
     /// * `handle` - Handle to spawn new tasks
-    pub fn watch_transfer_logs(&self, target: &Rc<Network<T>>, handle: &reactor::Handle) -> ProcessTransfer<T> {
+    //    pub fn watch_flush_logs(self, target: &Network<T>, handle: &reactor::Handle) -> WatchFlush<T> {
+    //        // This on just watches right inside, no tx to send to
+    //        WatchFlush::new(self, handle).map_err(move |e| error!("error watching transaction logs {:?}", e))
+    //    }
+
+    /// Returns a ProcessTransfer Future for this chain.
+    /// Watches the self network, and sends transactions to the target network
+    ///
+    /// # Arguments
+    ///
+    /// * `target` - Network where to anchor the block headers
+    /// * `handle` - Handle to spawn new tasks
+    pub fn watch_transfer_logs(&self, target: &Network<T>, handle: &reactor::Handle) -> ProcessTransfer<T> {
         let (tx, rx) = mpsc::unbounded();
-        let watch = WatchLiveTransfers::new(&tx, self, target, handle)
+        let watch = WatchLiveTransfers::new(self, target, &tx, handle)
             .map_err(move |e| error!("error watching transaction logs {:?}", e));
+        // We do this in a separately spawned task because we have to wait 20 blocks per
         handle.spawn(watch);
-        ProcessTransfer::new(rx, target, handle)
+        ProcessTransfer::new(self, target, rx, handle)
     }
 
     /// Returns a RecheckPastTransferLogs Future for this chain.
@@ -320,11 +355,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
     ///
     /// * `target` - Network where to anchor the block headers
     /// * `handle` - Handle to spawn new tasks
-    pub fn recheck_past_transfer_logs(
-        &self,
-        target: &Rc<Network<T>>,
-        handle: &reactor::Handle,
-    ) -> RecheckPastTransferLogs {
+    pub fn recheck_past_transfer_logs(&self, target: &Network<T>, handle: &reactor::Handle) -> RecheckPastTransferLogs {
         RecheckPastTransferLogs::new(self, target, handle)
     }
 
@@ -335,7 +366,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
     ///
     /// * `target` - Network where to anchor the block headers
     /// * `handle` - Handle to spawn new tasks
-    pub fn handle_anchors(&self, target: &Rc<Network<T>>, handle: &reactor::Handle) -> HandleAnchors<T> {
+    pub fn handle_anchors(&self, target: &Network<T>, handle: &reactor::Handle) -> HandleAnchors<T> {
         HandleAnchors::new(self, target, handle)
     }
 
@@ -351,5 +382,43 @@ impl<T: DuplexTransport + 'static> Network<T> {
             return FREE_GAS_PRICE.into();
         }
         potential_gas_price
+    }
+
+    ///Returns a transaction receipt after waiting if not removed
+    ///The state of the transaction is stored on the target chain
+    pub fn get_receipt(
+        &self,
+        destination: Address,
+        amount: U256,
+        removed: bool,
+        transaction_hash: H256,
+    ) -> Box<Future<Item = Option<TransactionReceipt>, Error = ()>> {
+        let source = self.clone();
+        let web3 = self.web3.clone();
+        let network_type = self.network_type;
+        let confirmations = self.confirmations as usize;
+        let transport = web3.transport().clone();
+        let future = if removed {
+            Either::A(web3.eth().transaction_receipt(transaction_hash))
+        } else {
+            info!(
+                "received transfer event in tx hash {:?} on {:?}, waiting for confirmations",
+                &transaction_hash, network_type
+            );
+            Either::B(
+                wait_for_transaction_confirmation(
+                    transport,
+                    transaction_hash,
+                    time::Duration::from_secs(1),
+                    confirmations,
+                )
+                .cancel_removed(&source, transaction_hash),
+            )
+        }
+        .map_err(move |_| {
+            error!("error checking transaction on {:?}", network_type);
+            ()
+        });
+        Box::new(future)
     }
 }

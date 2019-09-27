@@ -7,8 +7,8 @@ use web3::futures::try_ready;
 use web3::{DuplexTransport, ErrorKind};
 
 /// Enum for the two stages of subscribing to a timeout stream
-/// Subscribing is holds future that returns a TimeoutStream
-/// Subscribed is holds a TimeoutStream
+/// Subscribing holds a future that returns a TimeoutStream
+/// Subscribed holds a TimeoutStream
 pub enum SubscriptionState<T, I>
 where
     T: DuplexTransport + 'static,

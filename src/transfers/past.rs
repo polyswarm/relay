@@ -194,7 +194,7 @@ impl RecheckPastTransferLogs {
     /// * `handle` - Handle to spawn new futures
     pub fn new<T: DuplexTransport + 'static>(
         source: &Network<T>,
-        target: &Rc<Network<T>>,
+        target: &Network<T>,
         handle: &reactor::Handle,
     ) -> Self {
         let handle = handle.clone();
@@ -223,7 +223,7 @@ impl Future for RecheckPastTransferLogs {
 
 /// Future to check a transfer against the contract and approve is necessary
 pub struct ValidateAndApproveTransfer<T: DuplexTransport + 'static> {
-    target: Rc<Network<T>>,
+    target: Network<T>,
     handle: reactor::Handle,
     transfer: Transfer,
     future: Box<Future<Item = bool, Error = ()>>,
@@ -237,7 +237,7 @@ impl<T: DuplexTransport + 'static> ValidateAndApproveTransfer<T> {
     /// * `target` - Network where the transfer will be approved for a withdrawal
     /// * `handle` - Handle to spawn new futures
     /// * `transfer` - Transfer event to check/approve
-    pub fn new(target: &Rc<Network<T>>, handle: &reactor::Handle, transfer: &Transfer) -> Self {
+    pub fn new(target: &Network<T>, handle: &reactor::Handle, transfer: &Transfer) -> Self {
         let network_type = target.network_type;
         let future = transfer.check_withdrawal(&target).map_err(move |e| {
             error!("error checking withdrawal for approval on {:?}: {:?}", network_type, e);
@@ -278,7 +278,7 @@ pub enum FindTransferState {
 /// Future to find a vec of transfers at a specific transaction
 pub struct FindTransferInTransaction<T: DuplexTransport + 'static> {
     hash: H256,
-    source: Rc<Network<T>>,
+    source: Network<T>,
     state: FindTransferState,
 }
 
@@ -289,7 +289,7 @@ impl<T: DuplexTransport + 'static> FindTransferInTransaction<T> {
     ///
     /// * `source` - Network where the transaction took place
     /// * `hash` - Transaction hash to check
-    pub fn new(source: &Rc<Network<T>>, hash: &H256) -> Self {
+    pub fn new(source: &Network<T>, hash: &H256) -> Self {
         let web3 = source.web3.clone();
         let network_type = source.network_type;
         let future = web3.clone().eth().transaction_receipt(*hash).map_err(move |e| {

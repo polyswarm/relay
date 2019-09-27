@@ -1,7 +1,7 @@
 use eth::contracts::TRANSFER_EVENT_SIGNATURE;
 use ethabi::Token;
 use relay::{Network, NetworkType};
-use server::endpoint::{BalanceResponse, NetworkStatus, RequestType, StatusResponse};
+use server::endpoint::{NetworkStatus, RequestType, StatusResponse};
 use std::cmp;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -55,8 +55,8 @@ impl Detokenize for BalanceOf {
 
 pub struct HandleRequests<T: DuplexTransport + 'static> {
     listen: mpsc::UnboundedReceiver<RequestType>,
-    homechain: Rc<Network<T>>,
-    sidechain: Rc<Network<T>>,
+    homechain: Network<T>,
+    sidechain: Network<T>,
     handle: reactor::Handle,
 }
 
@@ -70,8 +70,8 @@ impl<T: DuplexTransport + 'static> HandleRequests<T> {
     /// * `rx` - Receiver where requested RequestTypes will come across
     /// * `handle` - Handle to spawn new futures
     pub fn new(
-        homechain: &Rc<Network<T>>,
-        sidechain: &Rc<Network<T>>,
+        homechain: &Network<T>,
+        sidechain: &Network<T>,
         rx: mpsc::UnboundedReceiver<RequestType>,
         handle: &reactor::Handle,
     ) -> Self {
@@ -122,120 +122,8 @@ impl<T: DuplexTransport + 'static> Future for HandleRequests<T> {
                     self.handle.spawn(future);
                 }
                 Some(RequestType::Status(ref tx)) => handle.spawn(StatusCheck::new(&homechain, &sidechain, tx)),
-                Some(RequestType::Balance(chain, ref tx)) => {
-                    let source = match chain {
-                        NetworkType::Home => homechain,
-                        NetworkType::Side => sidechain,
-                    };
-                    info!("Checking all token balances");
-                    handle.spawn(BalanceCheck::new(&source, tx))
-                }
                 None => {}
             };
-        }
-    }
-}
-
-pub enum BalanceCheckState {
-    GetEndingBlock(Box<Future<Item = U256, Error = ()>>),
-    GetLogWindow(u64, u64, Box<Future<Item = Vec<Log>, Error = ()>>),
-}
-
-pub struct BalanceCheck<T: DuplexTransport + 'static> {
-    source: Rc<Network<T>>,
-    state: BalanceCheckState,
-    tx: mpsc::UnboundedSender<Result<BalanceResponse, ()>>,
-    balances: HashMap<Address, U256>,
-    start: Instant,
-}
-
-impl<T: DuplexTransport + 'static> BalanceCheck<T> {
-    fn new(source: &Rc<Network<T>>, tx: &mpsc::UnboundedSender<Result<BalanceResponse, ()>>) -> Self {
-        let future = source.web3.eth().block_number().map_err(move |e| {
-            error!("error getting block number {:?}", e);
-        });
-
-        BalanceCheck {
-            source: source.clone(),
-            tx: tx.clone(),
-            state: BalanceCheckState::GetEndingBlock(Box::new(future)),
-            balances: HashMap::new(),
-            start: Instant::now(),
-        }
-    }
-
-    fn build_next_window(&self, start: u64, end: u64) -> Box<Future<Item = Vec<Log>, Error = ()>> {
-        let token_address: Address = self.source.token.address();
-        let filter = FilterBuilder::default()
-            .address(vec![token_address])
-            .from_block(BlockNumber::from(start))
-            .to_block(BlockNumber::Number(end))
-            .topics(Some(vec![TRANSFER_EVENT_SIGNATURE.into()]), None, None, None)
-            .build();
-        //self.state = ;
-        let future = self.source.web3.eth().logs(filter).map_err(move |e| {
-            error!("error getting block number {:?}", e);
-        });
-        Box::new(future)
-    }
-}
-
-impl<T: DuplexTransport + 'static> Future for BalanceCheck<T> {
-    type Item = ();
-    type Error = ();
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        loop {
-            let tx = self.tx.clone();
-            let next = match self.state {
-                BalanceCheckState::GetEndingBlock(ref mut future) => {
-                    let block = try_ready!(future.poll());
-                    let window_end = cmp::min(block.as_u64(), 1000);
-                    let future = self.build_next_window(0, window_end);
-                    BalanceCheckState::GetLogWindow(block.as_u64(), window_end, future)
-                }
-                BalanceCheckState::GetLogWindow(end, window_end, ref mut future) => {
-                    let logs = try_ready!(future.poll());
-                    info!("found {} logs with transfers between {} and {}", logs.len(), window_end, end);
-                    // Process existing logs
-                    logs.iter().for_each(|log| {
-                        if Some(true) == log.removed {
-                            return;
-                        }
-
-                        let sender_address: Address = log.topics[1].into();
-                        let receiver_address: Address = log.topics[2].into();
-                        let amount: U256 = log.data.0[..32].into();
-                        debug!("{} transferred {} to {}", sender_address, amount, receiver_address);
-                        // Don't care if source doesn't exist, because it is likely a mint in that case
-                        let zero = U256::zero();
-                        self.balances
-                            .entry(sender_address)
-                            .and_modify(|v| {
-                                if !v.is_zero() {
-                                    *v -= amount;
-                                }
-                            })
-                            .or_insert(zero);
-                        let dest_balance = self.balances.entry(receiver_address).or_insert(zero);
-                        *dest_balance += amount;
-                    });
-
-                    debug!("Window end is {} of {} blocks", window_end, end);
-                    // Setup next window
-                    if window_end < end {
-                        let next_window_end = cmp::min(end, window_end + 1000);
-                        let future = self.build_next_window(window_end + 1, next_window_end);
-                        BalanceCheckState::GetLogWindow(end, next_window_end, future)
-                    } else {
-                        let send_result = tx.unbounded_send(Ok(BalanceResponse::new(&Instant::now().duration_since(self.start), &self.balances.clone())));
-                        if send_result.is_err() {
-                            error!("error sending balance response");
-                        }
-                        return Ok(Async::Ready(()));
-                    }
-                }
-            };
-            self.state = next;
         }
     }
 }
@@ -247,8 +135,8 @@ pub struct StatusCheck {
 
 impl StatusCheck {
     fn new<T: DuplexTransport + 'static>(
-        homechain: &Rc<Network<T>>,
-        sidechain: &Rc<Network<T>>,
+        homechain: &Network<T>,
+        sidechain: &Network<T>,
         tx: &mpsc::UnboundedSender<Result<StatusResponse, ()>>,
     ) -> Self {
         let home_eth_future = homechain

@@ -11,7 +11,6 @@ use web3::futures::try_ready;
 use web3::types::{Address, FilterBuilder, Log, TransactionReceipt, H256, U256};
 use web3::{DuplexTransport, ErrorKind};
 
-use super::eth::contracts::TRANSFER_EVENT_SIGNATURE;
 use super::extensions::removed::{CancelRemoved, ExitOnLogRemoved};
 use super::extensions::timeout::SubscriptionState;
 use super::relay::{Network, NetworkType, TransferApprovalState};
@@ -19,15 +18,16 @@ use super::transfers::transfer::Transfer;
 
 /// Stream of transfer events that have been on the main chain for N blocks.
 /// N is confirmations per settings.
-pub struct WatchLiveTransfers<T: DuplexTransport + 'static> {
+pub struct WatchLiveLogs<T: DuplexTransport + 'static> {
+    // TODO Add the desired event signature & change name to just WatchLogs
     state: SubscriptionState<T, Log>,
     handle: reactor::Handle,
     source: Network<T>,
     target: Network<T>,
-    tx: mpsc::UnboundedSender<Transfer>,
+    tx: mpsc::UnboundedSender<(Log, TransactionReceipt)>,
 }
 
-impl<T: DuplexTransport + 'static> WatchLiveTransfers<T> {
+impl<T: DuplexTransport + 'static> WatchLiveLogs<T> {
     /// Returns a newly created WatchTransfers Stream
     ///
     /// # Arguments
@@ -37,13 +37,14 @@ impl<T: DuplexTransport + 'static> WatchLiveTransfers<T> {
     pub fn new(
         source: &Network<T>,
         target: &Network<T>,
-        tx: &mpsc::UnboundedSender<Transfer>,
+        event_signature: &'static str,
+        tx: &mpsc::UnboundedSender<(Log, TransactionReceipt)>,
         handle: &reactor::Handle,
     ) -> Self {
         let filter = FilterBuilder::default()
             .address(vec![source.token.address()])
             .topics(
-                Some(vec![TRANSFER_EVENT_SIGNATURE.into()]),
+                Some(vec![event_signature.into()]),
                 None,
                 Some(vec![source.relay.address().into()]),
                 None,
@@ -52,7 +53,7 @@ impl<T: DuplexTransport + 'static> WatchLiveTransfers<T> {
 
         let future = Box::new(source.web3.clone().eth_subscribe().subscribe_logs(filter));
 
-        WatchLiveTransfers {
+        WatchLiveLogs {
             source: source.clone(),
             target: target.clone(),
             state: SubscriptionState::Subscribing(future),
@@ -62,34 +63,24 @@ impl<T: DuplexTransport + 'static> WatchLiveTransfers<T> {
     }
 
     fn process_log(&self, log: &Log) -> Box<Future<Item = (), Error = ()>> {
-        let destination: Address = log.topics[1].into();
-        let amount: U256 = log.data.0[..32].into();
-        let removed = log.removed.unwrap_or(false);
         let network_type = self.source.network_type;
         let target = self.target.clone();
         let source = self.source.clone();
         let tx = self.tx.clone();
+        let removed = log.removed.unwrap_or(false);
+        let log = log.clone();
         log.transaction_hash.map_or_else(
             || {
                 warn!("log missing transaction hash on {:?}", source.network_type);
                 Box::new(Either::A(ok(())))
             },
             |tx_hash| {
-                // TODO all this should probably be done in ProcessTransfer & Process flush, just send a transaction receipt instead of a Transfer Object
                 let future = source
-                    .get_receipt(destination, amount, removed, tx_hash)
+                    .get_receipt(removed, tx_hash)
                     .and_then(move |receipt_option| receipt_option.ok_or(()))
                     .and_then(move |receipt| {
-                        // FIXME This forward should be in ProcessTransfer
-                        Transfer::from_receipt(destination, amount, removed, &receipt)
-                            .map_err(|e| error!("error creating transfer from receipt: {:?}", e))
-                    })
-                    .and_then(move |transfer| {
-                        info!(
-                            "transfer event on {:?} confirmed, approving {}",
-                            network_type, &transfer
-                        );
-                        tx.unbounded_send(transfer).unwrap();
+
+                        tx.unbounded_send((log.clone(), receipt)).unwrap();
                         Ok(())
                     })
                     .map_err(move |_| {
@@ -102,7 +93,7 @@ impl<T: DuplexTransport + 'static> WatchLiveTransfers<T> {
     }
 }
 
-impl<T: DuplexTransport + 'static> Future for WatchLiveTransfers<T> {
+impl<T: DuplexTransport + 'static> Future for WatchLiveLogs<T> {
     type Item = ();
     type Error = web3::Error;
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
@@ -149,7 +140,7 @@ impl<T: DuplexTransport + 'static> Future for WatchLiveTransfers<T> {
 }
 
 pub struct ProcessTransfer<T: DuplexTransport + 'static> {
-    rx: mpsc::UnboundedReceiver<Transfer>,
+    rx: mpsc::UnboundedReceiver<(Log, TransactionReceipt)>,
     handle: reactor::Handle,
     source: Network<T>,
     target: Network<T>,
@@ -159,7 +150,7 @@ impl<T: DuplexTransport + 'static> ProcessTransfer<T> {
     pub fn new(
         source: &Network<T>,
         target: &Network<T>,
-        rx: mpsc::UnboundedReceiver<Transfer>,
+        rx: mpsc::UnboundedReceiver<(Log, TransactionReceipt)>,
         handle: &reactor::Handle,
     ) -> Self {
         ProcessTransfer {
@@ -239,18 +230,29 @@ impl<T: DuplexTransport + 'static> Future for ProcessTransfer<T> {
     type Item = ();
     type Error = ();
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        let network_type = self.source.network_type;
         loop {
-            let transfer = try_ready!(self.rx.poll());
-            match transfer {
-                Some(t) => {
+            let next = try_ready!(self.rx.poll());
+            match next {
+                Some((log, receipt)) => {
+                    let destination: Address = log.topics[1].into();
+                    let amount: U256 = log.data.0[..32].into();
+                    let removed = log.removed.unwrap_or(false);
+                    let transfer = Transfer::from_receipt(destination, amount, removed, &receipt).map_err(|e| {
+                        error!("error getting transfer from receipt {:?}: {:?}", receipt, e);
+                    })?;
+                    info!(
+                        "transfer event on {:?} confirmed, approving {}",
+                        network_type, &transfer
+                    );
                     let value = {
                         let lock = self.source.pending.read().map_err(|e| {
                             error!("Failed to acquire read lock {:?}", e);
                         })?;
 
-                        lock.peek(&t.tx_hash).copied()
+                        lock.peek(&transfer.tx_hash).copied()
                     };
-                    self.advance_transfer_approval(t, value).map_err(|e| {
+                    self.advance_transfer_approval(transfer, value).map_err(|e| {
                         error!("Failed to acquire write lock {:?}", e);
                     })?;
                 }
@@ -271,37 +273,8 @@ mod tests {
     #[test]
     fn should_build_network_with_mock() {
         let mock = MockTransport::new();
-        Rc::new(mock.new_network(NetworkType::Home).unwrap());
-        Rc::new(mock.new_network(NetworkType::Side).unwrap());
-    }
-
-    #[test]
-    fn process_transfer_should_process_create_transfer_state_on_tx() {
-        // arrange
-        let mut eloop = tokio_core::reactor::Core::new().unwrap();
-        let handle = eloop.handle();
-        let mock = MockTransport::new();
-        let target = Rc::new(mock.new_network(NetworkType::Side).unwrap());
-        let (tx, rx) = mpsc::unbounded();
-        let processor = ProcessTransfer::new(rx, &target, &handle);
-        let transfer = Transfer {
-            destination: Address::zero(),
-            amount: U256::zero(),
-            tx_hash: H256::zero(),
-            block_hash: H256::zero(),
-            block_number: U256::zero(),
-            removed: false,
-        };
-        // act
-        let send_and_close = move |mut tx: mpsc::UnboundedSender<Transfer>| {
-            tx.unbounded_send(transfer).unwrap();
-            tx.close().unwrap();
-        };
-        send_and_close(tx);
-
-        // assert
-        assert!(eloop.run(processor).is_ok());
-        assert!(target.pending.read().unwrap().peek(&transfer.tx_hash).is_some());
+        mock.new_network(NetworkType::Home).unwrap();
+        mock.new_network(NetworkType::Side).unwrap();
     }
 
     #[test]
@@ -310,9 +283,10 @@ mod tests {
         let eloop = tokio_core::reactor::Core::new().unwrap();
         let handle = eloop.handle();
         let mock = MockTransport::new();
-        let target = Rc::new(mock.new_network(NetworkType::Side).unwrap());
-        let (_tx, rx) = mpsc::unbounded();
-        let processor = ProcessTransfer::new(rx, &target, &handle);
+        let source = mock.new_network(NetworkType::Home).unwrap();
+        let target = mock.new_network(NetworkType::Side).unwrap();
+        let (tx, rx) = mpsc::unbounded();
+        let processor = ProcessTransfer::new(&source, &target, rx, &handle);
         let transfer = Transfer {
             destination: Address::zero(),
             amount: U256::zero(),
@@ -325,7 +299,7 @@ mod tests {
         processor.advance_transfer_approval(transfer, None).unwrap();
         // assert
         assert_eq!(
-            target.pending.read().unwrap().peek(&transfer.tx_hash),
+            source.pending.read().unwrap().peek(&transfer.tx_hash),
             Some(&TransferApprovalState::Sent)
         );
     }
@@ -336,9 +310,10 @@ mod tests {
         let eloop = tokio_core::reactor::Core::new().unwrap();
         let handle = eloop.handle();
         let mock = MockTransport::new();
-        let target = Rc::new(mock.new_network(NetworkType::Side).unwrap());
-        let (_tx, rx) = mpsc::unbounded();
-        let processor = ProcessTransfer::new(rx, &target, &handle);
+        let source = mock.new_network(NetworkType::Home).unwrap();
+        let target = mock.new_network(NetworkType::Side).unwrap();
+        let (tx, rx) = mpsc::unbounded();
+        let processor = ProcessTransfer::new(&source, &target, rx, &handle);
         let transfer = Transfer {
             destination: Address::zero(),
             amount: U256::zero(),
@@ -352,7 +327,7 @@ mod tests {
             .advance_transfer_approval(transfer, Some(TransferApprovalState::Sent))
             .unwrap();
         // assert
-        assert_eq!(target.pending.read().unwrap().peek(&transfer.tx_hash), None);
+        assert_eq!(source.pending.read().unwrap().peek(&transfer.tx_hash), None);
     }
 
     #[test]
@@ -361,9 +336,10 @@ mod tests {
         let eloop = tokio_core::reactor::Core::new().unwrap();
         let handle = eloop.handle();
         let mock = MockTransport::new();
-        let target = Rc::new(mock.new_network(NetworkType::Side).unwrap());
-        let (_tx, rx) = mpsc::unbounded();
-        let processor = ProcessTransfer::new(rx, &target, &handle);
+        let source = mock.new_network(NetworkType::Home).unwrap();
+        let target = mock.new_network(NetworkType::Side).unwrap();
+        let (tx, rx) = mpsc::unbounded();
+        let processor = ProcessTransfer::new(&source, &target, rx, &handle);
         let transfer = Transfer {
             destination: Address::zero(),
             amount: U256::zero(),
@@ -378,7 +354,7 @@ mod tests {
             .unwrap();
         // assert
         assert_eq!(
-            target.pending.read().unwrap().peek(&transfer.tx_hash),
+            source.pending.read().unwrap().peek(&transfer.tx_hash),
             Some(&TransferApprovalState::Sent)
         );
     }
@@ -389,9 +365,10 @@ mod tests {
         let eloop = tokio_core::reactor::Core::new().unwrap();
         let handle = eloop.handle();
         let mock = MockTransport::new();
-        let target = Rc::new(mock.new_network(NetworkType::Side).unwrap());
-        let (_tx, rx) = mpsc::unbounded();
-        let processor = ProcessTransfer::new(rx, &target, &handle);
+        let source = mock.new_network(NetworkType::Home).unwrap();
+        let target = mock.new_network(NetworkType::Side).unwrap();
+        let (tx, rx) = mpsc::unbounded();
+        let processor = ProcessTransfer::new(&source, &target, rx, &handle);
         let transfer = Transfer {
             destination: Address::zero(),
             amount: U256::zero(),
@@ -406,7 +383,7 @@ mod tests {
             .unwrap();
         // assert
         assert_eq!(
-            target.pending.read().unwrap().peek(&transfer.tx_hash),
+            source.pending.read().unwrap().peek(&transfer.tx_hash),
             Some(&TransferApprovalState::Removed)
         );
     }
@@ -417,9 +394,10 @@ mod tests {
         let eloop = tokio_core::reactor::Core::new().unwrap();
         let handle = eloop.handle();
         let mock = MockTransport::new();
-        let target = Rc::new(mock.new_network(NetworkType::Side).unwrap());
-        let (_tx, rx) = mpsc::unbounded();
-        let processor = ProcessTransfer::new(rx, &target, &handle);
+        let source = mock.new_network(NetworkType::Home).unwrap();
+        let target = mock.new_network(NetworkType::Side).unwrap();
+        let (tx, rx) = mpsc::unbounded();
+        let processor = ProcessTransfer::new(&source, &target, rx, &handle);
         let transfer = Transfer {
             destination: Address::zero(),
             amount: U256::zero(),
@@ -432,7 +410,7 @@ mod tests {
         processor.advance_transfer_approval(transfer, None).unwrap();
         // assert
         assert_eq!(
-            target.pending.read().unwrap().peek(&transfer.tx_hash),
+            source.pending.read().unwrap().peek(&transfer.tx_hash),
             Some(&TransferApprovalState::Removed)
         );
     }
@@ -443,9 +421,10 @@ mod tests {
         let eloop = tokio_core::reactor::Core::new().unwrap();
         let handle = eloop.handle();
         let mock = MockTransport::new();
-        let target = Rc::new(mock.new_network(NetworkType::Side).unwrap());
-        let (_tx, rx) = mpsc::unbounded();
-        let processor = ProcessTransfer::new(rx, &target, &handle);
+        let source = mock.new_network(NetworkType::Home).unwrap();
+        let target = mock.new_network(NetworkType::Side).unwrap();
+        let (tx, rx) = mpsc::unbounded();
+        let processor = ProcessTransfer::new(&source, &target, rx, &handle);
         let transfer = Transfer {
             destination: Address::zero(),
             amount: U256::zero(),
@@ -459,6 +438,6 @@ mod tests {
             .advance_transfer_approval(transfer, Some(TransferApprovalState::Removed))
             .unwrap();
         // assert
-        assert_eq!(target.pending.read().unwrap().peek(&transfer.tx_hash), None);
+        assert_eq!(source.pending.read().unwrap().peek(&transfer.tx_hash), None);
     }
 }

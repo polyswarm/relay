@@ -104,7 +104,7 @@ mod tests {
         T: DuplexTransport + 'static,
     {
         fn cancel_removed(self, target: &Network<T>, tx_hash: H256) -> ExitOnLogRemoved<T, (), ()> {
-            ExitOnLogRemoved::<T, (), ()>::new(target.clone(), tx_hash, Box::new(self))
+            ExitOnLogRemoved::<T, (), ()>::new(target, tx_hash, Box::new(self))
         }
     }
 
@@ -114,9 +114,9 @@ mod tests {
         let mut eloop = tokio_core::reactor::Core::new().unwrap();
         let handle = eloop.handle();
         let mock = MockTransport::new();
-        let target = Rc::new(mock.new_network(NetworkType::Home).unwrap());
+        let target = mock.new_network(NetworkType::Home).unwrap();
         let future = ExitOnLogRemoved::<MockTransport, (), std::io::Error>::new(
-            target.clone(),
+            &target,
             H256::zero(),
             Box::new(reactor::Timeout::new(Duration::from_secs(1), &handle).unwrap()),
         );
@@ -137,9 +137,9 @@ mod tests {
         let mut eloop = tokio_core::reactor::Core::new().unwrap();
         let handle = eloop.handle();
         let mock = MockTransport::new();
-        let target = Rc::new(mock.new_network(NetworkType::Home).unwrap());
+        let target = mock.new_network(NetworkType::Home).unwrap();
         let future = ExitOnLogRemoved::<MockTransport, (), std::io::Error>::new(
-            target.clone(),
+            &target,
             H256::zero(),
             Box::new(reactor::Timeout::new(Duration::from_secs(1), &handle).unwrap()),
         );
@@ -155,7 +155,7 @@ mod tests {
         let mut eloop = tokio_core::reactor::Core::new().unwrap();
         let handle = eloop.handle();
         let mock = MockTransport::new();
-        let target = Rc::new(mock.new_network(NetworkType::Home).unwrap());
+        let target = mock.new_network(NetworkType::Home).unwrap();
         let future = TestCheckRemoved::new(&handle).cancel_removed(&target, H256::zero());
         // act
         target
@@ -174,7 +174,7 @@ mod tests {
         let mut eloop = tokio_core::reactor::Core::new().unwrap();
         let handle = eloop.handle();
         let mock = MockTransport::new();
-        let target = Rc::new(mock.new_network(NetworkType::Home).unwrap());
+        let target = mock.new_network(NetworkType::Home).unwrap();
         let future = TestCheckRemoved::new(&handle).cancel_removed(&target, H256::zero());
 
         // act
@@ -188,7 +188,7 @@ mod tests {
         // arrange
         let mut eloop = tokio_core::reactor::Core::new().unwrap();
         let mock = MockTransport::new();
-        let target = Rc::new(mock.new_network(NetworkType::Home).unwrap());
+        let target = mock.new_network(NetworkType::Home).unwrap();
         let future = TestCheckRemoved {
             inner: Box::new(web3::futures::future::err(())),
         }

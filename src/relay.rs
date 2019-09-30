@@ -17,11 +17,12 @@ use super::anchors::anchor::HandleAnchors;
 use super::errors::OperationError;
 use super::eth::utils::clean_0x;
 use super::server::{HandleRequests, RequestType};
-use super::transfers::live::WatchLiveTransfers;
+use super::transfers::live::WatchLiveLogs;
 use super::transfers::past::RecheckPastTransferLogs;
 //use transfers::flush::WatchFlush;
 use super::extensions::removed::{CancelRemoved, ExitOnLogRemoved};
 use super::transfers::live::ProcessTransfer;
+use eth::contracts::TRANSFER_EVENT_SIGNATURE;
 
 const FREE_GAS_PRICE: u64 = 0;
 const GAS_LIMIT: u64 = 200_000;
@@ -329,6 +330,11 @@ impl<T: DuplexTransport + 'static> Network<T> {
     /// * `handle` - Handle to spawn new tasks
     //    pub fn watch_flush_logs(self, target: &Network<T>, handle: &reactor::Handle) -> WatchFlush<T> {
     //        // This on just watches right inside, no tx to send to
+    //        let watch = WatchLiveLogs::new(self, target, FLUSH_EVENT_SIGNATURE, &tx, handle)
+    //          .map_err(move |e| error!("error watching transaction logs {:?}", e)
+    //        );
+    //        We do this in a separately spawned task because we have to wait 20 blocks per
+    //        handle.spawn(watch);
     //        WatchFlush::new(self, handle).map_err(move |e| error!("error watching transaction logs {:?}", e))
     //    }
 
@@ -341,7 +347,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
     /// * `handle` - Handle to spawn new tasks
     pub fn watch_transfer_logs(&self, target: &Network<T>, handle: &reactor::Handle) -> ProcessTransfer<T> {
         let (tx, rx) = mpsc::unbounded();
-        let watch = WatchLiveTransfers::new(self, target, &tx, handle)
+        let watch = WatchLiveLogs::new(self, target, TRANSFER_EVENT_SIGNATURE, &tx, handle)
             .map_err(move |e| error!("error watching transaction logs {:?}", e));
         // We do this in a separately spawned task because we have to wait 20 blocks per
         handle.spawn(watch);
@@ -388,8 +394,6 @@ impl<T: DuplexTransport + 'static> Network<T> {
     ///The state of the transaction is stored on the target chain
     pub fn get_receipt(
         &self,
-        destination: Address,
-        amount: U256,
         removed: bool,
         transaction_hash: H256,
     ) -> Box<Future<Item = Option<TransactionReceipt>, Error = ()>> {

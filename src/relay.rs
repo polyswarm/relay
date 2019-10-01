@@ -15,14 +15,14 @@ use web3::{DuplexTransport, Web3};
 
 use super::anchors::anchor::HandleAnchors;
 use super::errors::OperationError;
+use super::eth::contracts::{FLUSH_EVENT_SIGNATURE, TRANSFER_EVENT_SIGNATURE};
 use super::eth::utils::clean_0x;
+use super::extensions::removed::{CancelRemoved, ExitOnLogRemoved};
 use super::server::{HandleRequests, RequestType};
+use super::transfers::flush::ProcessFlush;
+use super::transfers::live::ProcessTransfer;
 use super::transfers::live::WatchLiveLogs;
 use super::transfers::past::RecheckPastTransferLogs;
-//use transfers::flush::WatchFlush;
-use super::extensions::removed::{CancelRemoved, ExitOnLogRemoved};
-use super::transfers::live::ProcessTransfer;
-use eth::contracts::TRANSFER_EVENT_SIGNATURE;
 
 const FREE_GAS_PRICE: u64 = 0;
 const GAS_LIMIT: u64 = 200_000;
@@ -80,13 +80,13 @@ impl<T: DuplexTransport + 'static> Relay<T> {
         rx: mpsc::UnboundedReceiver<RequestType>,
         handle: &reactor::Handle,
     ) -> impl Future<Item = (), Error = ()> {
-        //            .join(self.sidechain.clone().watch_flush_logs(&self.homechain, handle))
         self.sidechain
             .handle_anchors(&self.homechain, handle)
             .join(self.homechain.watch_transfer_logs(&self.sidechain, handle))
             .join(self.sidechain.watch_transfer_logs(&self.homechain, handle))
             .join(self.homechain.recheck_past_transfer_logs(&self.sidechain, handle))
             .join(self.sidechain.recheck_past_transfer_logs(&self.homechain, handle))
+            .join(self.sidechain.watch_flush_logs(&self.homechain, handle))
             .join(self.handle_requests(rx, handle))
             .and_then(|_| Ok(()))
             .map_err(|_| {
@@ -201,7 +201,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
             keydir: keydir.to_string(),
             password: password.to_string(),
             nonce: Rc::new(nonce),
-            pending: Rc::new(RwLock::new(LruCache::new(1024))),
+            pending: Rc::new(RwLock::new(LruCache::new(4096))),
             retries,
         })
     }
@@ -328,15 +328,14 @@ impl<T: DuplexTransport + 'static> Network<T> {
     ///
     /// * `target` - Network where to anchor the block headers
     /// * `handle` - Handle to spawn new tasks
-    //    pub fn watch_flush_logs(self, target: &Network<T>, handle: &reactor::Handle) -> WatchFlush<T> {
-    //        // This on just watches right inside, no tx to send to
-    //        let watch = WatchLiveLogs::new(self, target, FLUSH_EVENT_SIGNATURE, &tx, handle)
-    //          .map_err(move |e| error!("error watching transaction logs {:?}", e)
-    //        );
-    //        We do this in a separately spawned task because we have to wait 20 blocks per
-    //        handle.spawn(watch);
-    //        WatchFlush::new(self, handle).map_err(move |e| error!("error watching transaction logs {:?}", e))
-    //    }
+    pub fn watch_flush_logs(self, target: &Network<T>, handle: &reactor::Handle) -> ProcessFlush<T> {
+        // This on just watches right inside, no tx to send to
+        let watch = WatchLiveLogs::new(self, target, FLUSH_EVENT_SIGNATURE, &tx, handle)
+            .map_err(move |e| error!("error watching transaction logs {:?}", e));
+        // We do this in a separately spawned task because we have to wait 20 blocks per
+        handle.spawn(watch);
+        ProcessFlush::new(self, handle).map_err(move |e| error!("error watching transaction logs {:?}", e))
+    }
 
     /// Returns a ProcessTransfer Future for this chain.
     /// Watches the self network, and sends transactions to the target network

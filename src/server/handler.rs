@@ -22,7 +22,7 @@ pub struct BalanceQuery {
 }
 
 impl BalanceQuery {
-    fn new(address: Address) -> Self {
+    pub fn new(address: Address) -> Self {
         BalanceQuery { address }
     }
 }
@@ -103,13 +103,14 @@ impl<T: DuplexTransport + 'static> Future for HandleRequests<T> {
                     let future = FindTransferInTransaction::new(&source, &tx_hash)
                         .and_then(move |transfers| {
                             let handle = handle.clone();
+                            let source = source.clone();
                             let target = target.clone();
                             let futures: Vec<ValidateAndApproveTransfer<T>> = transfers
                                 .iter()
                                 .map(move |transfer| {
                                     let handle = handle.clone();
                                     let target = target.clone();
-                                    ValidateAndApproveTransfer::new(&target, &handle, &transfer)
+                                    ValidateAndApproveTransfer::new(&source, &target, &handle, &transfer)
                                 })
                                 .collect();
                             future::join_all(futures)

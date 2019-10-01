@@ -203,7 +203,7 @@ impl RecheckPastTransferLogs {
             .for_each(move |transfer| {
                 let target = target.clone();
                 let handle = handle.clone();
-                ValidateAndApproveTransfer::new(&target, &handle, &transfer)
+                ValidateAndApproveTransfer::new(&source, &target, &handle, &transfer)
             })
             .and_then(move |_| {
                 // This is only ever triggered when the FindMissedTransfers has an error, and closes the Sender.
@@ -223,6 +223,7 @@ impl Future for RecheckPastTransferLogs {
 
 /// Future to check a transfer against the contract and approve is necessary
 pub struct ValidateAndApproveTransfer<T: DuplexTransport + 'static> {
+    source: Network<T>,
     target: Network<T>,
     handle: reactor::Handle,
     transfer: Transfer,
@@ -237,13 +238,14 @@ impl<T: DuplexTransport + 'static> ValidateAndApproveTransfer<T> {
     /// * `target` - Network where the transfer will be approved for a withdrawal
     /// * `handle` - Handle to spawn new futures
     /// * `transfer` - Transfer event to check/approve
-    pub fn new(target: &Network<T>, handle: &reactor::Handle, transfer: &Transfer) -> Self {
+    pub fn new(source: &Network<T>, target: &Network<T>, handle: &reactor::Handle, transfer: &Transfer) -> Self {
         let network_type = target.network_type;
         let future = transfer.check_withdrawal(&target).map_err(move |e| {
             error!("error checking withdrawal for approval on {:?}: {:?}", network_type, e);
         });
 
         ValidateAndApproveTransfer {
+            source: source.clone(),
             target: target.clone(),
             handle: handle.clone(),
             transfer: *transfer,

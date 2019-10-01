@@ -84,6 +84,7 @@ impl Transfer {
     /// * `target` - Network where the withdrawals is performed
     pub fn approve_withdrawal<T: DuplexTransport + 'static>(
         &self,
+        source: &Network<T>,
         target: &Network<T>,
     ) -> Box<Future<Item = (), Error = ()>> {
         info!("approving withdrawal on {:?}: {} ", target.network_type, self);
@@ -95,7 +96,7 @@ impl Transfer {
                 &ApproveParams::from(*self),
                 target.retries,
             )
-            .cancel_removed(&target, self.tx_hash)
+            .cancel_removed(&source, self.tx_hash)
             .and_then(move |success| {
                 success.map_or_else(
                     || {

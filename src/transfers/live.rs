@@ -79,7 +79,6 @@ impl<T: DuplexTransport + 'static> WatchLiveLogs<T> {
                     .get_receipt(removed, tx_hash)
                     .and_then(move |receipt_option| receipt_option.ok_or(()))
                     .and_then(move |receipt| {
-
                         tx.unbounded_send((log.clone(), receipt)).unwrap();
                         Ok(())
                     })
@@ -183,7 +182,8 @@ impl<T: DuplexTransport + 'static> ProcessTransfer<T> {
                         .pending
                         .write()?
                         .put(transfer.tx_hash, TransferApprovalState::Sent);
-                    self.handle.spawn(transfer.approve_withdrawal(&self.target));
+                    self.handle
+                        .spawn(transfer.approve_withdrawal(&self.source, &self.target));
                 }
             }
             None => {
@@ -210,10 +210,11 @@ impl<T: DuplexTransport + 'static> ProcessTransfer<T> {
                         .put(transfer.tx_hash, TransferApprovalState::Sent);
 
                     // LRU Cache will drop values, so we need to recheck the chain
+                    let source = self.source.clone();
                     let target = self.target.clone();
                     let approve_future = transfer.check_withdrawal(&self.target).and_then(move |not_approved| {
                         if not_approved {
-                            Either::A(transfer.approve_withdrawal(&target))
+                            Either::A(transfer.approve_withdrawal(&source, &target))
                         } else {
                             Either::B(ok(()))
                         }

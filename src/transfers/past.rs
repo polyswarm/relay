@@ -199,7 +199,8 @@ impl RecheckPastTransferLogs {
     ) -> Self {
         let handle = handle.clone();
         let target = target.clone();
-        let future = CheckPastTransfers::new(source, &handle)
+        let source = source.clone();
+        let future = CheckPastTransfers::new(&source, &handle)
             .for_each(move |transfer| {
                 let target = target.clone();
                 let handle = handle.clone();
@@ -260,13 +261,14 @@ impl<T: DuplexTransport + 'static> Future for ValidateAndApproveTransfer<T> {
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         let needs_approval = try_ready!(self.future.poll());
         if needs_approval {
+            let source = self.source.clone();
             let target = self.target.clone();
             let handle = self.handle.clone();
             info!(
                 "approving missed transfer on {:?}: {:?}",
                 target.network_type, self.transfer
             );
-            handle.spawn(self.transfer.approve_withdrawal(&target));
+            handle.spawn(self.transfer.approve_withdrawal(&source, &target));
         }
         Ok(Async::Ready(()))
     }

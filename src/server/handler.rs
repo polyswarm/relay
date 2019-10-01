@@ -35,7 +35,7 @@ impl Tokenize for BalanceQuery {
 
 /// Withdrawal event added to contract after a transfer
 #[derive(Debug, Clone)]
-pub struct BalanceOf(U256);
+pub struct BalanceOf(pub U256);
 
 impl Detokenize for BalanceOf {
     /// Creates a new instance from parsed ABI tokens.

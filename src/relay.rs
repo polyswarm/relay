@@ -328,13 +328,14 @@ impl<T: DuplexTransport + 'static> Network<T> {
     ///
     /// * `target` - Network where to anchor the block headers
     /// * `handle` - Handle to spawn new tasks
-    pub fn watch_flush_logs(self, target: &Network<T>, handle: &reactor::Handle) -> ProcessFlush<T> {
+    pub fn watch_flush_logs(&self, target: &Network<T>, handle: &reactor::Handle) -> ProcessFlush<T> {
+        let (tx, rx) = mpsc::unbounded();
         // This on just watches right inside, no tx to send to
         let watch = WatchLiveLogs::new(self, target, FLUSH_EVENT_SIGNATURE, &tx, handle)
             .map_err(move |e| error!("error watching transaction logs {:?}", e));
         // We do this in a separately spawned task because we have to wait 20 blocks per
         handle.spawn(watch);
-        ProcessFlush::new(self, handle).map_err(move |e| error!("error watching transaction logs {:?}", e))
+        ProcessFlush::new(self, target, rx, handle)
     }
 
     /// Returns a ProcessTransfer Future for this chain.

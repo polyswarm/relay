@@ -16,8 +16,8 @@ use super::extensions::timeout::SubscriptionState;
 use super::relay::{Network, NetworkType, TransferApprovalState};
 use super::transfers::transfer::Transfer;
 
-/// Stream of transfer events that have been on the main chain for N blocks.
-/// N is confirmations per settings.
+/// Stream of events that have match the given filter.
+/// Passes the transaction receipt and log over the given tx upon confirmation (or removal)
 pub struct WatchLiveLogs<T: DuplexTransport + 'static> {
     // TODO Add the desired event signature & change name to just WatchLogs
     state: SubscriptionState<T, Log>,
@@ -33,7 +33,7 @@ impl<T: DuplexTransport + 'static> WatchLiveLogs<T> {
     /// # Arguments
     ///
     /// * `source` - Network where the transfers are performed
-    /// * `handle` - Handle to spawn naew futures
+    /// * `handle` - Handle to spawn new futures
     pub fn new(
         source: &Network<T>,
         target: &Network<T>,
@@ -128,6 +128,8 @@ impl<T: DuplexTransport + 'static> Future for WatchLiveLogs<T> {
     }
 }
 
+/// Process logs/receipt for Transfer events seen on the chain
+/// Tracks the state of the transfer and triggers a withdrawal (or unwithdrawal on removal) on the target chain
 pub struct ProcessTransfer<T: DuplexTransport + 'static> {
     rx: mpsc::UnboundedReceiver<(Log, TransactionReceipt)>,
     handle: reactor::Handle,

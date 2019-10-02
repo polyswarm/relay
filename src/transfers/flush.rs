@@ -25,6 +25,7 @@ use web3::helpers::CallFuture;
 use web3::types::{Address, BlockNumber, Bytes, FilterBuilder, Log, Transaction, TransactionReceipt, H256, U256};
 use web3::{contract, DuplexTransport, Transport};
 
+/// struct for taking the FlushBlockQuery  and parsing the Tokens
 #[derive(Debug, Clone)]
 pub struct FlushBlock(U256);
 
@@ -44,6 +45,7 @@ impl Detokenize for FlushBlock {
     }
 }
 
+/// Query for getting the current FlushBlock from the relay contract
 pub struct FlushBlockQuery {}
 
 impl FlushBlockQuery {
@@ -64,6 +66,7 @@ enum CheckForPastFlushState {
     GetFlushReceipt(Log, Box<Future<Item = Option<TransactionReceipt>, Error = ()>>),
 }
 
+/// Future for checking if the flush block is set in relay, then getting the transaction receipt if so
 pub struct CheckForPastFlush<T: DuplexTransport + 'static> {
     state: CheckForPastFlushState,
     source: Network<T>,
@@ -71,6 +74,11 @@ pub struct CheckForPastFlush<T: DuplexTransport + 'static> {
 }
 
 impl<T: DuplexTransport + 'static> CheckForPastFlush<T> {
+    /// Create a new CheckForPastFlush Future
+    /// # Arguments
+    ///
+    /// * `source` - Network being flushed
+    /// * `tx` - Sender to trigger Flush event processor
     pub fn new(source: &Network<T>, tx: mpsc::UnboundedSender<(Log, TransactionReceipt)>) -> Self {
         let flush_block_query = FlushBlockQuery::new();
         let flush_block_future = source
@@ -92,7 +100,10 @@ impl<T: DuplexTransport + 'static> CheckForPastFlush<T> {
             tx: tx.clone(),
         }
     }
-
+    /// Create a Future to get the flush even logs given the block the event occurred at
+    /// # Arguments
+    ///
+    /// * `block` - Block number for the flush event
     pub fn get_flush_log(&self, block_number: u64) -> Box<Future<Item = Vec<Log>, Error = ()>> {
         // Not sure if there is a better way to get the log we want, probably get block or something
         let filter = FilterBuilder::default()
@@ -104,9 +115,8 @@ impl<T: DuplexTransport + 'static> CheckForPastFlush<T> {
         Box::new(
             self.source
                 .web3
-                .eth_subscribe()
-                .subscribe_logs(filter)
-                .and_then(|log| log.take(1).collect())
+                .eth()
+                .logs(filter)
                 .map_err(|e| {
                     error!("error getting flush log: {:?}", e);
                 }),
@@ -184,6 +194,12 @@ enum ProcessFlushState<T: DuplexTransport + 'static> {
     WithdrawLeftovers(WithdrawLeftovers<T>),
 }
 
+/// Process Flush Log/Receipts that come across and trigger a multi step flush
+/// 1. Check all balances
+/// 1. Filter contracts out
+/// 1. Filter out balances that don't have more than the fee cost to withdraw
+/// 1. Withdraw all balances to the same wallet on target chain
+/// 1. Withdraw any leftovers in the contract after all withdrawals confirmed
 pub struct ProcessFlush<T: DuplexTransport + 'static> {
     state: ProcessFlushState<T>,
     source: Network<T>,
@@ -193,6 +209,12 @@ pub struct ProcessFlush<T: DuplexTransport + 'static> {
 }
 
 impl<T: DuplexTransport + 'static> ProcessFlush<T> {
+    /// Create a new ProcessFlush Future
+    /// # Arguments
+    ///
+    /// * `source` - Network being flushed
+    /// * `target` - Network to send all the token balances
+    /// * `rx` - Receiver that triggers on Flush event
     pub fn new(
         source: &Network<T>,
         target: &Network<T>,
@@ -309,6 +331,7 @@ impl<T: DuplexTransport + 'static> Future for ProcessFlush<T> {
     }
 }
 
+/// Fee Wallet struct for taking the FeeWalletQuery and parsing the Tokens
 #[derive(Debug, Clone)]
 pub struct FeeWallet(Address);
 
@@ -328,6 +351,7 @@ impl Detokenize for FeeWallet {
     }
 }
 
+/// Query with args for getting the fee wallet
 pub struct FeeWalletQuery {}
 
 impl FeeWalletQuery {
@@ -348,6 +372,8 @@ enum WithdrawLeftoversState {
     Withdraw(Box<Future<Item = (), Error = ()>>),
 }
 
+/// Future that gets the balance of the relay contract on target chain.
+/// Then, it withdraws that balance to the fee wallet
 pub struct WithdrawLeftovers<T: DuplexTransport + 'static> {
     state: WithdrawLeftoversState,
     source: Network<T>,
@@ -357,6 +383,12 @@ pub struct WithdrawLeftovers<T: DuplexTransport + 'static> {
 }
 
 impl<T: DuplexTransport + 'static> WithdrawLeftovers<T> {
+    /// Create a new WithdrawLeftovers Future
+    /// # Arguments
+    ///
+    /// * `source` - Network being flushed
+    /// * `target` - Network to send all the token balances
+    /// * `flush_receipt` - Transaction receipt for the flush event
     fn new(source: &Network<T>, target: &Network<T>, flush_receipt: &TransactionReceipt) -> Self {
         let state = WithdrawLeftoversState::GetBalance(WithdrawLeftovers::get_balance(&target));
         WithdrawLeftovers {
@@ -368,6 +400,10 @@ impl<T: DuplexTransport + 'static> WithdrawLeftovers<T> {
         }
     }
 
+    /// Get a future to find the balance of the relay address
+    /// # Arguments
+    ///
+    /// * `target` - Network being flushed
     fn get_balance(target: &Network<T>) -> Box<Future<Item = BalanceOf, Error = ()>> {
         let relay_contract_balance_query = BalanceQuery::new(target.relay.address());
         let target = target.clone();
@@ -388,6 +424,10 @@ impl<T: DuplexTransport + 'static> WithdrawLeftovers<T> {
         )
     }
 
+    /// Get a future to find the fee wallet for the target chain
+    /// # Arguments
+    ///
+    /// * `target` - Network being flushed
     fn get_fee_wallet(target: &Network<T>) -> Box<Future<Item = FeeWallet, Error = ()>> {
         let fee_wallet_query = FeeWalletQuery::new();
         let target = target.clone();
@@ -451,6 +491,7 @@ impl<T: DuplexTransport + 'static> Future for WithdrawLeftovers<T> {
     }
 }
 
+/// Fees struct for taking the FeeQuery and parsing the Tokens
 #[derive(Debug, Clone)]
 pub struct Fees(U256);
 
@@ -470,6 +511,7 @@ impl Detokenize for Fees {
     }
 }
 
+/// Query with args for getting the fees
 pub struct FeeQuery {}
 
 impl FeeQuery {
@@ -484,13 +526,19 @@ impl Tokenize for FeeQuery {
     }
 }
 
+/// FilterLowBalance Future that takes a list of wallets, and filters out that have a balance below the fee cost to withdraw
 pub struct FilterLowBalance {
     future: Box<Future<Item = Fees, Error = ()>>,
-    balances: Vec<(Address, U256)>,
+    wallets: Vec<(Address, U256)>,
 }
 
 impl FilterLowBalance {
-    pub fn new<T: DuplexTransport + 'static>(target: &Network<T>, balances: Vec<(Address, U256)>) -> Self {
+    /// Create a new FilterContracts Future
+    /// # Arguments
+    ///
+    /// * `source` - Network where the wallets may be contracts
+    /// * `wallets` - Vector of tuples with Address and Balances
+    pub fn new<T: DuplexTransport + 'static>(target: &Network<T>, wallets: Vec<(Address, U256)>) -> Self {
         // Get contract data
         let future = target
             .relay
@@ -507,7 +555,7 @@ impl FilterLowBalance {
 
         FilterLowBalance {
             future: Box::new(future),
-            balances,
+            wallets,
         }
     }
 }
@@ -519,7 +567,7 @@ impl Future for FilterLowBalance {
         let fee = try_ready!(self.future.poll());
         let fee_value = fee.0;
         let filtered = self
-            .balances
+            .wallets
             .iter()
             .filter_map(|(address, balance)| {
                 if *balance > fee_value {
@@ -533,12 +581,18 @@ impl Future for FilterLowBalance {
     }
 }
 
+/// FilterContract Future that takes a list of wallets, and filters out any that are contracts
 pub struct FilterContracts {
     future: Box<Future<Item = Vec<Bytes>, Error = ()>>,
     wallets: Vec<(Address, U256)>,
 }
 
 impl FilterContracts {
+    /// Create a new FilterContracts Future
+    /// # Arguments
+    ///
+    /// * `source` - Network where the wallets may be contracts
+    /// * `wallets` - Vector of tuples with Address and Balances
     pub fn new<T: DuplexTransport + 'static>(source: &Network<T>, wallets: Vec<(Address, U256)>) -> Self {
         // Get contract data
         // For whatever reason, doing this as an iter().map().collect() did not work
@@ -583,6 +637,9 @@ pub enum CheckBalancesState {
     GetLogWindow(u64, u64, Box<Future<Item = Vec<Log>, Error = ()>>),
 }
 
+/// Get all balances for all wallets with tokens by looking over the entire history of the chain.
+/// Keep track of all balances, and add and remove as transfers occur
+/// In order to avoid crashes, it does this by looking at windows of 1000 blocks rather than the whole chain
 pub struct CheckBalances<T: DuplexTransport + 'static> {
     source: Network<T>,
     state: CheckBalancesState,
@@ -590,6 +647,11 @@ pub struct CheckBalances<T: DuplexTransport + 'static> {
 }
 
 impl<T: DuplexTransport + 'static> CheckBalances<T> {
+    /// Create a new CheckBalance Future
+    /// # Arguments
+    ///
+    /// * `source` - Network where the transfers were performed
+    /// * `block` - Optional ending block, gets latest if None
     fn new(source: &Network<T>, block: Option<U256>) -> Self {
         let state = match block {
             Some(b) => {
@@ -614,6 +676,12 @@ impl<T: DuplexTransport + 'static> CheckBalances<T> {
         }
     }
 
+    /// Build a filter and look at all logs in the given range for transfer events.
+    /// # Arguments
+    ///
+    /// * `source` - Network where the transfers were performed
+    /// * `start` - Start of the next window
+    /// * `end` - End of the next window
     fn build_next_window(source: &Network<T>, start: u64, end: u64) -> Box<Future<Item = Vec<Log>, Error = ()>> {
         let token_address: Address = source.token.address();
         let filter = FilterBuilder::default()

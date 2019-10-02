@@ -335,7 +335,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
             .map_err(move |e| error!("error watching transaction logs {:?}", e));
         // We do this in a separately spawned task because we have to wait 20 blocks per
         handle.spawn(watch);
-        ProcessFlush::new(self, target, rx, handle)
+        ProcessFlush::new(self, target, rx)
     }
 
     /// Returns a ProcessTransfer Future for this chain.

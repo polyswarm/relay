@@ -1,3 +1,4 @@
+use actix_web::web::block;
 use eth::contracts::{FLUSH_EVENT_SIGNATURE, TRANSFER_EVENT_SIGNATURE};
 use ethabi::Token;
 use extensions::removed::{CancelRemoved, ExitOnLogRemoved};
@@ -24,6 +25,156 @@ use web3::helpers::CallFuture;
 use web3::types::{Address, BlockNumber, Bytes, FilterBuilder, Log, Transaction, TransactionReceipt, H256, U256};
 use web3::{contract, DuplexTransport, Transport};
 
+#[derive(Debug, Clone)]
+pub struct FlushBlock(U256);
+
+impl Detokenize for FlushBlock {
+    /// Creates a new instance from parsed ABI tokens.
+    fn from_tokens(tokens: Vec<Token>) -> Result<Self, contract::Error>
+    where
+        Self: Sized,
+    {
+        let block = tokens[0].clone().to_uint().ok_or_else(|| {
+            contract::Error::from_kind(contract::ErrorKind::Msg(
+                "cannot parse flush blockfrom contract response".to_string(),
+            ))
+        })?;
+        debug!("flush block: {:?}", block);
+        Ok(FlushBlock(block))
+    }
+}
+
+pub struct FlushBlockQuery {}
+
+impl FlushBlockQuery {
+    fn new() -> Self {
+        FlushBlockQuery {}
+    }
+}
+
+impl Tokenize for FlushBlockQuery {
+    fn into_tokens(self) -> Vec<Token> {
+        vec![]
+    }
+}
+
+enum CheckForPastFlushState {
+    CheckFlushBlock(Box<Future<Item = FlushBlock, Error = ()>>),
+    GetFlushLog(Box<Future<Item = Vec<Log>, Error = ()>>),
+    GetFlushReceipt(Log, Box<Future<Item = Option<TransactionReceipt>, Error = ()>>),
+}
+
+pub struct CheckForPastFlush<T: DuplexTransport + 'static> {
+    state: CheckForPastFlushState,
+    source: Network<T>,
+    tx: mpsc::UnboundedSender<(Log, TransactionReceipt)>,
+}
+
+impl<T: DuplexTransport + 'static> CheckForPastFlush<T> {
+    pub fn new(source: &Network<T>, tx: mpsc::UnboundedSender<(Log, TransactionReceipt)>) -> Self {
+        let flush_block_query = FlushBlockQuery::new();
+        let flush_block_future = source
+            .token
+            .query::<FlushBlock, Address, BlockNumber, FlushBlockQuery>(
+                "flushBlock",
+                flush_block_query,
+                source.account,
+                Options::default(),
+                BlockNumber::Latest,
+            )
+            .map_err(|e| {
+                error!("error retrieving flush block: {:?}", e);
+                ()
+            });
+        CheckForPastFlush {
+            state: CheckForPastFlushState::CheckFlushBlock(Box::new(flush_block_future)),
+            source: source.clone(),
+            tx: tx.clone(),
+        }
+    }
+
+    pub fn get_flush_log(&self, block_number: u64) -> Box<Future<Item = Vec<Log>, Error = ()>> {
+        // Not sure if there is a better way to get the log we want, probably get block or something
+        let filter = FilterBuilder::default()
+            .address(vec![self.source.relay.address()])
+            .from_block(BlockNumber::from(block_number - 1))
+            .to_block(BlockNumber::Number(block_number + 1))
+            .topics(Some(vec![FLUSH_EVENT_SIGNATURE.into()]), None, None, None)
+            .build();
+        Box::new(
+            self.source
+                .web3
+                .eth_subscribe()
+                .subscribe_logs(filter)
+                .and_then(|log| log.take(1).collect())
+                .map_err(|e| {
+                    error!("error getting flush log: {:?}", e);
+                }),
+        )
+    }
+}
+
+impl<T: DuplexTransport + 'static> Future for CheckForPastFlush<T> {
+    type Item = ();
+    type Error = ();
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        loop {
+            let source = self.source.clone();
+            let tx = self.tx.clone();
+            let next = match self.state {
+                CheckForPastFlushState::CheckFlushBlock(ref mut future) => {
+                    let block = try_ready!(future.poll());
+                    let block_number = block.0.as_u64();
+                    if block_number > 0 {
+                        let future = self.get_flush_log(block_number);
+                        CheckForPastFlushState::GetFlushLog(future)
+                    } else {
+                        return Ok(Async::Ready(()));
+                    }
+                }
+                CheckForPastFlushState::GetFlushLog(ref mut stream) => {
+                    let logs = try_ready!(stream.poll());
+                    if logs.len() > 0 {
+                        let ref log = logs[0];
+                        let removed = log.removed.unwrap_or(false);
+                        match log.transaction_hash {
+                            Some(tx_hash) => {
+                                let future = source.get_receipt(removed, tx_hash);
+                                CheckForPastFlushState::GetFlushReceipt(log.clone(), Box::new(future))
+                            }
+                            None => {
+                                error!("flush log missing transaction hash");
+                                return Err(());
+                            }
+                        }
+                    } else {
+                        error!("Didn't find any flush event at flushBlock");
+                        return Ok(Async::Ready(()));
+                    }
+                }
+                CheckForPastFlushState::GetFlushReceipt(ref log, ref mut future) => {
+                    let receipt_option = try_ready!(future.poll());
+                    match receipt_option {
+                        Some(receipt) => {
+                            let send_result = tx.unbounded_send((log.clone(), receipt));
+                            if send_result.is_err() {
+                                error!("error sending log & receipt");
+                                return Err(());
+                            }
+                            return Ok(Async::Ready(()));
+                        }
+                        None => {
+                            error!("error getting flush receipt");
+                            return Err(());
+                        }
+                    }
+                }
+            };
+            self.state = next;
+        }
+    }
+}
+
 enum ProcessFlushState<T: DuplexTransport + 'static> {
     Wait,
     CheckBalances(CheckBalances<T>),
@@ -38,7 +189,6 @@ pub struct ProcessFlush<T: DuplexTransport + 'static> {
     source: Network<T>,
     target: Network<T>,
     rx: mpsc::UnboundedReceiver<(Log, TransactionReceipt)>,
-    handle: reactor::Handle,
     flush_receipt: Option<TransactionReceipt>,
 }
 
@@ -47,14 +197,12 @@ impl<T: DuplexTransport + 'static> ProcessFlush<T> {
         source: &Network<T>,
         target: &Network<T>,
         rx: mpsc::UnboundedReceiver<(Log, TransactionReceipt)>,
-        handle: &reactor::Handle,
     ) -> Self {
         ProcessFlush {
             state: ProcessFlushState::Wait,
             source: source.clone(),
             target: target.clone(),
             rx,
-            handle: handle.clone(),
             flush_receipt: None,
         }
     }
@@ -206,7 +354,6 @@ pub struct WithdrawLeftovers<T: DuplexTransport + 'static> {
     target: Network<T>,
     receipt: TransactionReceipt,
     balance: Option<U256>,
-    fee_wallet: Option<Address>,
 }
 
 impl<T: DuplexTransport + 'static> WithdrawLeftovers<T> {
@@ -218,7 +365,6 @@ impl<T: DuplexTransport + 'static> WithdrawLeftovers<T> {
             target: target.clone(),
             receipt: flush_receipt.clone(),
             balance: None,
-            fee_wallet: None,
         }
     }
 

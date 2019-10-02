@@ -1,4 +1,3 @@
-use std::rc::Rc;
 use tokio_core::reactor;
 use web3::futures::future;
 use web3::futures::prelude::*;

@@ -1,19 +1,16 @@
+use actix_web::http::StatusCode;
+use actix_web::{middleware, web, App, HttpResponse, HttpServer};
 use serde_derive::{Deserialize, Serialize};
 use std::str::FromStr;
 use std::thread;
-use std::time::Duration;
 use web3::futures::future;
 use web3::futures::prelude::*;
 use web3::futures::sync::mpsc;
-use web3::types::{Address, H256, U256};
-
-use actix_web::http::StatusCode;
-use actix_web::{middleware, web, App, HttpResponse, HttpServer};
+use web3::types::{H256, U256};
 
 use super::errors::EndpointError;
 use super::eth::utils;
 use super::relay::NetworkType;
-use std::collections::HashMap;
 
 pub const HOME: &str = "HOME";
 pub const SIDE: &str = "SIDE";
@@ -85,7 +82,6 @@ impl Endpoint {
             HttpServer::new(move || {
                 let status_tx = self.tx.clone();
                 let hash_tx = self.tx.clone();
-                let balance_tx = self.tx.clone();
                 App::new()
                     .wrap(middleware::Logger::default())
                     .service(web::resource("/status").route(web::get().to(move || {

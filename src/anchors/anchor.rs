@@ -1,6 +1,5 @@
 use ethabi::Token;
 use std::fmt;
-use std::rc::Rc;
 use tokio_core::reactor;
 use web3::contract::tokens::Tokenize;
 use web3::futures::prelude::*;

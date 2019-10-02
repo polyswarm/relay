@@ -1,19 +1,15 @@
 use lru::LruCache;
-use std::rc::Rc;
 use std::sync::{PoisonError, RwLockWriteGuard};
-use std::time;
 use tokio_core::reactor;
-use web3::confirm::{wait_for_transaction_confirmation, SendTransactionWithConfirmation};
-use web3::futures::future::{err, ok, Either, Future};
+use web3::futures::future::{ok, Either, Future};
 use web3::futures::prelude::*;
 use web3::futures::sync::mpsc;
 use web3::futures::try_ready;
-use web3::types::{Address, Filter, FilterBuilder, Log, TransactionReceipt, H256, U256};
+use web3::types::{Address, Filter, Log, TransactionReceipt, H256, U256};
 use web3::{DuplexTransport, ErrorKind};
 
-use super::extensions::removed::{CancelRemoved, ExitOnLogRemoved};
 use super::extensions::timeout::SubscriptionState;
-use super::relay::{Network, NetworkType, TransferApprovalState};
+use super::relay::{Network, TransferApprovalState};
 use super::transfers::transfer::Transfer;
 
 /// Stream of events that have match the given filter.
@@ -23,7 +19,6 @@ pub struct WatchLiveLogs<T: DuplexTransport + 'static> {
     state: SubscriptionState<T, Log>,
     handle: reactor::Handle,
     source: Network<T>,
-    target: Network<T>,
     tx: mpsc::UnboundedSender<(Log, TransactionReceipt)>,
 }
 
@@ -36,7 +31,6 @@ impl<T: DuplexTransport + 'static> WatchLiveLogs<T> {
     /// * `handle` - Handle to spawn new futures
     pub fn new(
         source: &Network<T>,
-        target: &Network<T>,
         filter: &Filter,
         tx: &mpsc::UnboundedSender<(Log, TransactionReceipt)>,
         handle: &reactor::Handle,
@@ -45,7 +39,6 @@ impl<T: DuplexTransport + 'static> WatchLiveLogs<T> {
 
         WatchLiveLogs {
             source: source.clone(),
-            target: target.clone(),
             state: SubscriptionState::Subscribing(future),
             handle: handle.clone(),
             tx: tx.clone(),
@@ -54,7 +47,6 @@ impl<T: DuplexTransport + 'static> WatchLiveLogs<T> {
 
     fn process_log(&self, log: &Log) -> Box<Future<Item = (), Error = ()>> {
         let network_type = self.source.network_type;
-        let target = self.target.clone();
         let source = self.source.clone();
         let tx = self.tx.clone();
         let removed = log.removed.unwrap_or(false);
@@ -74,7 +66,6 @@ impl<T: DuplexTransport + 'static> WatchLiveLogs<T> {
                     })
                     .map_err(move |_| {
                         error!("error processing log on {:?}", network_type);
-                        ()
                     });
                 Box::new(Either::B(future))
             },
@@ -88,7 +79,6 @@ impl<T: DuplexTransport + 'static> Future for WatchLiveLogs<T> {
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         loop {
             let handle = self.handle.clone();
-            let tx = self.tx.clone();
             let next = match self.state {
                 SubscriptionState::Subscribing(ref mut future) => {
                     let stream = try_ready!(future.poll());
@@ -261,6 +251,7 @@ impl<T: DuplexTransport + 'static> Future for ProcessTransfer<T> {
 mod tests {
     use super::*;
     use crate::mock::transport::MockTransport;
+    use relay::NetworkType;
     use web3::types::{H256, U256};
 
     #[test]
@@ -278,7 +269,7 @@ mod tests {
         let mock = MockTransport::new();
         let source = mock.new_network(NetworkType::Home).unwrap();
         let target = mock.new_network(NetworkType::Side).unwrap();
-        let (tx, rx) = mpsc::unbounded();
+        let (_tx, rx) = mpsc::unbounded();
         let processor = ProcessTransfer::new(&source, &target, rx, &handle);
         let transfer = Transfer {
             destination: Address::zero(),
@@ -305,7 +296,7 @@ mod tests {
         let mock = MockTransport::new();
         let source = mock.new_network(NetworkType::Home).unwrap();
         let target = mock.new_network(NetworkType::Side).unwrap();
-        let (tx, rx) = mpsc::unbounded();
+        let (_tx, rx) = mpsc::unbounded();
         let processor = ProcessTransfer::new(&source, &target, rx, &handle);
         let transfer = Transfer {
             destination: Address::zero(),
@@ -331,7 +322,7 @@ mod tests {
         let mock = MockTransport::new();
         let source = mock.new_network(NetworkType::Home).unwrap();
         let target = mock.new_network(NetworkType::Side).unwrap();
-        let (tx, rx) = mpsc::unbounded();
+        let (_tx, rx) = mpsc::unbounded();
         let processor = ProcessTransfer::new(&source, &target, rx, &handle);
         let transfer = Transfer {
             destination: Address::zero(),
@@ -360,7 +351,7 @@ mod tests {
         let mock = MockTransport::new();
         let source = mock.new_network(NetworkType::Home).unwrap();
         let target = mock.new_network(NetworkType::Side).unwrap();
-        let (tx, rx) = mpsc::unbounded();
+        let (_tx, rx) = mpsc::unbounded();
         let processor = ProcessTransfer::new(&source, &target, rx, &handle);
         let transfer = Transfer {
             destination: Address::zero(),
@@ -389,7 +380,7 @@ mod tests {
         let mock = MockTransport::new();
         let source = mock.new_network(NetworkType::Home).unwrap();
         let target = mock.new_network(NetworkType::Side).unwrap();
-        let (tx, rx) = mpsc::unbounded();
+        let (_tx, rx) = mpsc::unbounded();
         let processor = ProcessTransfer::new(&source, &target, rx, &handle);
         let transfer = Transfer {
             destination: Address::zero(),
@@ -416,7 +407,7 @@ mod tests {
         let mock = MockTransport::new();
         let source = mock.new_network(NetworkType::Home).unwrap();
         let target = mock.new_network(NetworkType::Side).unwrap();
-        let (tx, rx) = mpsc::unbounded();
+        let (_tx, rx) = mpsc::unbounded();
         let processor = ProcessTransfer::new(&source, &target, rx, &handle);
         let transfer = Transfer {
             destination: Address::zero(),

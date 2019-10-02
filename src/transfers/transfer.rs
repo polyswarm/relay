@@ -1,5 +1,4 @@
 use std::fmt;
-use std::rc::Rc;
 use web3::contract::tokens::Tokenize;
 use web3::futures::future::Future;
 use web3::types::{Address, TransactionReceipt, H256, U256};

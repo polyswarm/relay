@@ -1,29 +1,18 @@
-use actix_web::web::block;
 use eth::contracts::{FLUSH_EVENT_SIGNATURE, TRANSFER_EVENT_SIGNATURE};
 use ethabi::Token;
-use extensions::removed::{CancelRemoved, ExitOnLogRemoved};
-use extensions::timeout::SubscriptionState;
-use lru::LruCache;
-use relay::{Network, NetworkType, TransferApprovalState};
-use relay_config::logger::flush;
+use relay::Network;
 use server::handler::{BalanceOf, BalanceQuery};
+use std::cmp;
 use std::collections::HashMap;
-use std::rc::Rc;
-use std::sync::{PoisonError, RwLockWriteGuard};
-use std::time::Instant;
-use std::{cmp, time};
-use tokio_core::reactor;
 use transfers::transfer::Transfer;
-use web3::confirm::{wait_for_transaction_confirmation, SendTransactionWithConfirmation};
 use web3::contract::tokens::{Detokenize, Tokenize};
-use web3::contract::{ErrorKind, Options, QueryResult};
+use web3::contract::Options;
 use web3::futures::future::join_all;
 use web3::futures::prelude::*;
 use web3::futures::sync::mpsc;
 use web3::futures::try_ready;
-use web3::helpers::CallFuture;
-use web3::types::{Address, BlockNumber, Bytes, FilterBuilder, Log, Transaction, TransactionReceipt, H256, U256};
-use web3::{contract, DuplexTransport, Transport};
+use web3::types::{Address, BlockNumber, Bytes, FilterBuilder, Log, TransactionReceipt, U256};
+use web3::{contract, DuplexTransport};
 
 /// struct for taking the FlushBlockQuery  and parsing the Tokens
 #[derive(Debug, Clone)]
@@ -63,7 +52,7 @@ impl Tokenize for FlushBlockQuery {
 enum CheckForPastFlushState {
     CheckFlushBlock(Box<Future<Item = FlushBlock, Error = ()>>),
     GetFlushLog(Box<Future<Item = Vec<Log>, Error = ()>>),
-    GetFlushReceipt(Log, Box<Future<Item = Option<TransactionReceipt>, Error = ()>>),
+    GetFlushReceipt(Box<Log>, Box<Future<Item = Option<TransactionReceipt>, Error = ()>>),
 }
 
 /// Future for checking if the flush block is set in relay, then getting the transaction receipt if so
@@ -92,7 +81,6 @@ impl<T: DuplexTransport + 'static> CheckForPastFlush<T> {
             )
             .map_err(|e| {
                 error!("error retrieving flush block: {:?}", e);
-                ()
             });
         CheckForPastFlush {
             state: CheckForPastFlushState::CheckFlushBlock(Box::new(flush_block_future)),
@@ -112,15 +100,9 @@ impl<T: DuplexTransport + 'static> CheckForPastFlush<T> {
             .to_block(BlockNumber::Number(block_number + 1))
             .topics(Some(vec![FLUSH_EVENT_SIGNATURE.into()]), None, None, None)
             .build();
-        Box::new(
-            self.source
-                .web3
-                .eth()
-                .logs(filter)
-                .map_err(|e| {
-                    error!("error getting flush log: {:?}", e);
-                }),
-        )
+        Box::new(self.source.web3.eth().logs(filter).map_err(|e| {
+            error!("error getting flush log: {:?}", e);
+        }))
     }
 }
 
@@ -144,13 +126,13 @@ impl<T: DuplexTransport + 'static> Future for CheckForPastFlush<T> {
                 }
                 CheckForPastFlushState::GetFlushLog(ref mut stream) => {
                     let logs = try_ready!(stream.poll());
-                    if logs.len() > 0 {
-                        let ref log = logs[0];
+                    if !logs.is_empty() {
+                        let log = &logs[0];
                         let removed = log.removed.unwrap_or(false);
                         match log.transaction_hash {
                             Some(tx_hash) => {
                                 let future = source.get_receipt(removed, tx_hash);
-                                CheckForPastFlushState::GetFlushReceipt(log.clone(), Box::new(future))
+                                CheckForPastFlushState::GetFlushReceipt(Box::new(log.clone()), Box::new(future))
                             }
                             None => {
                                 error!("flush log missing transaction hash");
@@ -166,7 +148,7 @@ impl<T: DuplexTransport + 'static> Future for CheckForPastFlush<T> {
                     let receipt_option = try_ready!(future.poll());
                     match receipt_option {
                         Some(receipt) => {
-                            let send_result = tx.unbounded_send((log.clone(), receipt));
+                            let send_result = tx.unbounded_send((*log.clone(), receipt));
                             if send_result.is_err() {
                                 error!("error sending log & receipt");
                                 return Err(());
@@ -234,7 +216,6 @@ impl<T: DuplexTransport + 'static> Future for ProcessFlush<T> {
     type Item = ();
     type Error = ();
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        let network_type = self.source.network_type;
         let target = self.target.clone();
         let source = self.source.clone();
         loop {
@@ -285,8 +266,7 @@ impl<T: DuplexTransport + 'static> Future for ProcessFlush<T> {
                             let futures: Vec<Box<Future<Item = (), Error = ()>>> = balances
                                 .iter()
                                 .filter_map(|(address, balance)| {
-                                    let transfer =
-                                        Transfer::from_receipt(address.clone(), balance.clone(), false, &receipt);
+                                    let transfer = Transfer::from_receipt(*address, *balance, false, &receipt);
                                     match transfer {
                                         Ok(t) => Some(t.approve_withdrawal(&source, &target)),
                                         Err(e) => {
@@ -419,7 +399,6 @@ impl<T: DuplexTransport + 'static> WithdrawLeftovers<T> {
                 )
                 .map_err(|e| {
                     error!("error retrieving contract balance: {:?}", e);
-                    ()
                 }),
         )
     }
@@ -443,7 +422,6 @@ impl<T: DuplexTransport + 'static> WithdrawLeftovers<T> {
                 )
                 .map_err(|e| {
                     error!("error retrieving fee wallet: {:?}", e);
-                    ()
                 }),
         )
     }
@@ -545,7 +523,7 @@ impl FilterLowBalance {
             .query::<Fees, Address, BlockNumber, FeeQuery>(
                 "fees",
                 FeeQuery::new(),
-                target.account.clone(),
+                target.account,
                 Options::default(),
                 BlockNumber::Latest,
             )
@@ -597,8 +575,8 @@ impl FilterContracts {
         // Get contract data
         // For whatever reason, doing this as an iter().map().collect() did not work
         let mut futures = Vec::new();
-        for (address, balance) in wallets.clone() {
-            let future = source.web3.eth().code(address.clone(), None).map_err(move |e| {
+        for (address, _balance) in wallets.clone() {
+            let future = source.web3.eth().code(address, None).map_err(move |e| {
                 error!("error retrieving code for wallet {}: {:?}", address, e);
             });
             futures.push(Box::new(future));
@@ -621,7 +599,7 @@ impl Future for FilterContracts {
             .iter()
             .zip(all_bytes)
             .filter_map(move |((address, balance), ref bytes)| {
-                if bytes.0.len() == 0 {
+                if bytes.0.is_empty() {
                     Some((*address, *balance))
                 } else {
                     None

@@ -335,7 +335,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
             .topics(Some(vec![FLUSH_EVENT_SIGNATURE.into()]), None, None, None)
             .build();
         // This on just watches right inside, no tx to send to
-        let watch = WatchLiveLogs::new(self, target, &filter, &tx, handle)
+        let watch = WatchLiveLogs::new(self, &filter, &tx, handle)
             .map_err(move |e| error!("error watching transaction logs {:?}", e));
         // We do this in a separately spawned task because we have to wait 20 blocks per
         handle.spawn(watch);
@@ -360,7 +360,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
                 None,
             )
             .build();
-        let watch = WatchLiveLogs::new(self, target, &filter, &tx, handle)
+        let watch = WatchLiveLogs::new(self, &filter, &tx, handle)
             .map_err(move |e| error!("error watching transaction logs {:?}", e));
         // We do this in a separately spawned task because we have to wait 20 blocks per
         handle.spawn(watch);
@@ -434,7 +434,6 @@ impl<T: DuplexTransport + 'static> Network<T> {
         }
         .map_err(move |_| {
             error!("error checking transaction on {:?}", network_type);
-            ()
         });
         Box::new(future)
     }

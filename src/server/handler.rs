@@ -1,11 +1,6 @@
-use eth::contracts::TRANSFER_EVENT_SIGNATURE;
 use ethabi::Token;
 use relay::{Network, NetworkType};
 use server::endpoint::{NetworkStatus, RequestType, StatusResponse};
-use std::cmp;
-use std::collections::HashMap;
-use std::rc::Rc;
-use std::time::Instant;
 use tokio_core::reactor;
 use transfers::past::{FindTransferInTransaction, ValidateAndApproveTransfer};
 use web3::contract::tokens::{Detokenize, Tokenize};
@@ -14,7 +9,7 @@ use web3::futures::future;
 use web3::futures::prelude::*;
 use web3::futures::sync::mpsc;
 use web3::futures::try_ready;
-use web3::types::{Address, BlockNumber, FilterBuilder, Log, U256};
+use web3::types::{Address, BlockNumber, U256};
 use web3::{contract, DuplexTransport};
 
 pub struct BalanceQuery {

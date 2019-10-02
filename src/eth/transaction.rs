@@ -1,22 +1,16 @@
 use ethcore_transaction::{Action, Transaction as RawTransactionRequest};
 use ethstore::accounts_dir::RootDiskDirectory;
 use ethstore::{EthStore, SimpleSecretStore, StoreAccountRef};
-use extensions::removed::{CancelRemoved, ExitOnLogRemoved};
 use rlp::{Encodable, RlpStream};
-use std::rc::Rc;
 use std::sync::atomic::Ordering;
-use std::time;
-use web3::confirm::{wait_for_transaction_confirmation, SendTransactionWithConfirmation};
 use web3::contract::tokens::Tokenize;
-use web3::futures::future::Either;
 use web3::futures::prelude::*;
 use web3::futures::try_ready;
-use web3::types::{Address, TransactionReceipt, H256, U256};
+use web3::types::{TransactionReceipt, U256};
 use web3::DuplexTransport;
 
 use super::errors::OperationError;
 use super::relay::Network;
-use relay::NetworkType;
 
 pub enum TransactionState<T, P>
 where

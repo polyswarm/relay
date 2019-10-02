@@ -1,4 +1,3 @@
-use std::rc::Rc;
 use web3::futures::prelude::*;
 use web3::types::H256;
 use web3::DuplexTransport;

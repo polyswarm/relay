@@ -1,5 +1,4 @@
 use ethabi::Token;
-use std::rc::Rc;
 use tiny_keccak::keccak256;
 use web3::contract;
 use web3::contract::tokens::{Detokenize, Tokenize};

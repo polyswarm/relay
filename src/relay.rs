@@ -10,7 +10,7 @@ use web3::contract::Contract;
 use web3::futures::future::Either;
 use web3::futures::sync::mpsc;
 use web3::futures::Future;
-use web3::types::{Address, TransactionReceipt, H256, U256};
+use web3::types::{Address, FilterBuilder, TransactionReceipt, H256, U256};
 use web3::{DuplexTransport, Web3};
 
 use super::anchors::anchor::HandleAnchors;
@@ -330,8 +330,12 @@ impl<T: DuplexTransport + 'static> Network<T> {
     /// * `handle` - Handle to spawn new tasks
     pub fn watch_flush_logs(&self, target: &Network<T>, handle: &reactor::Handle) -> ProcessFlush<T> {
         let (tx, rx) = mpsc::unbounded();
+        let filter = FilterBuilder::default()
+            .address(vec![self.relay.address()])
+            .topics(Some(vec![FLUSH_EVENT_SIGNATURE.into()]), None, None, None)
+            .build();
         // This on just watches right inside, no tx to send to
-        let watch = WatchLiveLogs::new(self, target, FLUSH_EVENT_SIGNATURE, &tx, handle)
+        let watch = WatchLiveLogs::new(self, target, &filter, &tx, handle)
             .map_err(move |e| error!("error watching transaction logs {:?}", e));
         // We do this in a separately spawned task because we have to wait 20 blocks per
         handle.spawn(watch);
@@ -347,7 +351,16 @@ impl<T: DuplexTransport + 'static> Network<T> {
     /// * `handle` - Handle to spawn new tasks
     pub fn watch_transfer_logs(&self, target: &Network<T>, handle: &reactor::Handle) -> ProcessTransfer<T> {
         let (tx, rx) = mpsc::unbounded();
-        let watch = WatchLiveLogs::new(self, target, TRANSFER_EVENT_SIGNATURE, &tx, handle)
+        let filter = FilterBuilder::default()
+            .address(vec![self.token.address()])
+            .topics(
+                Some(vec![TRANSFER_EVENT_SIGNATURE.into()]),
+                None,
+                Some(vec![self.relay.address().into()]),
+                None,
+            )
+            .build();
+        let watch = WatchLiveLogs::new(self, target, &filter, &tx, handle)
             .map_err(move |e| error!("error watching transaction logs {:?}", e));
         // We do this in a separately spawned task because we have to wait 20 blocks per
         handle.spawn(watch);

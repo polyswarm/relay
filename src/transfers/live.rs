@@ -8,7 +8,7 @@ use web3::futures::future::{err, ok, Either, Future};
 use web3::futures::prelude::*;
 use web3::futures::sync::mpsc;
 use web3::futures::try_ready;
-use web3::types::{Address, FilterBuilder, Log, TransactionReceipt, H256, U256};
+use web3::types::{Address, Filter, FilterBuilder, Log, TransactionReceipt, H256, U256};
 use web3::{DuplexTransport, ErrorKind};
 
 use super::extensions::removed::{CancelRemoved, ExitOnLogRemoved};
@@ -37,21 +37,11 @@ impl<T: DuplexTransport + 'static> WatchLiveLogs<T> {
     pub fn new(
         source: &Network<T>,
         target: &Network<T>,
-        event_signature: &'static str,
+        filter: &Filter,
         tx: &mpsc::UnboundedSender<(Log, TransactionReceipt)>,
         handle: &reactor::Handle,
     ) -> Self {
-        let filter = FilterBuilder::default()
-            .address(vec![source.token.address()])
-            .topics(
-                Some(vec![event_signature.into()]),
-                None,
-                Some(vec![source.relay.address().into()]),
-                None,
-            )
-            .build();
-
-        let future = Box::new(source.web3.clone().eth_subscribe().subscribe_logs(filter));
+        let future = Box::new(source.web3.clone().eth_subscribe().subscribe_logs(filter.clone()));
 
         WatchLiveLogs {
             source: source.clone(),

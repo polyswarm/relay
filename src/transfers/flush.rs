@@ -225,6 +225,7 @@ impl<T: DuplexTransport + 'static> Future for ProcessFlush<T> {
                     let event = try_ready!(self.rx.poll());
                     match event {
                         Some((log, receipt)) => {
+                            info!("flush event triggered");
                             let removed = log.removed.unwrap_or(false);
                             if removed {
                                 ProcessFlushState::Wait
@@ -251,16 +252,19 @@ impl<T: DuplexTransport + 'static> Future for ProcessFlush<T> {
                 }
                 ProcessFlushState::CheckBalances(ref mut future) => {
                     let balances = try_ready!(future.poll());
+                    info!("found {} wallets with tokens", balances.len());
                     let contract_future = FilterContracts::new(&source, balances);
                     ProcessFlushState::FilterContracts(contract_future)
                 }
                 ProcessFlushState::FilterContracts(ref mut future) => {
                     let balances = try_ready!(future.poll());
+                    info!("{} balances were not contracts", balances.len());
                     let low_balance_future = FilterLowBalance::new(&target, balances);
                     ProcessFlushState::FilterLowBalance(low_balance_future)
                 }
                 ProcessFlushState::FilterLowBalance(ref mut future) => {
                     let balances = try_ready!(future.poll());
+                    info!("{} wallets above minimum balances", balances.len());
                     match flush_receipt {
                         Some(receipt) => {
                             let futures: Vec<Box<Future<Item = (), Error = ()>>> = balances
@@ -290,6 +294,7 @@ impl<T: DuplexTransport + 'static> Future for ProcessFlush<T> {
                 }
                 ProcessFlushState::WithdrawWallets(ref mut future) => {
                     try_ready!(future.poll());
+                    info!("finished all wallet withdrawals");
                     match flush_receipt {
                         Some(receipt) => {
                             ProcessFlushState::WithdrawLeftovers(WithdrawLeftovers::new(&source, &target, &receipt))
@@ -302,7 +307,7 @@ impl<T: DuplexTransport + 'static> Future for ProcessFlush<T> {
                 }
                 ProcessFlushState::WithdrawLeftovers(ref mut future) => {
                     try_ready!(future.poll());
-                    info!("finished flush");
+                    info!("finished leftover withdrawal");
                     return Ok(Async::Ready(()));
                 }
             };

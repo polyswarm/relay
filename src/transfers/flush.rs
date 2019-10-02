@@ -68,10 +68,10 @@ impl<T: DuplexTransport + 'static> CheckForPastFlush<T> {
     ///
     /// * `source` - Network being flushed
     /// * `tx` - Sender to trigger Flush event processor
-    pub fn new(source: &Network<T>, tx: mpsc::UnboundedSender<(Log, TransactionReceipt)>) -> Self {
+    pub fn new(source: &Network<T>, tx: &mpsc::UnboundedSender<(Log, TransactionReceipt)>) -> Self {
         let flush_block_query = FlushBlockQuery::new();
         let flush_block_future = source
-            .token
+            .relay
             .query::<FlushBlock, Address, BlockNumber, FlushBlockQuery>(
                 "flushBlock",
                 flush_block_query,
@@ -117,6 +117,7 @@ impl<T: DuplexTransport + 'static> Future for CheckForPastFlush<T> {
                 CheckForPastFlushState::CheckFlushBlock(ref mut future) => {
                     let block = try_ready!(future.poll());
                     let block_number = block.0.as_u64();
+                    info!("flush block on start is {}", block_number);
                     if block_number > 0 {
                         let future = self.get_flush_log(block_number);
                         CheckForPastFlushState::GetFlushLog(future)
@@ -417,7 +418,7 @@ impl<T: DuplexTransport + 'static> WithdrawLeftovers<T> {
         let target = target.clone();
         Box::new(
             target
-                .token
+                .relay
                 .query::<FeeWallet, Address, BlockNumber, FeeWalletQuery>(
                     "feeWallet",
                     fee_wallet_query,
@@ -449,15 +450,18 @@ impl<T: DuplexTransport + 'static> Future for WithdrawLeftovers<T> {
                 WithdrawLeftoversState::GetFeeWallet(ref mut future) => {
                     let address = try_ready!(future.poll());
                     match self.balance {
-                        Some(b) => match Transfer::from_receipt(address.0, b, false, &receipt) {
-                            Ok(transfer) => {
-                                WithdrawLeftoversState::Withdraw(transfer.approve_withdrawal(&source, &target))
+                        Some(b) => {
+                            info!("withdrawing {} to fee wallet {}", b, address.0);
+                            match Transfer::from_receipt(address.0, b, false, &receipt) {
+                                Ok(transfer) => {
+                                    WithdrawLeftoversState::Withdraw(transfer.approve_withdrawal(&source, &target))
+                                }
+                                Err(e) => {
+                                    error!("Error creating transaction from flush receipt: {:?}", e);
+                                    return Err(());
+                                }
                             }
-                            Err(e) => {
-                                error!("Error creating transaction from flush receipt: {:?}", e);
-                                return Err(());
-                            }
-                        },
+                        }
                         None => {
                             error!("error balance is none");
                             return Err(());

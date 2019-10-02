@@ -23,6 +23,7 @@ use super::transfers::flush::ProcessFlush;
 use super::transfers::live::ProcessTransfer;
 use super::transfers::live::WatchLiveLogs;
 use super::transfers::past::RecheckPastTransferLogs;
+use transfers::flush::CheckForPastFlush;
 
 const FREE_GAS_PRICE: u64 = 0;
 const GAS_LIMIT: u64 = 200_000;
@@ -339,6 +340,8 @@ impl<T: DuplexTransport + 'static> Network<T> {
             .map_err(move |e| error!("error watching transaction logs {:?}", e));
         // We do this in a separately spawned task because we have to wait 20 blocks per
         handle.spawn(watch);
+        let check_existing = CheckForPastFlush::new(self, &tx);
+        handle.spawn(check_existing);
         ProcessFlush::new(self, target, rx)
     }
 

@@ -1,18 +1,52 @@
 use eth::contracts::{FLUSH_EVENT_SIGNATURE, TRANSFER_EVENT_SIGNATURE};
+use eth::transaction::SendTransaction;
 use ethabi::Token;
 use relay::Network;
 use server::handler::{BalanceOf, BalanceQuery};
 use std::cmp;
 use std::collections::HashMap;
 use transfers::transfer::Transfer;
+use transfers::withdrawal::ApproveParams;
 use web3::contract::tokens::{Detokenize, Tokenize};
 use web3::contract::Options;
 use web3::futures::future::join_all;
 use web3::futures::prelude::*;
 use web3::futures::sync::mpsc;
 use web3::futures::try_ready;
-use web3::types::{Address, BlockNumber, Bytes, FilterBuilder, Log, TransactionReceipt, U256};
+use web3::types::{Address, BlockNumber, Bytes, FilterBuilder, Log, TransactionReceipt, U256, H256};
 use web3::{contract, DuplexTransport};
+use actix_web::web::block;
+
+#[derive(Clone, Copy, Ord, Eq, PartialEq, PartialOrd)]
+pub struct Wallet {
+    address: Address,
+    balance: U256,
+}
+
+impl Wallet {
+    fn new(address: &Address, balance: &U256) -> Self {
+        Wallet {
+            address: *address,
+            balance: balance.clone(),
+        }
+    }
+
+    fn withdraw<T: DuplexTransport + 'static>(&self, target: &Network<T>,  transaction_hash: &H256, block_hash: &H256, block_number: &U256) -> SendTransaction<T, ApproveParams> {
+        let approve_params = ApproveParams {
+            destination: self.address,
+            amount: self.balance.clone(),
+            tx_hash: *transaction_hash,
+            block_hash: *block_hash,
+            block_number: *block_number,
+        };
+        SendTransaction::new(
+            &target,
+            "approveWithdrawal",
+            &approve_params,
+            target.retries,
+        )
+    }
+}
 
 /// struct for taking the FlushBlockQuery  and parsing the Tokens
 #[derive(Debug, Clone)]
@@ -264,24 +298,27 @@ impl<T: DuplexTransport + 'static> Future for ProcessFlush<T> {
                     ProcessFlushState::FilterLowBalance(low_balance_future)
                 }
                 ProcessFlushState::FilterLowBalance(ref mut future) => {
-                    let balances = try_ready!(future.poll());
+                    let mut balances = try_ready!(future.poll());
                     info!("{} wallets above minimum balances", balances.len());
                     match flush_receipt {
                         Some(receipt) => {
-                            let futures: Vec<Box<Future<Item = (), Error = ()>>> = balances
+                            if receipt.block_number.is_none() {
+                                error!("no block number in transfer receipt");
+                                return Err(());
+                            }
+
+                            if receipt.block_hash.is_none() {
+                                error!("no block hash in transfer receipt");
+                                return Err(());
+                            }
+                            let block_hash = receipt.block_hash.unwrap();
+                            let block_number = receipt.block_number.unwrap();
+                            balances.sort();
+                            let futures: Vec<SendTransaction<T, ApproveParams>> = balances
                                 .iter()
-                                .filter_map(|(address, balance)| {
-                                    let transfer = Transfer::from_receipt(*address, *balance, false, &receipt);
-                                    match transfer {
-                                        Ok(t) => Some(t.approve_withdrawal(&source, &target, false)),
-                                        Err(e) => {
-                                            error!(
-                                                "error creating transfer to {} for {} nct from receipt: {:?}",
-                                                address, balance, e
-                                            );
-                                            None
-                                        }
-                                    }
+                                .enumerate()
+                                .filter_map(|(i, wallet)| {
+                                    Some(wallet.withdraw(&target, &receipt.transaction_hash, &block_hash, &(block_number + i)))
                                 })
                                 .collect();
 
@@ -294,11 +331,13 @@ impl<T: DuplexTransport + 'static> Future for ProcessFlush<T> {
                     }
                 }
                 ProcessFlushState::WithdrawWallets(ref mut future) => {
-                    try_ready!(future.poll());
-                    info!("finished all wallet withdrawals");
+                    let withdrawals = try_ready!(future.poll());
+                    info!("finished {} wallet withdrawals", withdrawals.len());
+
+
                     match flush_receipt {
                         Some(receipt) => {
-                            ProcessFlushState::WithdrawLeftovers(WithdrawLeftovers::new(&source, &target, &receipt))
+                            ProcessFlushState::WithdrawLeftovers(WithdrawLeftovers::new(&source, &target, &receipt, withdrawals.len()))
                         }
                         None => {
                             error!("No flush receipt available");
@@ -352,19 +391,20 @@ impl Tokenize for FeeWalletQuery {
     }
 }
 
-enum WithdrawLeftoversState {
+enum WithdrawLeftoversState<T: DuplexTransport + 'static> {
     GetBalance(Box<Future<Item = BalanceOf, Error = ()>>),
     GetFeeWallet(Box<Future<Item = FeeWallet, Error = ()>>),
-    Withdraw(Box<Future<Item = (), Error = ()>>),
+    Withdraw(SendTransaction<T, ApproveParams>),
 }
 
 /// Future that gets the balance of the relay contract on target chain.
 /// Then, it withdraws that balance to the fee wallet
 pub struct WithdrawLeftovers<T: DuplexTransport + 'static> {
-    state: WithdrawLeftoversState,
+    state: WithdrawLeftoversState<T>,
     source: Network<T>,
     target: Network<T>,
     receipt: TransactionReceipt,
+    offset: usize,
     balance: Option<U256>,
 }
 
@@ -375,13 +415,14 @@ impl<T: DuplexTransport + 'static> WithdrawLeftovers<T> {
     /// * `source` - Network being flushed
     /// * `target` - Network to send all the token balances
     /// * `flush_receipt` - Transaction receipt for the flush event
-    fn new(source: &Network<T>, target: &Network<T>, flush_receipt: &TransactionReceipt) -> Self {
+    fn new(source: &Network<T>, target: &Network<T>, flush_receipt: &TransactionReceipt, offset: usize) -> Self {
         let state = WithdrawLeftoversState::GetBalance(WithdrawLeftovers::get_balance(&target));
         WithdrawLeftovers {
             state,
             source: source.clone(),
             target: target.clone(),
             receipt: flush_receipt.clone(),
+            offset,
             balance: None,
         }
     }
@@ -441,6 +482,7 @@ impl<T: DuplexTransport + 'static> Future for WithdrawLeftovers<T> {
             let source = self.source.clone();
             let target = self.target.clone();
             let receipt = self.receipt.clone();
+            let offset = self.offset;
             let next = match self.state {
                 WithdrawLeftoversState::GetBalance(ref mut future) => {
                     let balance = try_ready!(future.poll());
@@ -451,16 +493,21 @@ impl<T: DuplexTransport + 'static> Future for WithdrawLeftovers<T> {
                     let address = try_ready!(future.poll());
                     match self.balance {
                         Some(b) => {
-                            info!("withdrawing {} to fee wallet {}", b, address.0);
-                            match Transfer::from_receipt(address.0, b, false, &receipt) {
-                                Ok(transfer) => WithdrawLeftoversState::Withdraw(
-                                    transfer.approve_withdrawal(&source, &target, false),
-                                ),
-                                Err(e) => {
-                                    error!("Error creating transaction from flush receipt: {:?}", e);
-                                    return Err(());
-                                }
+                            if receipt.block_number.is_none() {
+                                error!("no block number in transfer receipt");
+                                return Err(());
                             }
+
+                            if receipt.block_hash.is_none() {
+                                error!("no block hash in transfer receipt");
+                                return Err(());
+                            }
+                            let block_hash = receipt.block_hash.unwrap();
+                            let block_number = receipt.block_number.unwrap() + offset;
+                            let wallet = Wallet::new(&address.0, &b);
+                            info!("withdrawing {} to fee wallet {}", wallet.balance, wallet.address);
+                            let withdrawal = wallet.withdraw(&target, &receipt.transaction_hash, &block_hash, &block_number);
+                            WithdrawLeftoversState::Withdraw(withdrawal)
                         }
                         None => {
                             error!("error balance is none");
@@ -516,7 +563,7 @@ impl Tokenize for FeeQuery {
 /// FilterLowBalance Future that takes a list of wallets, and filters out that have a balance below the fee cost to withdraw
 pub struct FilterLowBalance {
     future: Box<Future<Item = Fees, Error = ()>>,
-    wallets: Vec<(Address, U256)>,
+    wallets: Vec<Wallet>,
 }
 
 impl FilterLowBalance {
@@ -525,7 +572,7 @@ impl FilterLowBalance {
     ///
     /// * `source` - Network where the wallets may be contracts
     /// * `wallets` - Vector of tuples with Address and Balances
-    pub fn new<T: DuplexTransport + 'static>(target: &Network<T>, wallets: Vec<(Address, U256)>) -> Self {
+    pub fn new<T: DuplexTransport + 'static>(target: &Network<T>, wallets: Vec<Wallet>) -> Self {
         // Get contract data
         let future = target
             .relay
@@ -548,7 +595,7 @@ impl FilterLowBalance {
 }
 
 impl Future for FilterLowBalance {
-    type Item = Vec<(Address, U256)>;
+    type Item = Vec<Wallet>;
     type Error = ();
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         let fee = try_ready!(self.future.poll());
@@ -556,9 +603,9 @@ impl Future for FilterLowBalance {
         let filtered = self
             .wallets
             .iter()
-            .filter_map(|(address, balance)| {
-                if *balance > fee_value {
-                    Some((*address, *balance))
+            .filter_map(|wallet| {
+                if wallet.balance > fee_value {
+                    Some(*wallet)
                 } else {
                     None
                 }
@@ -571,7 +618,7 @@ impl Future for FilterLowBalance {
 /// FilterContract Future that takes a list of wallets, and filters out any that are contracts
 pub struct FilterContracts {
     future: Box<Future<Item = Vec<Bytes>, Error = ()>>,
-    wallets: Vec<(Address, U256)>,
+    wallets: Vec<Wallet>,
 }
 
 impl FilterContracts {
@@ -580,13 +627,13 @@ impl FilterContracts {
     ///
     /// * `source` - Network where the wallets may be contracts
     /// * `wallets` - Vector of tuples with Address and Balances
-    pub fn new<T: DuplexTransport + 'static>(source: &Network<T>, wallets: Vec<(Address, U256)>) -> Self {
+    pub fn new<T: DuplexTransport + 'static>(source: &Network<T>, wallets: Vec<Wallet>) -> Self {
         // Get contract data
         // For whatever reason, doing this as an iter().map().collect() did not work
         let mut futures = Vec::new();
-        for (address, _balance) in wallets.clone() {
-            let future = source.web3.eth().code(address, None).map_err(move |e| {
-                error!("error retrieving code for wallet {}: {:?}", address, e);
+        for wallet in wallets.clone() {
+            let future = source.web3.eth().code(wallet.address, None).map_err(move |e| {
+                error!("error retrieving code for wallet {}: {:?}", wallet.address, e);
             });
             futures.push(Box::new(future));
         }
@@ -599,7 +646,7 @@ impl FilterContracts {
 }
 
 impl Future for FilterContracts {
-    type Item = Vec<(Address, U256)>;
+    type Item = Vec<Wallet>;
     type Error = ();
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         let all_bytes = try_ready!(self.future.poll());
@@ -607,9 +654,9 @@ impl Future for FilterContracts {
             .wallets
             .iter()
             .zip(all_bytes)
-            .filter_map(move |((address, balance), ref bytes)| {
+            .filter_map(move |(wallet, ref bytes)| {
                 if bytes.0.is_empty() {
-                    Some((*address, *balance))
+                    Some(*wallet)
                 } else {
                     None
                 }
@@ -686,7 +733,7 @@ impl<T: DuplexTransport + 'static> CheckBalances<T> {
 }
 
 impl<T: DuplexTransport + 'static> Future for CheckBalances<T> {
-    type Item = Vec<(Address, U256)>;
+    type Item = Vec<Wallet>;
     type Error = ();
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         let source = self.source.clone();
@@ -736,7 +783,7 @@ impl<T: DuplexTransport + 'static> Future for CheckBalances<T> {
                         CheckBalancesState::GetLogWindow(end, next_window_end, future)
                     } else {
                         return Ok(Async::Ready(
-                            self.balances.iter().map(|(key, value)| (*key, *value)).collect(),
+                            self.balances.iter().map(|(key, value)| Wallet::new(key, value)).collect(),
                         ));
                     }
                 }

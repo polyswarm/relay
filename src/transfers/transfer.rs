@@ -85,7 +85,6 @@ impl Transfer {
         &self,
         source: &Network<T>,
         target: &Network<T>,
-        ignore_errors: bool,
     ) -> Box<Future<Item = (), Error = ()>> {
         info!("approving withdrawal on {:?}: {} ", target.network_type, self);
         let target = target.clone();
@@ -107,18 +106,13 @@ impl Transfer {
                 },
                 |_| Ok(()),
             )
-        });
-        if ignore_errors {
-            Box::new(send.or_else(|_| Ok(())))
-        } else {
-            Box::new(send)
-        }
+        }).or_else(|_| Ok(()));
+        Box::new(send)
     }
 
     pub fn unapprove_withdrawal<T: DuplexTransport + 'static>(
         &self,
         target: &Network<T>,
-        ignore_errors: bool,
     ) -> Box<Future<Item = (), Error = ()>> {
         info!("unapproving withdrawal on {:?}: {} ", target.network_type, self);
         let send = SendTransaction::new(
@@ -126,12 +120,8 @@ impl Transfer {
             "unapproveWithdrawal",
             &UnapproveParams::from(*self),
             target.retries,
-        );
-        if ignore_errors {
-            Box::new(send.or_else(|_| Ok(())))
-        } else {
-            Box::new(send)
-        }
+        ).or_else(|_| Ok(()));
+        Box::new(send)
     }
 }
 

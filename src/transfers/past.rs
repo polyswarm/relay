@@ -267,7 +267,7 @@ impl<T: DuplexTransport + 'static> Future for ValidateAndApproveTransfer<T> {
                 "approving missed transfer on {:?}: {:?}",
                 target.network_type, self.transfer
             );
-            handle.spawn(self.transfer.approve_withdrawal(&source, &target, true));
+            handle.spawn(self.transfer.approve_withdrawal(&source, &target));
         }
         Ok(Async::Ready(()))
     }

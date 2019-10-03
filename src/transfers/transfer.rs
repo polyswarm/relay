@@ -106,7 +106,8 @@ impl Transfer {
                 },
                 |_| Ok(()),
             )
-        }).or_else(|_| Ok(()));
+        })
+        .or_else(|_| Ok(()));
         Box::new(send)
     }
 
@@ -120,7 +121,8 @@ impl Transfer {
             "unapproveWithdrawal",
             &UnapproveParams::from(*self),
             target.retries,
-        ).or_else(|_| Ok(()));
+        )
+        .or_else(|_| Ok(()));
         Box::new(send)
     }
 }

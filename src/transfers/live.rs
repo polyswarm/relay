@@ -154,7 +154,7 @@ impl<T: DuplexTransport + 'static> ProcessTransfer<T> {
                         .pending
                         .write()?
                         .put(transfer.tx_hash, TransferApprovalState::Removed);
-                    self.handle.spawn(transfer.unapprove_withdrawal(&self.target));
+                    self.handle.spawn(transfer.unapprove_withdrawal(&self.target, true));
                 }
             }
             Some(TransferApprovalState::Removed) => {
@@ -165,7 +165,7 @@ impl<T: DuplexTransport + 'static> ProcessTransfer<T> {
                         .write()?
                         .put(transfer.tx_hash, TransferApprovalState::Sent);
                     self.handle
-                        .spawn(transfer.approve_withdrawal(&self.source, &self.target));
+                        .spawn(transfer.approve_withdrawal(&self.source, &self.target, true));
                 }
             }
             None => {
@@ -179,7 +179,7 @@ impl<T: DuplexTransport + 'static> ProcessTransfer<T> {
                     let target = self.target.clone();
                     let unapprove_future = transfer.check_withdrawal(&self.target).and_then(move |not_approved| {
                         if !not_approved {
-                            Either::A(transfer.unapprove_withdrawal(&target))
+                            Either::A(transfer.unapprove_withdrawal(&target, true))
                         } else {
                             Either::B(ok(()))
                         }
@@ -196,7 +196,7 @@ impl<T: DuplexTransport + 'static> ProcessTransfer<T> {
                     let target = self.target.clone();
                     let approve_future = transfer.check_withdrawal(&self.target).and_then(move |not_approved| {
                         if not_approved {
-                            Either::A(transfer.approve_withdrawal(&source, &target))
+                            Either::A(transfer.approve_withdrawal(&source, &target, true))
                         } else {
                             Either::B(ok(()))
                         }

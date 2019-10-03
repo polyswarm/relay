@@ -198,5 +198,4 @@ mod tests {
         // assert
         assert_eq!(result, Err(()))
     }
-
 }

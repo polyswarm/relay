@@ -19,11 +19,11 @@ use super::eth::contracts::{FLUSH_EVENT_SIGNATURE, TRANSFER_EVENT_SIGNATURE};
 use super::eth::utils::clean_0x;
 use super::extensions::removed::{CancelRemoved, ExitOnLogRemoved};
 use super::server::{HandleRequests, RequestType};
+use super::transfers::flush::CheckForPastFlush;
 use super::transfers::flush::ProcessFlush;
 use super::transfers::live::ProcessTransfer;
 use super::transfers::live::WatchLiveLogs;
 use super::transfers::past::RecheckPastTransferLogs;
-use transfers::flush::CheckForPastFlush;
 
 const FREE_GAS_PRICE: u64 = 0;
 const GAS_LIMIT: u64 = 200_000;

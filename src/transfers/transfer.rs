@@ -85,43 +85,53 @@ impl Transfer {
         &self,
         source: &Network<T>,
         target: &Network<T>,
+        ignore_errors: bool,
     ) -> Box<Future<Item = (), Error = ()>> {
         info!("approving withdrawal on {:?}: {} ", target.network_type, self);
         let target = target.clone();
-        Box::new(
-            SendTransaction::new(
-                &target,
-                "approveWithdrawal",
-                &ApproveParams::from(*self),
-                target.retries,
-            )
-            .cancel_removed(&source, self.tx_hash)
-            .and_then(move |success| {
-                success.map_or_else(
-                    || {
-                        warn!(
-                            "log removed from originating chain while waiting on approval confirmations on target {:?}",
-                            target.network_type
-                        );
-                        Ok(())
-                    },
-                    |_| Ok(()),
-                )
-            }),
+        let send = SendTransaction::new(
+            &target,
+            "approveWithdrawal",
+            &ApproveParams::from(*self),
+            target.retries,
         )
+        .cancel_removed(&source, self.tx_hash)
+        .and_then(move |success| {
+            success.map_or_else(
+                || {
+                    warn!(
+                        "log removed from originating chain while waiting on approval confirmations on target {:?}",
+                        target.network_type
+                    );
+                    Ok(())
+                },
+                |_| Ok(()),
+            )
+        });
+        if ignore_errors {
+            Box::new(send.or_else(|_| Ok(())))
+        } else {
+            Box::new(send)
+        }
     }
 
     pub fn unapprove_withdrawal<T: DuplexTransport + 'static>(
         &self,
         target: &Network<T>,
-    ) -> SendTransaction<T, UnapproveParams> {
+        ignore_errors: bool,
+    ) -> Box<Future<Item = (), Error = ()>> {
         info!("unapproving withdrawal on {:?}: {} ", target.network_type, self);
-        SendTransaction::new(
+        let send = SendTransaction::new(
             target,
             "unapproveWithdrawal",
             &UnapproveParams::from(*self),
             target.retries,
-        )
+        );
+        if ignore_errors {
+            Box::new(send.or_else(|_| Ok(())))
+        } else {
+            Box::new(send)
+        }
     }
 }
 

@@ -220,7 +220,8 @@ where
                                     if result == 1.into() {
                                         info!("{} on {:?} successful: {:?}", function, network_type, receipt);
                                     } else {
-                                        warn!("{} on {:?} failed: {:?}", function, network_type, receipt);
+                                        error!("{} on {:?} failed: {:?}", function, network_type, receipt);
+                                        return Err(());
                                     }
                                 }
                                 None => {

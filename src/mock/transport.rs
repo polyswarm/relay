@@ -374,5 +374,4 @@ mod tests {
         let headers = eloop.run(stream).unwrap();
         assert_eq!(value, *headers.get(0).unwrap());
     }
-
 }

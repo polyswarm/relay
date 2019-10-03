@@ -25,9 +25,9 @@ impl Anchor {
     /// # Arguments
     ///
     /// * `target` - Network to post the anchor
-    fn process<T: DuplexTransport + 'static>(&self, target: &Network<T>) -> SendTransaction<T, Self> {
+    fn process<T: DuplexTransport + 'static>(&self, target: &Network<T>) -> Box<Future<Item = (), Error = ()>> {
         info!("anchoring block {} to {:?}", self, target.network_type);
-        SendTransaction::new(target, "anchor", self, target.retries)
+        Box::new(SendTransaction::new(target, "anchor", self, target.retries).or_else(|_| Ok(())))
     }
 }
 

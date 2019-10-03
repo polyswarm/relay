@@ -273,7 +273,7 @@ impl<T: DuplexTransport + 'static> Future for ProcessFlush<T> {
                                 .filter_map(|(address, balance)| {
                                     let transfer = Transfer::from_receipt(*address, *balance, false, &receipt);
                                     match transfer {
-                                        Ok(t) => Some(t.approve_withdrawal(&source, &target)),
+                                        Ok(t) => Some(t.approve_withdrawal(&source, &target, false)),
                                         Err(e) => {
                                             error!(
                                                 "error creating transfer to {} for {} nct from receipt: {:?}",
@@ -453,9 +453,9 @@ impl<T: DuplexTransport + 'static> Future for WithdrawLeftovers<T> {
                         Some(b) => {
                             info!("withdrawing {} to fee wallet {}", b, address.0);
                             match Transfer::from_receipt(address.0, b, false, &receipt) {
-                                Ok(transfer) => {
-                                    WithdrawLeftoversState::Withdraw(transfer.approve_withdrawal(&source, &target))
-                                }
+                                Ok(transfer) => WithdrawLeftoversState::Withdraw(
+                                    transfer.approve_withdrawal(&source, &target, false),
+                                ),
                                 Err(e) => {
                                     error!("Error creating transaction from flush receipt: {:?}", e);
                                     return Err(());

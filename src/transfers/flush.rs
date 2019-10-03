@@ -331,7 +331,7 @@ impl<T: DuplexTransport + 'static> Future for ProcessFlush<T> {
                                 .iter()
                                 .enumerate()
                                 .filter_map(|(i, wallet)| {
-                                    Some(wallet.withdraw(&target, &receipt.transaction_hash, &block_hash, &(block_number + i)))
+                                    Some(wallet.withdraw(&target, &receipt.transaction_hash, &block_hash, &(block_number + i))
                                 })
                                 .collect();
 
@@ -350,7 +350,7 @@ impl<T: DuplexTransport + 'static> Future for ProcessFlush<T> {
 
                     match flush_receipt {
                         Some(receipt) => {
-                            ProcessFlushState::WithdrawLeftovers(WithdrawLeftovers::new(&source, &target, &receipt, withdrawals.len()))
+                            ProcessFlushState::WithdrawLeftovers(WithdrawLeftovers::new(&source, &target, &receipt, withdrawals.len() + 1))
                         }
                         None => {
                             error!("No flush receipt available");

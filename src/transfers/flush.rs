@@ -17,6 +17,7 @@ use web3::types::{Address, BlockNumber, Bytes, FilterBuilder, Log, TransactionRe
 use web3::{contract, DuplexTransport};
 use actix_web::web::block;
 
+/// Simple struct with an Address and Balance that represents an ethereum wallet
 #[derive(Clone, Copy, Ord, Eq, PartialEq, PartialOrd)]
 pub struct Wallet {
     address: Address,
@@ -24,6 +25,11 @@ pub struct Wallet {
 }
 
 impl Wallet {
+    /// Create a new wallet
+    /// # Arguments
+    ///
+    /// * `address` - Address for the wallet
+    /// * `balance` - Current balance of tokens at the wallet
     fn new(address: &Address, balance: &U256) -> Self {
         Wallet {
             address: *address,
@@ -31,6 +37,13 @@ impl Wallet {
         }
     }
 
+    /// Create a SendTransaction Future that performs a withdrawal on the target chain
+    /// # Arguments
+    ///
+    /// * `target` - Network to withdrawl from
+    /// * `transaction_hash`- Transaction hash of the flush
+    /// * `block_hash` - Block hash of the flush
+    /// * `block_number` - Modified block number of the flush. Will not match the actual block number to avoid collisions in the contract
     fn withdraw<T: DuplexTransport + 'static>(&self, target: &Network<T>,  transaction_hash: &H256, block_hash: &H256, block_number: &U256) -> SendTransaction<T, ApproveParams> {
         let approve_params = ApproveParams {
             destination: self.address,

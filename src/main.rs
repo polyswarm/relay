@@ -27,6 +27,7 @@ extern crate ethkey;
 extern crate ethstore;
 extern crate rlp;
 extern crate serde;
+extern crate tokio;
 
 pub mod anchors;
 pub mod errors;
@@ -74,7 +75,7 @@ fn main() -> Result<(), Error> {
 
     // Parse options
     let matches = App::new("Polyswarm Relay")
-        .version("0.1.1")
+        .version("1.1.0")
         .author("PolySwarm Developers <info@polyswarm.io>")
         .about("Relays ERC20 tokens between two different networks.")
         .arg(

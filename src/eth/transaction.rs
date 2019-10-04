@@ -2,7 +2,6 @@ use ethcore_transaction::{Action, Transaction as RawTransactionRequest};
 use ethstore::accounts_dir::RootDiskDirectory;
 use ethstore::{EthStore, SimpleSecretStore, StoreAccountRef};
 use rlp::{Encodable, RlpStream};
-use std::rc::Rc;
 use std::sync::atomic::Ordering;
 use web3::contract::tokens::Tokenize;
 use web3::futures::prelude::*;
@@ -29,7 +28,7 @@ where
     T: DuplexTransport + 'static,
     P: Tokenize + Clone,
 {
-    target: Rc<Network<T>>,
+    target: Network<T>,
     function: String,
     params: P,
     nonce: Option<U256>,
@@ -41,7 +40,7 @@ where
     T: DuplexTransport + 'static,
     P: Tokenize + Clone,
 {
-    pub fn new(target: &Rc<Network<T>>, function_name: &str, params: P, nonce: Option<U256>) -> Self {
+    pub fn new(target: &Network<T>, function_name: &str, params: P, nonce: Option<U256>) -> Self {
         let network_type = target.network_type;
         let gas_future = target.web3.eth().gas_price().map_err(move |e| {
             error!("error fetching current gas price on {:?}: {}", network_type, e);
@@ -156,7 +155,7 @@ where
     P: Tokenize + Clone,
 {
     function: String,
-    target: Rc<Network<T>>,
+    target: Network<T>,
     state: TransactionState<T, P>,
     params: P,
     retries: u64, // amount of times relay should try to resync nonce
@@ -174,7 +173,7 @@ where
     /// * `target` - Network where the withdrawal will be posted to the contract
     /// * `function` - Name of the function to call
     /// * `params` - Vec of Tokens corresponsind to the params for the contract function parameters
-    pub fn new(target: &Rc<Network<T>>, function: &str, params: &P, retries: u64) -> Self {
+    pub fn new(target: &Network<T>, function: &str, params: &P, retries: u64) -> Self {
         let target = target.clone();
         let future = BuildTransaction::new(&target, function, params.clone(), None);
         let state = TransactionState::Build(future);
@@ -221,7 +220,8 @@ where
                                     if result == 1.into() {
                                         info!("{} on {:?} successful: {:?}", function, network_type, receipt);
                                     } else {
-                                        warn!("{} on {:?} failed: {:?}", function, network_type, receipt);
+                                        error!("{} on {:?} failed: {:?}", function, network_type, receipt);
+                                        return Err(());
                                     }
                                 }
                                 None => {

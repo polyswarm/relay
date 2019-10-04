@@ -1,28 +1,16 @@
-use ethabi::Token;
+use actix_web::http::StatusCode;
+use actix_web::{middleware, web, App, HttpResponse, HttpServer};
 use serde_derive::{Deserialize, Serialize};
-use std::rc::Rc;
 use std::str::FromStr;
 use std::thread;
-use tokio_core::reactor;
-use web3::contract;
-use web3::contract::tokens::{Detokenize, Tokenize};
-use web3::contract::Options;
 use web3::futures::future;
 use web3::futures::prelude::*;
 use web3::futures::sync::mpsc;
-use web3::futures::try_ready;
-use web3::types::{Address, BlockNumber, TransactionReceipt, H256, U256};
-use web3::DuplexTransport;
-
-use actix_web::http::StatusCode;
-use actix_web::{middleware, web, App, HttpResponse, HttpServer};
+use web3::types::{H256, U256};
 
 use super::errors::EndpointError;
-use super::eth::contracts::TRANSFER_EVENT_SIGNATURE;
 use super::eth::utils;
-use super::relay::{Network, NetworkType};
-use super::transfers::past::ValidateAndApproveTransfer;
-use super::transfers::transfer::Transfer;
+use super::relay::NetworkType;
 
 pub const HOME: &str = "HOME";
 pub const SIDE: &str = "SIDE";
@@ -47,9 +35,9 @@ impl StatusResponse {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct NetworkStatus {
-    relay_eth_balance: Option<U256>,
-    relay_last_block: Option<U256>,
-    contract_nct_balance: Option<U256>,
+    relay_eth_balance: Option<String>,
+    relay_last_block: Option<String>,
+    contract_nct_balance: Option<String>,
 }
 
 impl NetworkStatus {
@@ -59,9 +47,9 @@ impl NetworkStatus {
         contract_nct_balance: Option<U256>,
     ) -> Self {
         NetworkStatus {
-            relay_eth_balance,
-            relay_last_block,
-            contract_nct_balance,
+            relay_eth_balance: relay_eth_balance.map(|v| v.to_string()),
+            relay_last_block: relay_last_block.map(|v| v.to_string()),
+            contract_nct_balance: contract_nct_balance.map(|v| v.to_string()),
         }
     }
 }
@@ -187,333 +175,4 @@ fn search(
         EndpointError::UnableToSend
     })?;
     Ok(HttpResponse::new(StatusCode::OK))
-}
-
-/// Future to handle the Stream of missed transfers by checking them, and approving them
-pub struct HandleRequests {
-    future: Box<Future<Item = (), Error = ()>>,
-}
-
-impl HandleRequests {
-    /// Returns a newly created HandleMissedTransfers Future
-    ///
-    /// # Arguments
-    ///
-    /// * `source` - Network where the missed transfers are captured
-    /// * `target` - Network where the transfer will be approved for a withdrawal
-    /// * `rx` - Receiver where requested RequestTypes will come across
-    /// * `handle` - Handle to spawn new futures
-    pub fn new<T: DuplexTransport + 'static>(
-        homechain: &Rc<Network<T>>,
-        sidechain: &Rc<Network<T>>,
-        rx: mpsc::UnboundedReceiver<RequestType>,
-        handle: &reactor::Handle,
-    ) -> Self {
-        let handle = handle.clone();
-        let homechain = homechain.clone();
-        let sidechain = sidechain.clone();
-        let requests_future = rx.for_each(move |request| {
-            let homechain = homechain.clone();
-            let sidechain = sidechain.clone();
-            let handle = handle.clone();
-            match request {
-                RequestType::Hash(chain, tx_hash) => {
-                    let (source, target) = match chain {
-                        NetworkType::Home => (homechain, sidechain),
-                        NetworkType::Side => (sidechain, homechain),
-                    };
-                    future::Either::A(
-                        FindTransferInTransaction::new(&source, &tx_hash)
-                            .and_then(move |transfers| {
-                                let handle = handle.clone();
-                                let target = target.clone();
-                                let futures: Vec<ValidateAndApproveTransfer<T>> = transfers
-                                    .iter()
-                                    .map(move |transfer| {
-                                        let handle = handle.clone();
-                                        let target = target.clone();
-                                        ValidateAndApproveTransfer::new(&target, &handle, &transfer)
-                                    })
-                                    .collect();
-                                future::join_all(futures)
-                            })
-                            .and_then(|_| Ok(()))
-                            .or_else(move |_| {
-                                // No log here, errors are caught in Futures
-                                Ok(())
-                            }),
-                    )
-                }
-                RequestType::Status(tx) => {
-                    let home_eth_future = homechain
-                        .web3
-                        .eth()
-                        .balance(homechain.account, None)
-                        .and_then(move |balance| Ok(Some(balance)))
-                        .or_else(|_| Ok(None));
-
-                    let home_balance_query = BalanceQuery::new(homechain.relay.address());
-                    let home_nct_future = homechain
-                        .token
-                        .query::<BalanceOf, Address, BlockNumber, BalanceQuery>(
-                            "balanceOf",
-                            home_balance_query,
-                            homechain.account,
-                            Options::default(),
-                            BlockNumber::Latest,
-                        )
-                        .and_then(move |balance| Ok(Some(balance.0)))
-                        .or_else(move |_| Ok(None));
-
-                    let home_last_block_future = homechain
-                        .web3
-                        .eth()
-                        .block_number()
-                        .and_then(move |block| Ok(Some(block)))
-                        .or_else(|_| Ok(None));
-
-                    let side_eth_future = sidechain
-                        .web3
-                        .eth()
-                        .balance(sidechain.account, None)
-                        .and_then(move |balance| Ok(Some(balance)))
-                        .or_else(|_| Ok(None));
-                    let side_balance_query = BalanceQuery::new(sidechain.relay.address());
-                    let side_nct_future = sidechain
-                        .token
-                        .query::<BalanceOf, Address, BlockNumber, BalanceQuery>(
-                            "balanceOf",
-                            side_balance_query,
-                            sidechain.account,
-                            Options::default(),
-                            BlockNumber::Latest,
-                        )
-                        .and_then(move |balance| Ok(Some(balance.0)))
-                        .or_else(move |_| Ok(None));
-
-                    let side_last_block_future = sidechain
-                        .web3
-                        .eth()
-                        .block_number()
-                        .and_then(move |block| Ok(Some(block)))
-                        .or_else(|_| Ok(None));
-
-                    let futures: Vec<Box<Future<Item = Option<U256>, Error = ()>>> = vec![
-                        Box::new(home_eth_future),
-                        Box::new(home_last_block_future),
-                        Box::new(home_nct_future),
-                        Box::new(side_eth_future),
-                        Box::new(side_last_block_future),
-                        Box::new(side_nct_future),
-                    ];
-
-                    let tx = tx.clone();
-                    let error_tx = tx.clone();
-
-                    future::Either::B(
-                        future::join_all(futures)
-                            .and_then(move |results| {
-                                debug!("results from status futures: {:?}", results);
-                                let home = NetworkStatus::new(results[0], results[1], results[2]);
-                                let side = NetworkStatus::new(results[3], results[4], results[5]);
-                                Ok(StatusResponse::new(home, side))
-                            })
-                            .and_then(move |response| {
-                                debug!("Status response: {:?}", response);
-                                let tx: mpsc::UnboundedSender<Result<StatusResponse, ()>> = tx.clone();
-                                let send_result = tx.unbounded_send(Ok(response));
-                                if send_result.is_err() {
-                                    error!("error sending status response");
-                                }
-                                Ok(())
-                            })
-                            .or_else(move |e| {
-                                let tx = error_tx.clone();
-                                error!("error getting status: {:?}", e);
-                                let send_result = tx.unbounded_send(Err(()));
-                                if send_result.is_err() {
-                                    error!("error sending status response");
-                                }
-                                Ok(())
-                            }),
-                    )
-                }
-            }
-        });
-
-        HandleRequests {
-            future: Box::new(requests_future),
-        }
-    }
-}
-
-impl Future for HandleRequests {
-    type Item = ();
-    type Error = ();
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        self.future.poll()
-    }
-}
-
-pub enum FindTransferState {
-    ExtractTransfers(Box<Future<Item = Vec<Transfer>, Error = ()>>),
-    FetchReceipt(Box<Future<Item = Option<TransactionReceipt>, Error = ()>>),
-}
-
-/// Future to find a vec of transfers at a specific transaction
-pub struct FindTransferInTransaction<T: DuplexTransport + 'static> {
-    hash: H256,
-    source: Rc<Network<T>>,
-    state: FindTransferState,
-}
-
-impl<T: DuplexTransport + 'static> FindTransferInTransaction<T> {
-    /// Returns a newly created FindTransferInTransaction Future
-    ///
-    /// # Arguments
-    ///
-    /// * `source` - Network where the transaction took place
-    /// * `hash` - Transaction hash to check
-    fn new(source: &Rc<Network<T>>, hash: &H256) -> Self {
-        let web3 = source.web3.clone();
-        let network_type = source.network_type;
-        let future = web3.clone().eth().transaction_receipt(*hash).map_err(move |e| {
-            error!("error getting transaction receipt on {:?}: {:?}", network_type, e);
-        });
-        let state = FindTransferState::FetchReceipt(Box::new(future));
-        FindTransferInTransaction {
-            hash: *hash,
-            source: source.clone(),
-            state,
-        }
-    }
-}
-
-impl<T: DuplexTransport + 'static> Future for FindTransferInTransaction<T> {
-    type Item = Vec<Transfer>;
-    type Error = ();
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        loop {
-            let source = self.source.clone();
-            let network_type = source.network_type;
-            let hash = self.hash;
-            let next = match self.state {
-                FindTransferState::ExtractTransfers(ref mut future) => {
-                    let transfers = try_ready!(future.poll());
-                    if transfers.is_empty() {
-                        warn!("no relay transactions found on {:?} at {:?}", network_type, hash);
-                        return Err(());
-                    } else {
-                        return Ok(Async::Ready(transfers));
-                    }
-                }
-                FindTransferState::FetchReceipt(ref mut future) => {
-                    let receipt = try_ready!(future.poll());
-                    match receipt {
-                        Some(r) => {
-                            if r.block_hash.is_none() {
-                                error!("receipt did not have block hash on {:?}", network_type);
-                                return Err(());
-                            }
-                            let block_hash = r.block_hash.unwrap();
-                            r.block_number.map_or_else(
-                                || {
-                                    error!("receipt did not have block number on {:?}", network_type);
-                                    Err(())
-                                },
-                                |receipt_block| {
-                                    let future = source
-                                        .web3
-                                        .clone()
-                                        .eth()
-                                        .block_number()
-                                        .and_then(move |block| {
-                                            let mut transfers = Vec::new();
-                                            if let Some(confirmed) =
-                                                block.checked_rem(receipt_block).map(|u| u.as_u64())
-                                            {
-                                                if confirmed > source.confirmations {
-                                                    let logs = r.logs;
-                                                    for log in logs {
-                                                        info!(
-                                                            "found log at {:?} on {:?}: {:?}",
-                                                            hash, network_type, log
-                                                        );
-                                                        if log.topics[0] == TRANSFER_EVENT_SIGNATURE.into()
-                                                            && log.topics[2] == source.relay.address().into()
-                                                        {
-                                                            let destination: Address = log.topics[1].into();
-                                                            let amount: U256 = log.data.0[..32].into();
-                                                            if destination == Address::zero() {
-                                                                info!("found mint on {:?}. Skipping", network_type);
-                                                                continue;
-                                                            }
-                                                            let transfer = Transfer {
-                                                                destination,
-                                                                amount,
-                                                                tx_hash: hash,
-                                                                block_hash,
-                                                                block_number: receipt_block,
-                                                                removed: false,
-                                                            };
-                                                            transfers.push(transfer);
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                            Ok(transfers)
-                                        })
-                                        .map_err(move |e| {
-                                            error!("error getting current block on {:?}: {:?}", network_type, e);
-                                        });
-                                    Ok(FindTransferState::ExtractTransfers(Box::new(future)))
-                                },
-                            )
-                        }
-                        None => {
-                            error!("unable to find {:?} on {:?}", hash, source.network_type);
-                            return Err(());
-                        }
-                    }?
-                }
-            };
-            self.state = next;
-        }
-    }
-}
-
-pub struct BalanceQuery {
-    address: Address,
-}
-
-impl BalanceQuery {
-    fn new(address: Address) -> Self {
-        BalanceQuery { address }
-    }
-}
-
-impl Tokenize for BalanceQuery {
-    fn into_tokens(self) -> Vec<Token> {
-        vec![Token::Address(self.address)]
-    }
-}
-
-/// Withdrawal event added to contract after a transfer
-#[derive(Debug, Clone)]
-pub struct BalanceOf(U256);
-
-impl Detokenize for BalanceOf {
-    /// Creates a new instance from parsed ABI tokens.
-    fn from_tokens(tokens: Vec<Token>) -> Result<Self, contract::Error>
-    where
-        Self: Sized,
-    {
-        let balance = tokens[0].clone().to_uint().ok_or_else(|| {
-            contract::Error::from_kind(contract::ErrorKind::Msg(
-                "cannot parse balance from contract response".to_string(),
-            ))
-        })?;
-        debug!("balance of: {:?}", balance);
-        Ok(BalanceOf(balance))
-    }
 }

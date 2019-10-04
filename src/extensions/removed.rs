@@ -1,4 +1,3 @@
-use std::rc::Rc;
 use web3::futures::prelude::*;
 use web3::types::H256;
 use web3::DuplexTransport;
@@ -9,7 +8,7 @@ pub struct ExitOnLogRemoved<T, I, E>
 where
     T: DuplexTransport + 'static,
 {
-    target: Rc<Network<T>>,
+    target: Network<T>,
     tx_hash: H256,
     future: Box<Future<Item = I, Error = E>>,
 }
@@ -18,9 +17,9 @@ impl<T, I, E> ExitOnLogRemoved<T, I, E>
 where
     T: DuplexTransport + 'static,
 {
-    pub fn new(target: Rc<Network<T>>, tx_hash: H256, future: Box<Future<Item = I, Error = E>>) -> Self {
+    pub fn new(target: &Network<T>, tx_hash: H256, future: Box<Future<Item = I, Error = E>>) -> Self {
         ExitOnLogRemoved {
-            target,
+            target: target.clone(),
             tx_hash,
             future,
         }
@@ -61,7 +60,7 @@ where
     /// * `self` - Existing Future that this is added to. Consumes self.
     /// * `target` - Target network to check against
     /// * `tx_hash` - Tx hash to check for removal
-    fn cancel_removed(self, target: &Rc<Network<T>>, tx_hash: H256) -> ExitOnLogRemoved<T, I, E>;
+    fn cancel_removed(self, target: &Network<T>, tx_hash: H256) -> ExitOnLogRemoved<T, I, E>;
 }
 
 #[cfg(test)]
@@ -103,8 +102,8 @@ mod tests {
     where
         T: DuplexTransport + 'static,
     {
-        fn cancel_removed(self, target: &Rc<Network<T>>, tx_hash: H256) -> ExitOnLogRemoved<T, (), ()> {
-            ExitOnLogRemoved::<T, (), ()>::new(target.clone(), tx_hash, Box::new(self))
+        fn cancel_removed(self, target: &Network<T>, tx_hash: H256) -> ExitOnLogRemoved<T, (), ()> {
+            ExitOnLogRemoved::<T, (), ()>::new(target, tx_hash, Box::new(self))
         }
     }
 
@@ -114,9 +113,9 @@ mod tests {
         let mut eloop = tokio_core::reactor::Core::new().unwrap();
         let handle = eloop.handle();
         let mock = MockTransport::new();
-        let target = Rc::new(mock.new_network(NetworkType::Home).unwrap());
+        let target = mock.new_network(NetworkType::Home).unwrap();
         let future = ExitOnLogRemoved::<MockTransport, (), std::io::Error>::new(
-            target.clone(),
+            &target,
             H256::zero(),
             Box::new(reactor::Timeout::new(Duration::from_secs(1), &handle).unwrap()),
         );
@@ -137,9 +136,9 @@ mod tests {
         let mut eloop = tokio_core::reactor::Core::new().unwrap();
         let handle = eloop.handle();
         let mock = MockTransport::new();
-        let target = Rc::new(mock.new_network(NetworkType::Home).unwrap());
+        let target = mock.new_network(NetworkType::Home).unwrap();
         let future = ExitOnLogRemoved::<MockTransport, (), std::io::Error>::new(
-            target.clone(),
+            &target,
             H256::zero(),
             Box::new(reactor::Timeout::new(Duration::from_secs(1), &handle).unwrap()),
         );
@@ -155,7 +154,7 @@ mod tests {
         let mut eloop = tokio_core::reactor::Core::new().unwrap();
         let handle = eloop.handle();
         let mock = MockTransport::new();
-        let target = Rc::new(mock.new_network(NetworkType::Home).unwrap());
+        let target = mock.new_network(NetworkType::Home).unwrap();
         let future = TestCheckRemoved::new(&handle).cancel_removed(&target, H256::zero());
         // act
         target
@@ -174,7 +173,7 @@ mod tests {
         let mut eloop = tokio_core::reactor::Core::new().unwrap();
         let handle = eloop.handle();
         let mock = MockTransport::new();
-        let target = Rc::new(mock.new_network(NetworkType::Home).unwrap());
+        let target = mock.new_network(NetworkType::Home).unwrap();
         let future = TestCheckRemoved::new(&handle).cancel_removed(&target, H256::zero());
 
         // act
@@ -188,7 +187,7 @@ mod tests {
         // arrange
         let mut eloop = tokio_core::reactor::Core::new().unwrap();
         let mock = MockTransport::new();
-        let target = Rc::new(mock.new_network(NetworkType::Home).unwrap());
+        let target = mock.new_network(NetworkType::Home).unwrap();
         let future = TestCheckRemoved {
             inner: Box::new(web3::futures::future::err(())),
         }
@@ -199,5 +198,4 @@ mod tests {
         // assert
         assert_eq!(result, Err(()))
     }
-
 }

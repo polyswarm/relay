@@ -1,5 +1,4 @@
 use std::fmt;
-use std::rc::Rc;
 use web3::contract::tokens::Tokenize;
 use web3::futures::future::Future;
 use web3::types::{Address, TransactionReceipt, H256, U256};
@@ -16,8 +15,8 @@ where
     T: DuplexTransport + 'static,
     P: Tokenize + Clone + 'static,
 {
-    fn cancel_removed(self, target: &Rc<Network<T>>, tx_hash: H256) -> ExitOnLogRemoved<T, (), ()> {
-        ExitOnLogRemoved::new(target.clone(), tx_hash, Box::new(self))
+    fn cancel_removed(self, target: &Network<T>, tx_hash: H256) -> ExitOnLogRemoved<T, (), ()> {
+        ExitOnLogRemoved::new(target, tx_hash, Box::new(self))
     }
 }
 
@@ -73,7 +72,7 @@ impl Transfer {
     /// # Arguments
     ///
     /// * `target` - Network that withdrawals are posted to
-    pub fn check_withdrawal<T: DuplexTransport + 'static>(&self, target: &Rc<Network<T>>) -> DoesRequireApproval<T> {
+    pub fn check_withdrawal<T: DuplexTransport + 'static>(&self, target: &Network<T>) -> DoesRequireApproval<T> {
         DoesRequireApproval::new(target, self)
     }
 
@@ -84,44 +83,47 @@ impl Transfer {
     /// * `target` - Network where the withdrawals is performed
     pub fn approve_withdrawal<T: DuplexTransport + 'static>(
         &self,
-        target: &Rc<Network<T>>,
+        source: &Network<T>,
+        target: &Network<T>,
     ) -> Box<Future<Item = (), Error = ()>> {
         info!("approving withdrawal on {:?}: {} ", target.network_type, self);
         let target = target.clone();
-        Box::new(
-            SendTransaction::new(
-                &target,
-                "approveWithdrawal",
-                &ApproveParams::from(*self),
-                target.retries,
-            )
-            .cancel_removed(&target, self.tx_hash)
-            .and_then(move |success| {
-                success.map_or_else(
-                    || {
-                        warn!(
-                            "log removed from originating chain while waiting on approval confirmations on target {:?}",
-                            target.network_type
-                        );
-                        Ok(())
-                    },
-                    |_| Ok(()),
-                )
-            }),
+        let send = SendTransaction::new(
+            &target,
+            "approveWithdrawal",
+            &ApproveParams::from(*self),
+            target.retries,
         )
+        .cancel_removed(&source, self.tx_hash)
+        .and_then(move |success| {
+            success.map_or_else(
+                || {
+                    warn!(
+                        "log removed from originating chain while waiting on approval confirmations on target {:?}",
+                        target.network_type
+                    );
+                    Ok(())
+                },
+                |_| Ok(()),
+            )
+        })
+        .or_else(|_| Ok(()));
+        Box::new(send)
     }
 
     pub fn unapprove_withdrawal<T: DuplexTransport + 'static>(
         &self,
-        target: &Rc<Network<T>>,
-    ) -> SendTransaction<T, UnapproveParams> {
+        target: &Network<T>,
+    ) -> Box<Future<Item = (), Error = ()>> {
         info!("unapproving withdrawal on {:?}: {} ", target.network_type, self);
-        SendTransaction::new(
+        let send = SendTransaction::new(
             target,
             "unapproveWithdrawal",
             &UnapproveParams::from(*self),
             target.retries,
         )
+        .or_else(|_| Ok(()));
+        Box::new(send)
     }
 }
 

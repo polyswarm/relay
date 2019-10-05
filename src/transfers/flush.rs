@@ -766,11 +766,11 @@ impl<T: DuplexTransport + 'static> Future for CheckBalances<T> {
                 }
                 CheckBalancesState::GetLogWindow(end, window_end, ref mut future) => {
                     let logs = try_ready!(future.poll());
-                    info!(
+                    debug!(
                         "found {} logs with transfers between {} and {}",
                         logs.len(),
+                        window_end - 1000,
                         window_end,
-                        end
                     );
                     // Process existing logs
                     logs.iter().for_each(|log| {

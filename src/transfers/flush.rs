@@ -16,7 +16,7 @@ use web3::{contract, DuplexTransport};
 use relay::Network;
 use server::handler::{BalanceOf, BalanceQuery};
 use transfers::transfer::Transfer;
-use transfers::withdrawal::{ApproveParams, DoesRequireApproval, WaitForWithdrawalProcessed};
+use transfers::withdrawal::{ApproveParams, WaitForWithdrawalProcessed};
 
 /// Simple struct with an Address and Balance that represents an ethereum wallet
 #[derive(Clone, Copy, Ord, Eq, PartialEq, PartialOrd)]

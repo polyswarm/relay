@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use web3::contract::tokens::{Detokenize, Tokenize};
 use web3::contract::Options;
 use web3::futures::future::join_all;
+use web3::futures::future::{ok, Either};
 use web3::futures::prelude::*;
 use web3::futures::sync::mpsc;
 use web3::futures::try_ready;
@@ -14,7 +15,8 @@ use web3::{contract, DuplexTransport};
 
 use relay::Network;
 use server::handler::{BalanceOf, BalanceQuery};
-use transfers::withdrawal::ApproveParams;
+use transfers::transfer::Transfer;
+use transfers::withdrawal::{ApproveParams, WaitForWithdrawalProcessed};
 
 /// Simple struct with an Address and Balance that represents an ethereum wallet
 #[derive(Clone, Copy, Ord, Eq, PartialEq, PartialOrd)]
@@ -33,6 +35,23 @@ impl Wallet {
         Wallet {
             address: *address,
             balance: *balance,
+        }
+    }
+
+    /// Creates a transfer for this wallet given the flush tx hash, block hash, and the block number with offset
+    /// # Arguments
+    ///
+    /// * `transaction_hash`- Transaction hash of the flush
+    /// * `block_hash` - Block hash of the flush
+    /// * `block_number` - Modified block number of the flush. Will not match the actual block number to avoid collisions in the contract
+    fn get_transfer(&self, transaction_hash: &H256, block_hash: &H256, block_number: &U256) -> Transfer {
+        Transfer {
+            destination: self.address,
+            amount: self.balance,
+            tx_hash: *transaction_hash,
+            block_hash: *block_hash,
+            block_number: *block_number,
+            removed: false,
         }
     }
 
@@ -327,16 +346,45 @@ impl<T: DuplexTransport + 'static> Future for ProcessFlush<T> {
                             let block_hash = receipt.block_hash.unwrap();
                             let block_number = receipt.block_number.unwrap();
                             balances.sort();
-                            let futures: Vec<SendTransaction<T, ApproveParams>> = balances
+                            let futures: Vec<Box<Future<Item = (), Error = ()>>> = balances
                                 .iter()
                                 .enumerate()
                                 .map(|(i, wallet)| {
-                                    wallet.withdraw(
-                                        &target,
+                                    // Copy a bunch of values
+                                    let target = target.clone();
+                                    let wait_target = target.clone();
+                                    let transaction_hash = receipt.transaction_hash;
+                                    let wallet = *wallet;
+
+                                    // Create futures
+                                    let transfer = wallet.get_transfer(
                                         &receipt.transaction_hash,
                                         &block_hash,
                                         &(block_number + i),
-                                    )
+                                    );
+                                    let future: Box<Future<Item = (), Error = ()>> = Box::new(
+                                        transfer
+                                            .check_withdrawal(&target)
+                                            .and_then(move |needs_approval| {
+                                                let target = target.clone();
+                                                if needs_approval {
+                                                    Either::A(wallet.withdraw(
+                                                        &target,
+                                                        &transaction_hash,
+                                                        &block_hash,
+                                                        &(block_number + i),
+                                                    ))
+                                                } else {
+                                                    Either::B(ok(()))
+                                                }
+                                            })
+                                            .and_then(move |_| {
+                                                let target = wait_target.clone();
+                                                // Wait until it is processed before moving on
+                                                WaitForWithdrawalProcessed::new(&target, &transfer)
+                                            }),
+                                    );
+                                    future
                                 })
                                 .collect();
 

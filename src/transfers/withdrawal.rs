@@ -107,6 +107,20 @@ pub struct Withdrawal {
     pub processed: bool,
 }
 
+impl Withdrawal {
+    fn get_withdrawal_hash(transfer: &Transfer) -> H256 {
+        let tx_hash = transfer.tx_hash;
+        let block_hash = transfer.block_hash;
+        let block_number: &mut [u8] = &mut [0; 32];
+        transfer.block_number.to_big_endian(block_number);
+        let mut grouped: Vec<u8> = Vec::new();
+        grouped.extend_from_slice(&tx_hash[..]);
+        grouped.extend_from_slice(&block_hash[..]);
+        grouped.extend_from_slice(block_number);
+        H256(keccak256(&grouped[..]))
+    }
+}
+
 impl Detokenize for Withdrawal {
     /// Creates a new instance from parsed ABI tokens.
     fn from_tokens(tokens: Vec<Token>) -> Result<Self, contract::Error>
@@ -170,7 +184,7 @@ pub struct DoesRequireApproval<T: DuplexTransport + 'static> {
 
 impl<T: DuplexTransport + 'static> DoesRequireApproval<T> {
     pub fn new(target: &Network<T>, transfer: &Transfer) -> Self {
-        let approval_hash = Self::get_withdrawal_hash(transfer);
+        let approval_hash = Withdrawal::get_withdrawal_hash(transfer);
         let account = target.account;
         let network_type = target.network_type;
         let future = Box::new(
@@ -194,18 +208,6 @@ impl<T: DuplexTransport + 'static> DoesRequireApproval<T> {
             state,
         }
     }
-
-    fn get_withdrawal_hash(transfer: &Transfer) -> H256 {
-        let tx_hash = transfer.tx_hash;
-        let block_hash = transfer.block_hash;
-        let block_number: &mut [u8] = &mut [0; 32];
-        transfer.block_number.to_big_endian(block_number);
-        let mut grouped: Vec<u8> = Vec::new();
-        grouped.extend_from_slice(&tx_hash[..]);
-        grouped.extend_from_slice(&block_hash[..]);
-        grouped.extend_from_slice(block_number);
-        H256(keccak256(&grouped[..]))
-    }
 }
 
 impl<T: DuplexTransport + 'static> Future for DoesRequireApproval<T> {
@@ -227,7 +229,7 @@ impl<T: DuplexTransport + 'static> Future for DoesRequireApproval<T> {
                             return Ok(Async::Ready(false));
                         } else {
                             debug!("transaction not processed on {:?} - checking approvers", network_type);
-                            let approval_hash = Self::get_withdrawal_hash(&self.transfer);
+                            let approval_hash = Withdrawal::get_withdrawal_hash(&self.transfer);
                             let approval_future = GetWithdrawalApprovals::new(&self.target, &approval_hash, &0.into());
                             CheckWithdrawalState::GetWithdrawalApprovals(0, approval_future)
                         }
@@ -245,7 +247,7 @@ impl<T: DuplexTransport + 'static> Future for DoesRequireApproval<T> {
                                 return Ok(Async::Ready(false));
                             } else {
                                 let i = index + 1;
-                                let approval_hash = Self::get_withdrawal_hash(&self.transfer);
+                                let approval_hash = Withdrawal::get_withdrawal_hash(&self.transfer);
                                 let approval_future =
                                     GetWithdrawalApprovals::new(&self.target, &approval_hash, &i.into());
                                 CheckWithdrawalState::GetWithdrawalApprovals(i, approval_future)
@@ -300,5 +302,57 @@ impl Future for GetWithdrawalApprovals {
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         self.0.poll()
+    }
+}
+
+pub struct WaitForWithdrawalProcessed<T: DuplexTransport + 'static> {
+    target: Network<T>,
+    transfer: Transfer,
+    future: Box<Future<Item = Withdrawal, Error = ()>>,
+}
+
+impl<T: DuplexTransport + 'static> WaitForWithdrawalProcessed<T> {
+    pub fn new(target: &Network<T>, transfer: &Transfer) -> Self {
+        let future = WaitForWithdrawalProcessed::check(target, transfer);
+        WaitForWithdrawalProcessed {
+            target: target.clone(),
+            transfer: *transfer,
+            future,
+        }
+    }
+
+    fn check(target: &Network<T>, transfer: &Transfer) -> Box<Future<Item = Withdrawal, Error = ()>> {
+        let approval_hash = Withdrawal::get_withdrawal_hash(transfer);
+        let account = target.account;
+        let network_type = target.network_type;
+        Box::new(
+            target
+                .relay
+                .query::<Withdrawal, Address, BlockNumber, H256>(
+                    "withdrawals",
+                    approval_hash,
+                    account,
+                    Options::default(),
+                    BlockNumber::Latest,
+                )
+                .map_err(move |e| {
+                    error!("error getting withdrawal on {:?}: {:?}", network_type, e);
+                }),
+        )
+    }
+}
+
+impl<T: DuplexTransport + 'static> Future for WaitForWithdrawalProcessed<T> {
+    type Item = ();
+    type Error = ();
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        loop {
+            let withdrawal = try_ready!(self.future.poll());
+            if withdrawal.processed {
+                return Ok(Async::Ready(()));
+            } else {
+                self.future = WaitForWithdrawalProcessed::check(&self.target, &self.transfer);
+            }
+        }
     }
 }

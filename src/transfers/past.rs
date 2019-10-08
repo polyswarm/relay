@@ -240,7 +240,7 @@ impl<T: DuplexTransport + 'static> ValidateAndApproveTransfer<T> {
     /// * `transfer` - Transfer event to check/approve
     pub fn new(source: &Network<T>, target: &Network<T>, handle: &reactor::Handle, transfer: &Transfer) -> Self {
         let network_type = target.network_type;
-        let future = transfer.check_withdrawal(&target).map_err(move |e| {
+        let future = transfer.check_withdrawal(&target, None).map_err(move |e| {
             error!("error checking withdrawal for approval on {:?}: {:?}", network_type, e);
         });
 

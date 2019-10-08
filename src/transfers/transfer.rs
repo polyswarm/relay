@@ -72,8 +72,12 @@ impl Transfer {
     /// # Arguments
     ///
     /// * `target` - Network that withdrawals are posted to
-    pub fn check_withdrawal<T: DuplexTransport + 'static>(&self, target: &Network<T>) -> DoesRequireApproval<T> {
-        DoesRequireApproval::new(target, self)
+    pub fn check_withdrawal<T: DuplexTransport + 'static>(
+        &self,
+        target: &Network<T>,
+        fees: Option<U256>,
+    ) -> DoesRequireApproval<T> {
+        DoesRequireApproval::new(target, self, fees)
     }
 
     /// Returns a Future that will transaction with "approve_withdrawal" on the ERC20Relay contract

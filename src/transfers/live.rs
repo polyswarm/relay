@@ -193,13 +193,16 @@ impl<T: DuplexTransport + 'static> ProcessTransfer<T> {
                         .put(transfer.tx_hash, TransferApprovalState::Removed);
                     // LRU Cache will drop values, so we need to recheck the chain
                     let target = self.target.clone();
-                    let unapprove_future = transfer.check_withdrawal(&self.target).and_then(move |not_approved| {
-                        if !not_approved {
-                            Either::A(transfer.unapprove_withdrawal(&target))
-                        } else {
-                            Either::B(ok(()))
-                        }
-                    });
+                    let unapprove_future =
+                        transfer
+                            .check_withdrawal(&self.target, None)
+                            .and_then(move |not_approved| {
+                                if !not_approved {
+                                    Either::A(transfer.unapprove_withdrawal(&target))
+                                } else {
+                                    Either::B(ok(()))
+                                }
+                            });
                     self.handle.spawn(unapprove_future);
                 } else {
                     self.source
@@ -210,13 +213,15 @@ impl<T: DuplexTransport + 'static> ProcessTransfer<T> {
                     // LRU Cache will drop values, so we need to recheck the chain
                     let source = self.source.clone();
                     let target = self.target.clone();
-                    let approve_future = transfer.check_withdrawal(&self.target).and_then(move |not_approved| {
-                        if not_approved {
-                            Either::A(transfer.approve_withdrawal(&source, &target))
-                        } else {
-                            Either::B(ok(()))
-                        }
-                    });
+                    let approve_future = transfer
+                        .check_withdrawal(&self.target, None)
+                        .and_then(move |not_approved| {
+                            if not_approved {
+                                Either::A(transfer.approve_withdrawal(&source, &target))
+                            } else {
+                                Either::B(ok(()))
+                            }
+                        });
                     self.handle.spawn(approve_future);
                 }
             }

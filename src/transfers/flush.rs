@@ -1,9 +1,5 @@
-use eth::contracts::{FLUSH_EVENT_SIGNATURE, TRANSFER_EVENT_SIGNATURE};
-use eth::transaction::SendTransaction;
-use ethabi::Token;
 use std::cmp;
 use std::collections::HashMap;
-use web3::contract::tokens::{Detokenize, Tokenize};
 use web3::contract::Options;
 use web3::futures::future::join_all;
 use web3::futures::future::{ok, Either};
@@ -11,8 +7,13 @@ use web3::futures::prelude::*;
 use web3::futures::sync::mpsc;
 use web3::futures::try_ready;
 use web3::types::{Address, BlockNumber, Bytes, FilterBuilder, Log, TransactionReceipt, H256, U256};
-use web3::{contract, DuplexTransport};
+use web3::DuplexTransport;
 
+use eth::contracts::{
+    FeeQuery, FeeWallet, FeeWalletQuery, Fees, FlushBlock, FlushBlockQuery, FLUSH_EVENT_SIGNATURE,
+    TRANSFER_EVENT_SIGNATURE,
+};
+use eth::transaction::SendTransaction;
 use relay::Network;
 use server::handler::{BalanceOf, BalanceQuery};
 use transfers::live::Event;
@@ -81,41 +82,6 @@ impl Wallet {
     }
 }
 
-/// struct for taking the FlushBlockQuery  and parsing the Tokens
-#[derive(Debug, Clone)]
-pub struct FlushBlock(U256);
-
-impl Detokenize for FlushBlock {
-    /// Creates a new instance from parsed ABI tokens.
-    fn from_tokens(tokens: Vec<Token>) -> Result<Self, contract::Error>
-    where
-        Self: Sized,
-    {
-        let block = tokens[0].clone().to_uint().ok_or_else(|| {
-            contract::Error::from_kind(contract::ErrorKind::Msg(
-                "cannot parse flush blockfrom contract response".to_string(),
-            ))
-        })?;
-        debug!("flush block: {:?}", block);
-        Ok(FlushBlock(block))
-    }
-}
-
-/// Query for getting the current FlushBlock from the relay contract
-pub struct FlushBlockQuery {}
-
-impl FlushBlockQuery {
-    fn new() -> Self {
-        FlushBlockQuery {}
-    }
-}
-
-impl Tokenize for FlushBlockQuery {
-    fn into_tokens(self) -> Vec<Token> {
-        vec![]
-    }
-}
-
 enum CheckForPastFlushState {
     CheckFlushBlock(Box<Future<Item = FlushBlock, Error = ()>>),
     GetFlushLog(Box<Future<Item = Vec<Log>, Error = ()>>),
@@ -135,12 +101,11 @@ impl<T: DuplexTransport + 'static> CheckForPastFlush<T> {
     /// * `source` - Network being flushed
     /// * `tx` - Sender to trigger Flush event processor
     pub fn new(source: &Network<T>) -> Self {
-        let flush_block_query = FlushBlockQuery::new();
         let flush_block_future = source
             .relay
             .query::<FlushBlock, Address, BlockNumber, FlushBlockQuery>(
                 "flushBlock",
-                flush_block_query,
+                FlushBlockQuery::default(),
                 source.account,
                 Options::default(),
                 BlockNumber::Latest,
@@ -247,7 +212,7 @@ pub struct ProcessFlush<T: DuplexTransport + 'static> {
     source: Network<T>,
     target: Network<T>,
     rx: mpsc::UnboundedReceiver<Event>,
-    flush_receipt: Option<TransactionReceipt>,
+    flush: Option<Event>,
 }
 
 impl<T: DuplexTransport + 'static> ProcessFlush<T> {
@@ -263,8 +228,91 @@ impl<T: DuplexTransport + 'static> ProcessFlush<T> {
             source: source.clone(),
             target: target.clone(),
             rx,
-            flush_receipt: None,
+            flush: None,
         }
+    }
+
+    fn handle_flush_event(&self, flush: Event) -> Result<Option<CheckBalances<T>>, ()> {
+        if let Ok(mut lock) = self.source.flushed.write() {
+            *lock = Some(flush.clone());
+        } else {
+            error!("error getting write lock on process");
+            return Err(());
+        }
+
+        info!("flush event triggered");
+        let removed = flush.log.removed.unwrap_or(false);
+        if removed {
+            Ok(None)
+        } else {
+            if flush.receipt.block_hash.is_none() {
+                error!("Failed to get block hash for flush");
+                return Err(());
+            }
+
+            if flush.receipt.block_number.is_none() {
+                error!("Failed to get block hash for flush");
+                return Err(());
+            }
+
+            Ok(Some(CheckBalances::new(&self.source, flush.receipt.block_number)))
+        }
+    }
+
+    fn handle_final_wallets(
+        &self,
+        flush_event: &Event,
+        fees: &U256,
+        wallets: &mut Vec<Wallet>,
+    ) -> Result<impl Future<Item = Vec<()>, Error = ()>, ()> {
+        let receipt = flush_event.receipt.clone();
+        if receipt.block_number.is_none() {
+            error!("no block number in transfer receipt");
+            return Err(());
+        }
+
+        if receipt.block_hash.is_none() {
+            error!("no block hash in transfer receipt");
+            return Err(());
+        }
+
+        let block_hash = receipt.block_hash.unwrap();
+        let block_number = receipt.block_number.unwrap();
+        let fees = *fees;
+        wallets.sort();
+
+        let futures: Vec<Box<Future<Item = (), Error = ()>>> = wallets
+            .iter()
+            .enumerate()
+            .map(|(i, wallet)| {
+                let target = self.target.clone();
+                let wait_target = self.target.clone();
+                let transaction_hash = receipt.transaction_hash;
+                let wallet = *wallet;
+
+                // Create futures
+                let transfer = wallet.get_transfer(&receipt.transaction_hash, &block_hash, &(block_number + i));
+                let future: Box<Future<Item = (), Error = ()>> = Box::new(
+                    transfer
+                        .check_withdrawal(&target, Some(fees))
+                        .and_then(move |needs_approval| {
+                            let target = target.clone();
+                            if needs_approval {
+                                Either::A(wallet.withdraw(&target, &transaction_hash, &block_hash, &(block_number + i)))
+                            } else {
+                                Either::B(ok(()))
+                            }
+                        })
+                        .and_then(move |_| {
+                            let target = wait_target.clone();
+                            // Wait until it is processed before moving on
+                            WaitForWithdrawalProcessed::new(&target, &transfer)
+                        }),
+                );
+                future
+            })
+            .collect();
+        Ok(join_all(futures))
     }
 }
 
@@ -275,37 +323,17 @@ impl<T: DuplexTransport + 'static> Future for ProcessFlush<T> {
         let target = self.target.clone();
         let source = self.source.clone();
         loop {
-            let flush_receipt = self.flush_receipt.clone();
+            let flush = self.flush.clone();
             let next: ProcessFlushState<T> = match self.state {
                 ProcessFlushState::Wait => {
                     let event = try_ready!(self.rx.poll());
                     match event {
                         Some(flush) => {
-                            if let Ok(mut lock) = source.flushed.write() {
-                                *lock = Some(flush.clone());
+                            self.flush = Some(flush.clone());
+                            if let Some(future) = self.handle_flush_event(flush)? {
+                                ProcessFlushState::CheckBalances(future)
                             } else {
-                                error!("error getting write lock on process");
-                                return Err(());
-                            }
-
-                            info!("flush event triggered");
-                            let removed = flush.log.removed.unwrap_or(false);
-                            if removed {
                                 ProcessFlushState::Wait
-                            } else {
-                                if flush.receipt.block_hash.is_none() {
-                                    error!("Failed to get block hash for flush");
-                                    return Err(());
-                                }
-
-                                if flush.receipt.block_number.is_none() {
-                                    error!("Failed to get block hash for flush");
-                                    return Err(());
-                                }
-
-                                self.flush_receipt = Some(flush.receipt.clone());
-                                let balance_future = CheckBalances::new(&source, flush.receipt.block_number);
-                                ProcessFlushState::CheckBalances(balance_future)
                             }
                         }
                         None => {
@@ -326,65 +354,12 @@ impl<T: DuplexTransport + 'static> Future for ProcessFlush<T> {
                     ProcessFlushState::FilterLowBalance(low_balance_future)
                 }
                 ProcessFlushState::FilterLowBalance(ref mut future) => {
-                    let mut balances = try_ready!(future.poll());
+                    let (fees, mut balances) = try_ready!(future.poll());
                     info!("{} wallets above minimum balances", balances.len());
-                    match flush_receipt {
-                        Some(receipt) => {
-                            if receipt.block_number.is_none() {
-                                error!("no block number in transfer receipt");
-                                return Err(());
-                            }
-
-                            if receipt.block_hash.is_none() {
-                                error!("no block hash in transfer receipt");
-                                return Err(());
-                            }
-                            let block_hash = receipt.block_hash.unwrap();
-                            let block_number = receipt.block_number.unwrap();
-                            balances.sort();
-                            let futures: Vec<Box<Future<Item = (), Error = ()>>> = balances
-                                .iter()
-                                .enumerate()
-                                .map(|(i, wallet)| {
-                                    // Copy a bunch of values
-                                    let target = target.clone();
-                                    let wait_target = target.clone();
-                                    let transaction_hash = receipt.transaction_hash;
-                                    let wallet = *wallet;
-
-                                    // Create futures
-                                    let transfer = wallet.get_transfer(
-                                        &receipt.transaction_hash,
-                                        &block_hash,
-                                        &(block_number + i),
-                                    );
-                                    let future: Box<Future<Item = (), Error = ()>> = Box::new(
-                                        transfer
-                                            .check_withdrawal(&target)
-                                            .and_then(move |needs_approval| {
-                                                let target = target.clone();
-                                                if needs_approval {
-                                                    Either::A(wallet.withdraw(
-                                                        &target,
-                                                        &transaction_hash,
-                                                        &block_hash,
-                                                        &(block_number + i),
-                                                    ))
-                                                } else {
-                                                    Either::B(ok(()))
-                                                }
-                                            })
-                                            .and_then(move |_| {
-                                                let target = wait_target.clone();
-                                                // Wait until it is processed before moving on
-                                                WaitForWithdrawalProcessed::new(&target, &transfer)
-                                            }),
-                                    );
-                                    future
-                                })
-                                .collect();
-
-                            ProcessFlushState::WithdrawWallets(Box::new(join_all(futures)))
+                    match flush {
+                        Some(flush_event) => {
+                            let futures = self.handle_final_wallets(&flush_event, &fees.0, &mut balances)?;
+                            ProcessFlushState::WithdrawWallets(Box::new(futures))
                         }
                         None => {
                             error!("No flush receipt available");
@@ -395,17 +370,15 @@ impl<T: DuplexTransport + 'static> Future for ProcessFlush<T> {
                 ProcessFlushState::WithdrawWallets(ref mut future) => {
                     let withdrawals = try_ready!(future.poll());
                     info!("finished {} wallet withdrawals", withdrawals.len());
-
-                    match flush_receipt {
-                        Some(receipt) => ProcessFlushState::WithdrawLeftovers(WithdrawLeftovers::new(
+                    if let Some(flush_event) = flush {
+                        ProcessFlushState::WithdrawLeftovers(WithdrawLeftovers::new(
                             &target,
-                            &receipt,
+                            &flush_event.receipt,
                             withdrawals.len() + 1,
-                        )),
-                        None => {
-                            error!("No flush receipt available");
-                            return Err(());
-                        }
+                        ))
+                    } else {
+                        error!("No flush receipt available");
+                        return Err(());
                     }
                 }
                 ProcessFlushState::WithdrawLeftovers(ref mut future) => {
@@ -416,41 +389,6 @@ impl<T: DuplexTransport + 'static> Future for ProcessFlush<T> {
             };
             self.state = next;
         }
-    }
-}
-
-/// Fee Wallet struct for taking the FeeWalletQuery and parsing the Tokens
-#[derive(Debug, Clone)]
-pub struct FeeWallet(Address);
-
-impl Detokenize for FeeWallet {
-    /// Creates a new instance from parsed ABI tokens.
-    fn from_tokens(tokens: Vec<Token>) -> Result<Self, contract::Error>
-    where
-        Self: Sized,
-    {
-        let fee_wallet = tokens[0].clone().to_address().ok_or_else(|| {
-            contract::Error::from_kind(contract::ErrorKind::Msg(
-                "cannot parse fee wallet from contract response".to_string(),
-            ))
-        })?;
-        debug!("fees wallet: {:?}", fee_wallet);
-        Ok(FeeWallet(fee_wallet))
-    }
-}
-
-/// Query with args for getting the fee wallet
-pub struct FeeWalletQuery {}
-
-impl FeeWalletQuery {
-    fn new() -> Self {
-        FeeWalletQuery {}
-    }
-}
-
-impl Tokenize for FeeWalletQuery {
-    fn into_tokens(self) -> Vec<Token> {
-        vec![]
     }
 }
 
@@ -516,14 +454,13 @@ impl<T: DuplexTransport + 'static> WithdrawLeftovers<T> {
     ///
     /// * `target` - Network being flushed
     fn get_fee_wallet(target: &Network<T>) -> Box<Future<Item = FeeWallet, Error = ()>> {
-        let fee_wallet_query = FeeWalletQuery::new();
         let target = target.clone();
         Box::new(
             target
                 .relay
                 .query::<FeeWallet, Address, BlockNumber, FeeWalletQuery>(
                     "feeWallet",
-                    fee_wallet_query,
+                    FeeWalletQuery::default(),
                     target.account,
                     Options::default(),
                     BlockNumber::Latest,
@@ -586,41 +523,6 @@ impl<T: DuplexTransport + 'static> Future for WithdrawLeftovers<T> {
     }
 }
 
-/// Fees struct for taking the FeeQuery and parsing the Tokens
-#[derive(Debug, Clone)]
-pub struct Fees(U256);
-
-impl Detokenize for Fees {
-    /// Creates a new instance from parsed ABI tokens.
-    fn from_tokens(tokens: Vec<Token>) -> Result<Self, contract::Error>
-    where
-        Self: Sized,
-    {
-        let fee = tokens[0].clone().to_uint().ok_or_else(|| {
-            contract::Error::from_kind(contract::ErrorKind::Msg(
-                "cannot parse fees from contract response".to_string(),
-            ))
-        })?;
-        debug!("fees: {:?}", fee);
-        Ok(Fees(fee))
-    }
-}
-
-/// Query with args for getting the fees
-pub struct FeeQuery {}
-
-impl FeeQuery {
-    fn new() -> Self {
-        FeeQuery {}
-    }
-}
-
-impl Tokenize for FeeQuery {
-    fn into_tokens(self) -> Vec<Token> {
-        vec![]
-    }
-}
-
 /// FilterLowBalance Future that takes a list of wallets, and filters out that have a balance below the fee cost to withdraw
 pub struct FilterLowBalance {
     future: Box<Future<Item = Fees, Error = ()>>,
@@ -639,7 +541,7 @@ impl FilterLowBalance {
             .relay
             .query::<Fees, Address, BlockNumber, FeeQuery>(
                 "fees",
-                FeeQuery::new(),
+                FeeQuery::default(),
                 target.account,
                 Options::default(),
                 BlockNumber::Latest,
@@ -656,7 +558,7 @@ impl FilterLowBalance {
 }
 
 impl Future for FilterLowBalance {
-    type Item = Vec<Wallet>;
+    type Item = (Fees, Vec<Wallet>);
     type Error = ();
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         let fee = try_ready!(self.future.poll());
@@ -672,7 +574,7 @@ impl Future for FilterLowBalance {
                 }
             })
             .collect();
-        Ok(Async::Ready(filtered))
+        Ok(Async::Ready((fee, filtered)))
     }
 }
 

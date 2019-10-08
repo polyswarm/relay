@@ -7,7 +7,7 @@ use std::{process, time};
 use tokio_core::reactor;
 use web3::confirm::{wait_for_transaction_confirmation, SendTransactionWithConfirmation};
 use web3::contract::Contract;
-use web3::futures::future::Either;
+use web3::futures::future::{Either, err};
 use web3::futures::sync::mpsc;
 use web3::futures::Future;
 use web3::types::{Address, FilterBuilder, TransactionReceipt, H256, U256};
@@ -24,6 +24,7 @@ use super::transfers::flush::ProcessFlush;
 use super::transfers::live::ProcessTransfer;
 use super::transfers::live::WatchLiveLogs;
 use super::transfers::past::RecheckPastTransferLogs;
+use transfers::live::Event;
 
 const FREE_GAS_PRICE: u64 = 0;
 const GAS_LIMIT: u64 = 200_000;
@@ -59,8 +60,8 @@ impl<T: DuplexTransport + 'static> Relay<T> {
         Self { homechain, sidechain }
     }
 
-    fn handle_requests(&self, rx: mpsc::UnboundedReceiver<RequestType>, handle: &reactor::Handle) -> HandleRequests<T> {
-        HandleRequests::new(&self.homechain, &self.sidechain, rx, handle)
+    fn handle_requests(homechain: &Network<T>, sidechain: &Network<T>, rx: mpsc::UnboundedReceiver<RequestType>, handle: &reactor::Handle) -> HandleRequests<T> {
+        HandleRequests::new(homechain, sidechain, rx, handle)
     }
 
     pub fn unlock(&self, password: &str) -> impl Future<Item = (), Error = Error> {
@@ -81,18 +82,30 @@ impl<T: DuplexTransport + 'static> Relay<T> {
         rx: mpsc::UnboundedReceiver<RequestType>,
         handle: &reactor::Handle,
     ) -> impl Future<Item = (), Error = ()> {
-        self.sidechain
-            .handle_anchors(&self.homechain, handle)
-            .join(self.homechain.watch_transfer_logs(&self.sidechain, handle))
-            .join(self.sidechain.watch_transfer_logs(&self.homechain, handle))
-            .join(self.homechain.recheck_past_transfer_logs(&self.sidechain, handle))
-            .join(self.sidechain.recheck_past_transfer_logs(&self.homechain, handle))
-            .join(self.sidechain.watch_flush_logs(&self.homechain, handle))
-            .join(self.handle_requests(rx, handle))
-            .and_then(|_| Ok(()))
-            .map_err(|_| {
+        let sidechain = self.sidechain.clone();
+        let homechain = self.homechain.clone();
+        let handle = handle.clone();
+        sidechain.check_flush_block()
+            .and_then(move |flush_option| {
+                if let Ok(mut lock) = sidechain.flushed.write() {
+                    *lock = flush_option.clone();
+                } else {
+                    error!("error getting lock on startup");
+                    return Either::B(err(()));
+                }
+
+                Either::A(sidechain.handle_anchors(&homechain, &handle)
+                .join(homechain.watch_transfer_logs(&sidechain, &handle))
+                .join(homechain.recheck_past_transfer_logs(&sidechain, &handle))
+                .join(sidechain.watch_transfer_logs(&homechain, &handle))
+                .join(sidechain.recheck_past_transfer_logs(&homechain, &handle))
+                .join(sidechain.watch_flush_logs(&homechain, flush_option, &handle))
+                .join(Relay::handle_requests(&homechain, &sidechain, rx, &handle))
+                .and_then(|_| Ok(())))
+            }).map_err(|_| {
                 process::exit(-1);
             })
+
     }
 }
 
@@ -131,6 +144,7 @@ pub struct Network<T: DuplexTransport + 'static> {
     pub nonce: Rc<AtomicUsize>,
     pub pending: Rc<RwLock<LruCache<H256, TransferApprovalState>>>,
     pub retries: u64,
+    pub flushed: Rc<RwLock<Option<Event>>>,
 }
 
 impl<T: DuplexTransport + 'static> Network<T> {
@@ -204,6 +218,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
             nonce: Rc::new(nonce),
             pending: Rc::new(RwLock::new(LruCache::new(4096))),
             retries,
+            flushed: Rc::new(RwLock::new(None)),
         })
     }
 
@@ -321,6 +336,10 @@ impl<T: DuplexTransport + 'static> Network<T> {
             })
     }
 
+    pub fn check_flush_block(&self) -> CheckForPastFlush<T> {
+        CheckForPastFlush::new(self)
+    }
+
     /// Returns a WatchFlush Future for this chain.
     /// Watches the self (which should only be sidechain), and sends to the target, which should be
     /// homechain
@@ -329,8 +348,11 @@ impl<T: DuplexTransport + 'static> Network<T> {
     ///
     /// * `target` - Network where to anchor the block headers
     /// * `handle` - Handle to spawn new tasks
-    pub fn watch_flush_logs(&self, target: &Network<T>, handle: &reactor::Handle) -> ProcessFlush<T> {
+    pub fn watch_flush_logs(&self, target: &Network<T>, flush_option: Option<Event>, handle: &reactor::Handle) -> ProcessFlush<T> {
         let (tx, rx) = mpsc::unbounded();
+        if let Some(flush) = flush_option {
+            tx.unbounded_send(flush).unwrap();
+        }
         let filter = FilterBuilder::default()
             .address(vec![self.relay.address()])
             .topics(Some(vec![FLUSH_EVENT_SIGNATURE.into()]), None, None, None)
@@ -340,8 +362,6 @@ impl<T: DuplexTransport + 'static> Network<T> {
             .map_err(move |e| error!("error watching transaction logs {:?}", e));
         // We do this in a separately spawned task because we have to wait 20 blocks per
         handle.spawn(watch);
-        let check_existing = CheckForPastFlush::new(self, &tx);
-        handle.spawn(check_existing);
         ProcessFlush::new(self, target, rx)
     }
 

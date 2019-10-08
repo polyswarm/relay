@@ -1,6 +1,6 @@
 use std::fmt;
 use web3::contract::tokens::Tokenize;
-use web3::futures::future::Future;
+use web3::futures::future::{Future, ok, err};
 use web3::types::{Address, TransactionReceipt, H256, U256};
 use web3::DuplexTransport;
 
@@ -85,45 +85,57 @@ impl Transfer {
         &self,
         source: &Network<T>,
         target: &Network<T>,
-    ) -> Box<Future<Item = (), Error = ()>> {
-        info!("approving withdrawal on {:?}: {} ", target.network_type, self);
-        let target = target.clone();
-        let send = SendTransaction::new(
-            &target,
-            "approveWithdrawal",
-            &ApproveParams::from(*self),
-            target.retries,
-        )
-        .cancel_removed(&source, self.tx_hash)
-        .and_then(move |success| {
-            success.map_or_else(
-                || {
-                    warn!(
-                        "log removed from originating chain while waiting on approval confirmations on target {:?}",
-                        target.network_type
-                    );
-                    Ok(())
-                },
-                |_| Ok(()),
-            )
-        })
-        .or_else(|_| Ok(()));
-        Box::new(send)
+    ) -> Box<dyn Future<Item = (), Error = ()>> {
+        match source.flushed.read() {
+            Ok(lock) => {
+                if lock.is_some() {
+                    warn!("cannot approve withdrawal after flush on {:?}: {} ", source.network_type, self);
+                    Box::new(ok(()))
+                } else {
+                    info!("approving withdrawal on {:?}: {} ", target.network_type, self);
+                    let target = target.clone();
+                    Box::new(SendTransaction::new(
+                        &target,
+                        "approveWithdrawal",
+                        &ApproveParams::from(*self),
+                        target.retries,
+                    )
+                        .cancel_removed(&source, self.tx_hash)
+                        .and_then(move |success| {
+                            success.map_or_else(
+                                || {
+                                    warn!(
+                                        "log removed from originating chain while waiting on approval confirmations on target {:?}",
+                                        target.network_type
+                                    );
+                                    Ok(())
+                                },
+                                |_| Ok(()),
+                            )
+                        })
+                        .or_else(|_| Ok(())))
+                }
+            }
+            Err(e) => {
+                error!("error acquiring flush event lock: {:?}", e);
+                Box::new(err(()))
+            }
+
+        }
     }
 
     pub fn unapprove_withdrawal<T: DuplexTransport + 'static>(
         &self,
         target: &Network<T>,
-    ) -> Box<Future<Item = (), Error = ()>> {
+    ) -> impl Future<Item = (), Error = ()> {
         info!("unapproving withdrawal on {:?}: {} ", target.network_type, self);
-        let send = SendTransaction::new(
+        SendTransaction::new(
             target,
             "unapproveWithdrawal",
             &UnapproveParams::from(*self),
             target.retries,
         )
-        .or_else(|_| Ok(()));
-        Box::new(send)
+        .or_else(|_| Ok(()))
     }
 }
 

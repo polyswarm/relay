@@ -17,6 +17,7 @@ use relay::Network;
 use server::handler::{BalanceOf, BalanceQuery};
 use transfers::transfer::Transfer;
 use transfers::withdrawal::{ApproveParams, WaitForWithdrawalProcessed};
+use transfers::live::Event;
 
 /// Simple struct with an Address and Balance that represents an ethereum wallet
 #[derive(Clone, Copy, Ord, Eq, PartialEq, PartialOrd)]
@@ -125,7 +126,6 @@ enum CheckForPastFlushState {
 pub struct CheckForPastFlush<T: DuplexTransport + 'static> {
     state: CheckForPastFlushState,
     source: Network<T>,
-    tx: mpsc::UnboundedSender<(Log, TransactionReceipt)>,
 }
 
 impl<T: DuplexTransport + 'static> CheckForPastFlush<T> {
@@ -134,7 +134,7 @@ impl<T: DuplexTransport + 'static> CheckForPastFlush<T> {
     ///
     /// * `source` - Network being flushed
     /// * `tx` - Sender to trigger Flush event processor
-    pub fn new(source: &Network<T>, tx: &mpsc::UnboundedSender<(Log, TransactionReceipt)>) -> Self {
+    pub fn new(source: &Network<T>) -> Self {
         let flush_block_query = FlushBlockQuery::new();
         let flush_block_future = source
             .relay
@@ -151,7 +151,6 @@ impl<T: DuplexTransport + 'static> CheckForPastFlush<T> {
         CheckForPastFlush {
             state: CheckForPastFlushState::CheckFlushBlock(Box::new(flush_block_future)),
             source: source.clone(),
-            tx: tx.clone(),
         }
     }
     /// Create a Future to get the flush even logs given the block the event occurred at
@@ -173,12 +172,11 @@ impl<T: DuplexTransport + 'static> CheckForPastFlush<T> {
 }
 
 impl<T: DuplexTransport + 'static> Future for CheckForPastFlush<T> {
-    type Item = ();
+    type Item = Option<Event>;
     type Error = ();
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         loop {
             let source = self.source.clone();
-            let tx = self.tx.clone();
             let next = match self.state {
                 CheckForPastFlushState::CheckFlushBlock(ref mut future) => {
                     let block = try_ready!(future.poll());
@@ -188,7 +186,7 @@ impl<T: DuplexTransport + 'static> Future for CheckForPastFlush<T> {
                         let future = self.get_flush_log(block_number);
                         CheckForPastFlushState::GetFlushLog(future)
                     } else {
-                        return Ok(Async::Ready(()));
+                        return Ok(Async::Ready(None));
                     }
                 }
                 CheckForPastFlushState::GetFlushLog(ref mut stream) => {
@@ -208,19 +206,14 @@ impl<T: DuplexTransport + 'static> Future for CheckForPastFlush<T> {
                         }
                     } else {
                         error!("Didn't find any flush event at flushBlock");
-                        return Ok(Async::Ready(()));
+                        return Ok(Async::Ready(None));
                     }
                 }
                 CheckForPastFlushState::GetFlushReceipt(ref log, ref mut future) => {
                     let receipt_option = try_ready!(future.poll());
                     match receipt_option {
                         Some(receipt) => {
-                            let send_result = tx.unbounded_send((*log.clone(), receipt));
-                            if send_result.is_err() {
-                                error!("error sending log & receipt");
-                                return Err(());
-                            }
-                            return Ok(Async::Ready(()));
+                            return Ok(Async::Ready(Some(Event::new(&*log.clone(), &receipt))));
                         }
                         None => {
                             error!("error getting flush receipt");
@@ -253,7 +246,7 @@ pub struct ProcessFlush<T: DuplexTransport + 'static> {
     state: ProcessFlushState<T>,
     source: Network<T>,
     target: Network<T>,
-    rx: mpsc::UnboundedReceiver<(Log, TransactionReceipt)>,
+    rx: mpsc::UnboundedReceiver<Event>,
     flush_receipt: Option<TransactionReceipt>,
 }
 
@@ -267,7 +260,7 @@ impl<T: DuplexTransport + 'static> ProcessFlush<T> {
     pub fn new(
         source: &Network<T>,
         target: &Network<T>,
-        rx: mpsc::UnboundedReceiver<(Log, TransactionReceipt)>,
+        rx: mpsc::UnboundedReceiver<Event>,
     ) -> Self {
         ProcessFlush {
             state: ProcessFlushState::Wait,
@@ -291,24 +284,31 @@ impl<T: DuplexTransport + 'static> Future for ProcessFlush<T> {
                 ProcessFlushState::Wait => {
                     let event = try_ready!(self.rx.poll());
                     match event {
-                        Some((log, receipt)) => {
+                        Some(flush) => {
+                            if let Ok(mut lock) = source.flushed.write() {
+                                *lock = Some(flush.clone());
+                            } else {
+                                error!("error getting write lock on process");
+                                return Err(());
+                            }
+
                             info!("flush event triggered");
-                            let removed = log.removed.unwrap_or(false);
+                            let removed = flush.log.removed.unwrap_or(false);
                             if removed {
                                 ProcessFlushState::Wait
                             } else {
-                                if receipt.block_hash.is_none() {
+                                if flush.receipt.block_hash.is_none() {
                                     error!("Failed to get block hash for flush");
                                     return Err(());
                                 }
 
-                                if receipt.block_number.is_none() {
+                                if flush.receipt.block_number.is_none() {
                                     error!("Failed to get block hash for flush");
                                     return Err(());
                                 }
 
-                                self.flush_receipt = Some(receipt.clone());
-                                let balance_future = CheckBalances::new(&source, receipt.block_number);
+                                self.flush_receipt = Some(flush.receipt.clone());
+                                let balance_future = CheckBalances::new(&source, flush.receipt.block_number);
                                 ProcessFlushState::CheckBalances(balance_future)
                             }
                         }

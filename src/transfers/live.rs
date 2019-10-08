@@ -30,7 +30,6 @@ impl Event {
 /// Stream of events that have match the given filter.
 /// Passes the transaction receipt and log over the given tx upon confirmation (or removal)
 pub struct WatchLiveLogs<T: DuplexTransport + 'static> {
-    // TODO Add the desired event signature & change name to just WatchLogs
     state: SubscriptionState<T, Log>,
     handle: reactor::Handle,
     source: Network<T>,

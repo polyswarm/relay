@@ -7,7 +7,7 @@ use std::{process, time};
 use tokio_core::reactor;
 use web3::confirm::{wait_for_transaction_confirmation, SendTransactionWithConfirmation};
 use web3::contract::Contract;
-use web3::futures::future::{Either, err};
+use web3::futures::future::{err, Either};
 use web3::futures::sync::mpsc;
 use web3::futures::Future;
 use web3::types::{Address, FilterBuilder, TransactionReceipt, H256, U256};
@@ -60,7 +60,12 @@ impl<T: DuplexTransport + 'static> Relay<T> {
         Self { homechain, sidechain }
     }
 
-    fn handle_requests(homechain: &Network<T>, sidechain: &Network<T>, rx: mpsc::UnboundedReceiver<RequestType>, handle: &reactor::Handle) -> HandleRequests<T> {
+    fn handle_requests(
+        homechain: &Network<T>,
+        sidechain: &Network<T>,
+        rx: mpsc::UnboundedReceiver<RequestType>,
+        handle: &reactor::Handle,
+    ) -> HandleRequests<T> {
         HandleRequests::new(homechain, sidechain, rx, handle)
     }
 
@@ -85,7 +90,8 @@ impl<T: DuplexTransport + 'static> Relay<T> {
         let sidechain = self.sidechain.clone();
         let homechain = self.homechain.clone();
         let handle = handle.clone();
-        sidechain.check_flush_block()
+        sidechain
+            .check_flush_block()
             .and_then(move |flush_option| {
                 if let Ok(mut lock) = sidechain.flushed.write() {
                     *lock = flush_option.clone();
@@ -94,18 +100,21 @@ impl<T: DuplexTransport + 'static> Relay<T> {
                     return Either::B(err(()));
                 }
 
-                Either::A(sidechain.handle_anchors(&homechain, &handle)
-                .join(homechain.watch_transfer_logs(&sidechain, &handle))
-                .join(homechain.recheck_past_transfer_logs(&sidechain, &handle))
-                .join(sidechain.watch_transfer_logs(&homechain, &handle))
-                .join(sidechain.recheck_past_transfer_logs(&homechain, &handle))
-                .join(sidechain.watch_flush_logs(&homechain, flush_option, &handle))
-                .join(Relay::handle_requests(&homechain, &sidechain, rx, &handle))
-                .and_then(|_| Ok(())))
-            }).map_err(|_| {
+                Either::A(
+                    sidechain
+                        .handle_anchors(&homechain, &handle)
+                        .join(homechain.watch_transfer_logs(&sidechain, &handle))
+                        .join(homechain.recheck_past_transfer_logs(&sidechain, &handle))
+                        .join(sidechain.watch_transfer_logs(&homechain, &handle))
+                        .join(sidechain.recheck_past_transfer_logs(&homechain, &handle))
+                        .join(sidechain.watch_flush_logs(&homechain, flush_option, &handle))
+                        .join(Relay::handle_requests(&homechain, &sidechain, rx, &handle))
+                        .and_then(|_| Ok(())),
+                )
+            })
+            .map_err(|_| {
                 process::exit(-1);
             })
-
     }
 }
 
@@ -348,7 +357,12 @@ impl<T: DuplexTransport + 'static> Network<T> {
     ///
     /// * `target` - Network where to anchor the block headers
     /// * `handle` - Handle to spawn new tasks
-    pub fn watch_flush_logs(&self, target: &Network<T>, flush_option: Option<Event>, handle: &reactor::Handle) -> ProcessFlush<T> {
+    pub fn watch_flush_logs(
+        &self,
+        target: &Network<T>,
+        flush_option: Option<Event>,
+        handle: &reactor::Handle,
+    ) -> ProcessFlush<T> {
         let (tx, rx) = mpsc::unbounded();
         if let Some(flush) = flush_option {
             tx.unbounded_send(flush).unwrap();

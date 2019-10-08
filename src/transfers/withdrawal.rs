@@ -234,7 +234,10 @@ impl<T: DuplexTransport + 'static> Future for DoesRequireApproval<T> {
                             CheckWithdrawalState::GetWithdrawalApprovals(0, approval_future)
                         }
                     } else {
-                        error!("withdrawal from contract did not match transfer on {:?}: {:?} {:?}", network_type, self.transfer, withdrawal);
+                        error!(
+                            "withdrawal from contract did not match transfer on {:?}: {:?} {:?}",
+                            network_type, self.transfer, withdrawal
+                        );
                         return Ok(Async::Ready(false));
                     }
                 }

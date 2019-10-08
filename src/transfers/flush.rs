@@ -15,9 +15,9 @@ use web3::{contract, DuplexTransport};
 
 use relay::Network;
 use server::handler::{BalanceOf, BalanceQuery};
+use transfers::live::Event;
 use transfers::transfer::Transfer;
 use transfers::withdrawal::{ApproveParams, WaitForWithdrawalProcessed};
-use transfers::live::Event;
 
 /// Simple struct with an Address and Balance that represents an ethereum wallet
 #[derive(Clone, Copy, Ord, Eq, PartialEq, PartialOrd)]
@@ -257,11 +257,7 @@ impl<T: DuplexTransport + 'static> ProcessFlush<T> {
     /// * `source` - Network being flushed
     /// * `target` - Network to send all the token balances
     /// * `rx` - Receiver that triggers on Flush event
-    pub fn new(
-        source: &Network<T>,
-        target: &Network<T>,
-        rx: mpsc::UnboundedReceiver<Event>,
-    ) -> Self {
+    pub fn new(source: &Network<T>, target: &Network<T>, rx: mpsc::UnboundedReceiver<Event>) -> Self {
         ProcessFlush {
             state: ProcessFlushState::Wait,
             source: source.clone(),

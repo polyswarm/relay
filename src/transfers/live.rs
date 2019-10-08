@@ -237,9 +237,10 @@ impl<T: DuplexTransport + 'static> Future for ProcessTransfer<T> {
                     let destination: Address = event.log.topics[1].into();
                     let amount: U256 = event.log.data.0[..32].into();
                     let removed = event.log.removed.unwrap_or(false);
-                    let transfer = Transfer::from_receipt(destination, amount, removed, &event.receipt).map_err(|e| {
-                        error!("error getting transfer from receipt {:?}: {:?}", event.receipt, e);
-                    })?;
+                    let transfer =
+                        Transfer::from_receipt(destination, amount, removed, &event.receipt).map_err(|e| {
+                            error!("error getting transfer from receipt {:?}: {:?}", event.receipt, e);
+                        })?;
                     info!(
                         "transfer event on {:?} confirmed, approving {}",
                         network_type, &transfer

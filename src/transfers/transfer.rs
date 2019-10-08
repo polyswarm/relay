@@ -1,6 +1,6 @@
 use std::fmt;
 use web3::contract::tokens::Tokenize;
-use web3::futures::future::{Future, ok, err};
+use web3::futures::future::{err, ok, Future};
 use web3::types::{Address, TransactionReceipt, H256, U256};
 use web3::DuplexTransport;
 
@@ -89,7 +89,10 @@ impl Transfer {
         match source.flushed.read() {
             Ok(lock) => {
                 if lock.is_some() {
-                    warn!("cannot approve withdrawal after flush on {:?}: {} ", source.network_type, self);
+                    warn!(
+                        "cannot approve withdrawal after flush on {:?}: {} ",
+                        source.network_type, self
+                    );
                     Box::new(ok(()))
                 } else {
                     info!("approving withdrawal on {:?}: {} ", target.network_type, self);
@@ -120,7 +123,6 @@ impl Transfer {
                 error!("error acquiring flush event lock: {:?}", e);
                 Box::new(err(()))
             }
-
         }
     }
 

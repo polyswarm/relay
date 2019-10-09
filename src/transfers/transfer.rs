@@ -4,10 +4,10 @@ use web3::futures::future::{err, ok, Future};
 use web3::types::{Address, TransactionReceipt, H256, U256};
 use web3::DuplexTransport;
 
-use super::eth::transaction::SendTransaction;
-use super::extensions::removed::{CancelRemoved, ExitOnLogRemoved};
-use super::relay::Network;
-use super::withdrawal::{ApproveParams, DoesRequireApproval, UnapproveParams};
+use eth::transaction::SendTransaction;
+use extensions::removed::{CancelRemoved, ExitOnLogRemoved};
+use relay::Network;
+use transfers::withdrawal::{ApproveParams, DoesRequireApproval, UnapproveParams};
 
 /// Add CheckRemoved trait to SendTransaction, which is called by Transfer::approve_withdrawal
 impl<T, P> CancelRemoved<T, (), ()> for SendTransaction<T, P>

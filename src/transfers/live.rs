@@ -8,9 +8,9 @@ use web3::futures::try_ready;
 use web3::types::{Address, Filter, Log, TransactionReceipt, H256, U256};
 use web3::{DuplexTransport, ErrorKind};
 
-use super::extensions::timeout::SubscriptionState;
-use super::relay::{Network, TransferApprovalState};
-use super::transfers::transfer::Transfer;
+use super::transfer::Transfer;
+use extensions::timeout::SubscriptionState;
+use relay::{Network, TransferApprovalState};
 
 #[derive(Clone)]
 pub struct Event {

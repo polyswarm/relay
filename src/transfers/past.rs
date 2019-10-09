@@ -6,10 +6,10 @@ use web3::futures::try_ready;
 use web3::types::{Address, BlockNumber, FilterBuilder, TransactionReceipt, H256, U256};
 use web3::{DuplexTransport, ErrorKind};
 
-use super::eth::contracts::TRANSFER_EVENT_SIGNATURE;
-use super::extensions::timeout::Timeout;
-use super::relay::Network;
 use super::transfer::Transfer;
+use eth::contracts::TRANSFER_EVENT_SIGNATURE;
+use extensions::timeout::Timeout;
+use relay::Network;
 
 pub const LOOKBACK_RANGE: u64 = 1_000;
 pub const LOOKBACK_LEEWAY: u64 = 5;

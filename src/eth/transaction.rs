@@ -9,8 +9,8 @@ use web3::futures::try_ready;
 use web3::types::{TransactionReceipt, U256};
 use web3::DuplexTransport;
 
-use super::errors::OperationError;
-use super::relay::Network;
+use errors::OperationError;
+use relay::Network;
 
 pub enum TransactionState<T, P>
 where

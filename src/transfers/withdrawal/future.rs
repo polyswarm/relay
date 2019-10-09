@@ -1,84 +1,14 @@
-use ethabi::Token;
-use web3::contract::tokens::Tokenize;
 use web3::contract::Options;
 use web3::futures::prelude::*;
 use web3::futures::try_ready;
 use web3::types::{Address, BlockNumber, H256, U256};
 use web3::DuplexTransport;
 
-use super::eth::contracts::{FeeQuery, Fees, Withdrawal, WithdrawalApprovalQuery, WithdrawalApprovals};
-use super::relay::Network;
 use super::transfer::Transfer;
+use super::{FeeQuery, Fees, Withdrawal, WithdrawalApprovalQuery, WithdrawalApprovals};
+use relay::Network;
 
-/// Parameters for the approveWithdrawal function.
-///
-/// Implements Tokenize so it can be passed to SendTransaction
-///
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct ApproveParams {
-    pub destination: Address,
-    pub amount: U256,
-    pub tx_hash: H256,
-    pub block_hash: H256,
-    pub block_number: U256,
-}
-
-impl Tokenize for ApproveParams {
-    fn into_tokens(self) -> Vec<Token> {
-        let mut tokens = Vec::new();
-        tokens.push(Token::Address(self.destination));
-        tokens.push(Token::Uint(self.amount));
-        tokens.push(Token::FixedBytes(self.tx_hash.to_vec()));
-        tokens.push(Token::FixedBytes(self.block_hash.to_vec()));
-        tokens.push(Token::Uint(self.block_number));
-        tokens
-    }
-}
-
-impl From<Transfer> for ApproveParams {
-    fn from(transfer: Transfer) -> Self {
-        ApproveParams {
-            destination: transfer.destination,
-            amount: transfer.amount,
-            tx_hash: transfer.tx_hash,
-            block_hash: transfer.block_hash,
-            block_number: transfer.block_number,
-        }
-    }
-}
-
-/// Parameters for the unapproveWithdrawal function.
-///
-/// Implements Tokenize so it can be passed to SendTransaction
-///
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct UnapproveParams {
-    pub tx_hash: H256,
-    pub block_hash: H256,
-    pub block_number: U256,
-}
-
-impl Tokenize for UnapproveParams {
-    fn into_tokens(self) -> Vec<Token> {
-        let mut tokens = Vec::new();
-        tokens.push(Token::FixedBytes(self.tx_hash.to_vec()));
-        tokens.push(Token::FixedBytes(self.block_hash.to_vec()));
-        tokens.push(Token::Uint(self.block_number));
-        tokens
-    }
-}
-
-impl From<Transfer> for UnapproveParams {
-    fn from(transfer: Transfer) -> Self {
-        UnapproveParams {
-            tx_hash: transfer.tx_hash,
-            block_hash: transfer.block_hash,
-            block_number: transfer.block_number,
-        }
-    }
-}
-
-pub enum CheckWithdrawalState {
+pub enum DoesRequireApprovalState {
     GetFees(Box<Future<Item = Fees, Error = ()>>),
     GetWithdrawal(U256, Box<Future<Item = Withdrawal, Error = ()>>),
     GetWithdrawalApprovals(usize, GetWithdrawalApprovals),
@@ -88,17 +18,17 @@ pub enum CheckWithdrawalState {
 pub struct DoesRequireApproval<T: DuplexTransport + 'static> {
     target: Network<T>,
     transfer: Transfer,
-    state: CheckWithdrawalState,
+    state: DoesRequireApprovalState,
 }
 
 impl<T: DuplexTransport + 'static> DoesRequireApproval<T> {
     pub fn new(target: &Network<T>, transfer: &Transfer, fees: Option<U256>) -> Self {
         let state = match fees {
-            Some(fee) => CheckWithdrawalState::GetWithdrawal(
+            Some(fee) => DoesRequireApprovalState::GetWithdrawal(
                 fee,
                 Box::new(DoesRequireApproval::get_withdrawal(target, transfer)),
             ),
-            None => CheckWithdrawalState::GetFees(Box::new(DoesRequireApproval::get_fees(target))),
+            None => DoesRequireApprovalState::GetFees(Box::new(DoesRequireApproval::get_fees(target))),
         };
 
         DoesRequireApproval {
@@ -152,14 +82,14 @@ impl<T: DuplexTransport + 'static> Future for DoesRequireApproval<T> {
         let transfer = self.transfer;
         loop {
             let next = match self.state {
-                CheckWithdrawalState::GetFees(ref mut future) => {
+                DoesRequireApprovalState::GetFees(ref mut future) => {
                     let fees = try_ready!(future.poll());
-                    CheckWithdrawalState::GetWithdrawal(
+                    DoesRequireApprovalState::GetWithdrawal(
                         fees.0,
                         Box::new(DoesRequireApproval::get_withdrawal(&target, &transfer)),
                     )
                 }
-                CheckWithdrawalState::GetWithdrawal(fees, ref mut future) => {
+                DoesRequireApprovalState::GetWithdrawal(fees, ref mut future) => {
                     let withdrawal = try_ready!(future.poll());
                     if (withdrawal.destination == Address::zero() && withdrawal.amount.as_u64() == 0)
                         || (withdrawal.destination == self.transfer.destination
@@ -172,7 +102,7 @@ impl<T: DuplexTransport + 'static> Future for DoesRequireApproval<T> {
                             debug!("transaction not processed on {:?} - checking approvers", network_type);
                             let approval_hash = Withdrawal::get_withdrawal_hash(&self.transfer);
                             let approval_future = GetWithdrawalApprovals::new(&self.target, &approval_hash, &0.into());
-                            CheckWithdrawalState::GetWithdrawalApprovals(0, approval_future)
+                            DoesRequireApprovalState::GetWithdrawalApprovals(0, approval_future)
                         }
                     } else {
                         error!(
@@ -182,7 +112,7 @@ impl<T: DuplexTransport + 'static> Future for DoesRequireApproval<T> {
                         return Ok(Async::Ready(false));
                     }
                 }
-                CheckWithdrawalState::GetWithdrawalApprovals(index, ref mut future) => {
+                DoesRequireApprovalState::GetWithdrawalApprovals(index, ref mut future) => {
                     let polled = future.poll();
                     match polled {
                         Ok(Async::Ready(approval)) => {
@@ -194,7 +124,7 @@ impl<T: DuplexTransport + 'static> Future for DoesRequireApproval<T> {
                                 let approval_hash = Withdrawal::get_withdrawal_hash(&self.transfer);
                                 let approval_future =
                                     GetWithdrawalApprovals::new(&self.target, &approval_hash, &i.into());
-                                CheckWithdrawalState::GetWithdrawalApprovals(i, approval_future)
+                                DoesRequireApprovalState::GetWithdrawalApprovals(i, approval_future)
                             }
                         }
                         Ok(Async::NotReady) => {

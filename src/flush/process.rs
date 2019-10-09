@@ -305,6 +305,10 @@ impl<T: DuplexTransport + 'static> Future for FlushRemaining<T> {
             let next = match self.state {
                 FlushRemainingState::GetBalance(ref mut future) => {
                     let balance = try_ready!(future.poll());
+                    if balance.0 == 0 {
+                        info("contract balance is zero, no remaining NCT to withdraw");
+                        return Ok(Async::Ready(()))
+                    }
                     self.balance = Some(balance.0);
                     FlushRemainingState::GetFeeWallet(FlushRemaining::get_fee_wallet(&target))
                 }

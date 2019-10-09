@@ -8,9 +8,9 @@ use web3::futures::try_ready;
 use web3::types::{BlockId, BlockNumber, H256, U256};
 use web3::DuplexTransport;
 
-use super::eth::transaction::SendTransaction;
-use super::extensions::timeout::Timeout;
-use super::relay::Network;
+use eth::transaction::SendTransaction;
+use extensions::timeout::Timeout;
+use relay::Network;
 
 /// Represents a block on the sidechain to be anchored to the homechain
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]

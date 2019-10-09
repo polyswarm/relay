@@ -8,18 +8,32 @@ use web3::futures::try_ready;
 use web3::types::{Address, Filter, Log, TransactionReceipt, H256, U256};
 use web3::{DuplexTransport, ErrorKind};
 
-use super::extensions::timeout::SubscriptionState;
-use super::relay::{Network, TransferApprovalState};
-use super::transfers::transfer::Transfer;
+use super::transfer::Transfer;
+use extensions::timeout::SubscriptionState;
+use relay::{Network, TransferApprovalState};
+
+#[derive(Clone)]
+pub struct Event {
+    pub log: Log,
+    pub receipt: TransactionReceipt,
+}
+
+impl Event {
+    pub fn new(log: &Log, receipt: &TransactionReceipt) -> Self {
+        Event {
+            log: log.clone(),
+            receipt: receipt.clone(),
+        }
+    }
+}
 
 /// Stream of events that have match the given filter.
 /// Passes the transaction receipt and log over the given tx upon confirmation (or removal)
 pub struct WatchLiveLogs<T: DuplexTransport + 'static> {
-    // TODO Add the desired event signature & change name to just WatchLogs
     state: SubscriptionState<T, Log>,
     handle: reactor::Handle,
     source: Network<T>,
-    tx: mpsc::UnboundedSender<(Log, TransactionReceipt)>,
+    tx: mpsc::UnboundedSender<Event>,
 }
 
 impl<T: DuplexTransport + 'static> WatchLiveLogs<T> {
@@ -32,7 +46,7 @@ impl<T: DuplexTransport + 'static> WatchLiveLogs<T> {
     pub fn new(
         source: &Network<T>,
         filter: &Filter,
-        tx: &mpsc::UnboundedSender<(Log, TransactionReceipt)>,
+        tx: &mpsc::UnboundedSender<Event>,
         handle: &reactor::Handle,
     ) -> Self {
         let future = Box::new(source.web3.clone().eth_subscribe().subscribe_logs(filter.clone()));
@@ -61,7 +75,8 @@ impl<T: DuplexTransport + 'static> WatchLiveLogs<T> {
                     .get_receipt(removed, tx_hash)
                     .and_then(move |receipt_option| receipt_option.ok_or(()))
                     .and_then(move |receipt| {
-                        tx.unbounded_send((log.clone(), receipt)).unwrap();
+                        let event = Event::new(&log, &receipt);
+                        tx.unbounded_send(event).unwrap();
                         Ok(())
                     })
                     .map_err(move |_| {
@@ -121,7 +136,7 @@ impl<T: DuplexTransport + 'static> Future for WatchLiveLogs<T> {
 /// Process logs/receipt for Transfer events seen on the chain
 /// Tracks the state of the transfer and triggers a withdrawal (or unwithdrawal on removal) on the target chain
 pub struct ProcessTransfer<T: DuplexTransport + 'static> {
-    rx: mpsc::UnboundedReceiver<(Log, TransactionReceipt)>,
+    rx: mpsc::UnboundedReceiver<Event>,
     handle: reactor::Handle,
     source: Network<T>,
     target: Network<T>,
@@ -131,7 +146,7 @@ impl<T: DuplexTransport + 'static> ProcessTransfer<T> {
     pub fn new(
         source: &Network<T>,
         target: &Network<T>,
-        rx: mpsc::UnboundedReceiver<(Log, TransactionReceipt)>,
+        rx: mpsc::UnboundedReceiver<Event>,
         handle: &reactor::Handle,
     ) -> Self {
         ProcessTransfer {
@@ -177,13 +192,16 @@ impl<T: DuplexTransport + 'static> ProcessTransfer<T> {
                         .put(transfer.tx_hash, TransferApprovalState::Removed);
                     // LRU Cache will drop values, so we need to recheck the chain
                     let target = self.target.clone();
-                    let unapprove_future = transfer.check_withdrawal(&self.target).and_then(move |not_approved| {
-                        if !not_approved {
-                            Either::A(transfer.unapprove_withdrawal(&target))
-                        } else {
-                            Either::B(ok(()))
-                        }
-                    });
+                    let unapprove_future =
+                        transfer
+                            .check_withdrawal(&self.target, None)
+                            .and_then(move |not_approved| {
+                                if !not_approved {
+                                    Either::A(transfer.unapprove_withdrawal(&target))
+                                } else {
+                                    Either::B(ok(()))
+                                }
+                            });
                     self.handle.spawn(unapprove_future);
                 } else {
                     self.source
@@ -194,13 +212,15 @@ impl<T: DuplexTransport + 'static> ProcessTransfer<T> {
                     // LRU Cache will drop values, so we need to recheck the chain
                     let source = self.source.clone();
                     let target = self.target.clone();
-                    let approve_future = transfer.check_withdrawal(&self.target).and_then(move |not_approved| {
-                        if not_approved {
-                            Either::A(transfer.approve_withdrawal(&source, &target))
-                        } else {
-                            Either::B(ok(()))
-                        }
-                    });
+                    let approve_future = transfer
+                        .check_withdrawal(&self.target, None)
+                        .and_then(move |not_approved| {
+                            if not_approved {
+                                Either::A(transfer.approve_withdrawal(&source, &target))
+                            } else {
+                                Either::B(ok(()))
+                            }
+                        });
                     self.handle.spawn(approve_future);
                 }
             }
@@ -217,13 +237,14 @@ impl<T: DuplexTransport + 'static> Future for ProcessTransfer<T> {
         loop {
             let next = try_ready!(self.rx.poll());
             match next {
-                Some((log, receipt)) => {
-                    let destination: Address = log.topics[1].into();
-                    let amount: U256 = log.data.0[..32].into();
-                    let removed = log.removed.unwrap_or(false);
-                    let transfer = Transfer::from_receipt(destination, amount, removed, &receipt).map_err(|e| {
-                        error!("error getting transfer from receipt {:?}: {:?}", receipt, e);
-                    })?;
+                Some(event) => {
+                    let destination: Address = event.log.topics[1].into();
+                    let amount: U256 = event.log.data.0[..32].into();
+                    let removed = event.log.removed.unwrap_or(false);
+                    let transfer =
+                        Transfer::from_receipt(destination, amount, removed, &event.receipt).map_err(|e| {
+                            error!("error getting transfer from receipt {:?}: {:?}", event.receipt, e);
+                        })?;
                     info!(
                         "transfer event on {:?} confirmed, approving {}",
                         network_type, &transfer

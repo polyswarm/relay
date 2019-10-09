@@ -4,8 +4,8 @@ use std::env;
 use std::ffi::OsString;
 use std::path::Path;
 
-use super::errors::ConfigError;
-use super::transfers::past::{LOOKBACK_LEEWAY, LOOKBACK_RANGE};
+use errors::ConfigError;
+use transfers::past::{LOOKBACK_LEEWAY, LOOKBACK_RANGE};
 
 /// Settings for the application
 #[derive(Debug, Deserialize)]

@@ -74,7 +74,7 @@ impl<T: DuplexTransport + 'static> Future for CheckForPastFlush<T> {
                     let block = try_ready!(future.poll());
                     let block_number = block.0;
                     info!("flush block on start is {}", block_number);
-                    if block_number > 0.into() {
+                    if block_number > U64::zero() {
                         let future = self.get_flush_log(block_number);
                         CheckForPastFlushState::GetFlushLog(future)
                     } else {

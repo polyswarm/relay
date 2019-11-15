@@ -88,7 +88,7 @@ where
                         Ok(Async::NotReady) => match self.timeout.poll() {
                             // If the timeout is triggered, error out
                             Ok(Async::Ready(_)) => {
-                                return Err(Error::Transport("Ethereum connection unavailable".to_string()));
+                                return Err(Error::Unreachable);
                             }
                             // If timeout not triggered, return NotReady
                             Ok(Async::NotReady) => {

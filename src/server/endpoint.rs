@@ -108,9 +108,9 @@ impl Endpoint {
 /// # Arguments
 ///
 /// * `tx` - Sender to report new requests
-fn status(tx: &mpsc::UnboundedSender<RequestType>) -> Box<Future<Item = HttpResponse, Error = EndpointError>> {
+fn status(tx: &mpsc::UnboundedSender<RequestType>) -> Box<dyn Future<Item = HttpResponse, Error = EndpointError>> {
     let (status_tx, status_rx) = mpsc::unbounded();
-    let request_future: Box<Future<Item = HttpResponse, Error = EndpointError>> = Box::new(
+    let request_future: Box<dyn Future<Item = HttpResponse, Error = EndpointError>> = Box::new(
         status_rx
             .take(1)
             .collect()

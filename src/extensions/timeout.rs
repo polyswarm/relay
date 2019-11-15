@@ -4,7 +4,8 @@ use tokio_core::reactor;
 use web3::api::{SubscriptionResult, SubscriptionStream};
 use web3::futures::prelude::*;
 use web3::futures::try_ready;
-use web3::{DuplexTransport, ErrorKind};
+use web3::DuplexTransport;
+use web3::error::Error;
 
 /// Enum for the two stages of subscribing to a timeout stream
 /// Subscribing holds a future that returns a TimeoutStream
@@ -14,7 +15,7 @@ where
     T: DuplexTransport + 'static,
     I: serde::de::DeserializeOwned + 'static,
 {
-    Subscribing(Box<Future<Item = SubscriptionStream<T, I>, Error = web3::Error>>),
+    Subscribing(Box<dyn Future<Item = SubscriptionStream<T, I>, Error = web3::Error>>),
     Subscribed(SubscriptionStream<T, I>),
 }
 
@@ -86,9 +87,9 @@ where
                         Ok(Async::NotReady) => match self.timeout.poll() {
                             // If the timeout is triggered, error out
                             Ok(Async::Ready(_)) => {
-                                return Err(web3::Error::from_kind(ErrorKind::Msg(
+                                return Err(Error::Transport(
                                     "Ethereum connection unavailable".to_string(),
-                                )));
+                                ));
                             }
                             // If timeout not triggered, return NotReady
                             Ok(Async::NotReady) => {
@@ -96,7 +97,7 @@ where
                             }
                             // If timeout errors out, return error
                             Err(_) => {
-                                return Err(web3::Error::from_kind(ErrorKind::Msg("Timeout broken".to_string())));
+                                return Err(Error::Transport("Timeout broken".to_string()));
                             }
                         },
                         // If the stream returns an item, reset timeout and return the item

@@ -1,5 +1,5 @@
 use base64::decode;
-use consul::Client;
+use consul::{Client, Config, kv::KV};
 use errors::OperationError;
 use failure::Error;
 use serde_json;
@@ -48,14 +48,13 @@ impl ConsulConfig {
     where
         F: FnMut(),
     {
-        let client = Client::new(&self.consul_url, &self.consul_token);
-        let keystore = client.keystore;
+        let config = Config::new(Some(&self.consul_url), Some(&self.consul_token)).unwrap();
+        let client = Client::new(config);
         let one_sec = time::Duration::from_secs(1);
 
         loop {
-            if let Ok(result) = keystore.get_key(keyname.into()) {
-                let result_string = result.unwrap();
-                let config = decode(&result_string)?;
+            if let Ok((Some(keypair), _)) = client.get(keyname, None) {
+                let config = decode(&keypair.Value)?;
                 let new_config = String::from_utf8(config)?;
                 let json: serde_json::Value = serde_json::from_str(&new_config.as_str())?;
                 return Ok(json);
@@ -68,8 +67,8 @@ impl ConsulConfig {
     }
 
     pub fn watch_for_config_deletion(&self, chains: &[&str]) {
-        let client = Client::new(&self.consul_url, &self.consul_token);
-        let keystore = client.keystore;
+        let config = Config::new(Some(&self.consul_url), Some(&self.consul_token)).unwrap();
+        let client = Client::new(config);
         let one_sec = time::Duration::from_secs(1);
         let mut contract_addresses = HashMap::new();
 
@@ -77,11 +76,11 @@ impl ConsulConfig {
             for chain in chains.iter() {
                 let keyname = format!("chain/{}/{}", &self.community, &chain);
 
-                if let Ok(json) = keystore.get_key(keyname) {
-                    contract_addresses.entry(chain).or_insert_with(|| json.clone());
+                if let Ok((Some(keypair), _)) = client.get(&keyname, None) {
+                    contract_addresses.entry(chain).or_insert_with(|| keypair.Value.clone());
                     let val = &contract_addresses[chain];
 
-                    if &json != val {
+                    if &keypair.Value != val {
                         info!("config change detected, exiting...");
                         process::exit(1);
                     } else {

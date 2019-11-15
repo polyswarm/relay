@@ -6,7 +6,8 @@ use web3::futures::prelude::*;
 use web3::futures::sync::mpsc;
 use web3::futures::try_ready;
 use web3::types::{Address, Filter, Log, TransactionReceipt, H256, U256};
-use web3::{DuplexTransport, ErrorKind};
+use web3::DuplexTransport;
+use web3::Error;
 
 use super::transfer::Transfer;
 use extensions::timeout::SubscriptionState;
@@ -59,7 +60,7 @@ impl<T: DuplexTransport + 'static> WatchLiveLogs<T> {
         }
     }
 
-    fn process_log(&self, log: &Log) -> Box<Future<Item = (), Error = ()>> {
+    fn process_log(&self, log: &Log) -> Box<dyn Future<Item = (), Error = ()>> {
         let network_type = self.source.network_type;
         let source = self.source.clone();
         let tx = self.tx.clone();
@@ -108,7 +109,7 @@ impl<T: DuplexTransport + 'static> Future for WatchLiveLogs<T> {
                         }
                         Ok(Async::Ready(None)) => {
                             self.tx.close().map_err(move |_| {
-                                web3::Error::from_kind(ErrorKind::Msg("Unable to close sender".to_string()))
+                                Error::Transport("Unable to close sender".to_string())
                             })?;
                             return Ok(Async::Ready(()));
                         }
@@ -118,7 +119,7 @@ impl<T: DuplexTransport + 'static> Future for WatchLiveLogs<T> {
                         Err(e) => {
                             error!("error reading transfer logs on {:?}. {:?}", self.source.network_type, e);
                             self.tx.close().map_err(move |_| {
-                                web3::Error::from_kind(ErrorKind::Msg("Unable to close sender".to_string()))
+                                Error::Transport("Unable to close sender".to_string())
                             })?;
                             return Err(e);
                         }

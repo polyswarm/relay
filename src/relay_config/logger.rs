@@ -40,7 +40,7 @@ mod raw_logger {
         }
     }
 
-    pub fn build(name: &str, level: Level) -> Box<Log> {
+    pub fn build(name: &str, level: Level) -> Box<dyn Log> {
         Box::new(RawLogger {
             level,
             name: name.to_owned(),
@@ -83,7 +83,7 @@ mod json_logger {
         }
     }
 
-    pub fn build(name: &str, level: Level) -> Box<Log> {
+    pub fn build(name: &str, level: Level) -> Box<dyn Log> {
         Box::new(JsonLogger {
             level,
             name: name.to_owned(),

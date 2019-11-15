@@ -5,7 +5,7 @@ use web3::contract::tokens::Tokenize;
 use web3::futures::prelude::*;
 use web3::futures::sync::mpsc;
 use web3::futures::try_ready;
-use web3::types::{BlockId, BlockNumber, H256, U256};
+use web3::types::{BlockId, BlockNumber, H256, U64};
 use web3::DuplexTransport;
 
 use eth::transaction::SendTransaction;
@@ -16,7 +16,7 @@ use relay::Network;
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Anchor {
     block_hash: H256,
-    block_number: U256,
+    block_number: U64,
 }
 
 impl Anchor {
@@ -25,7 +25,7 @@ impl Anchor {
     /// # Arguments
     ///
     /// * `target` - Network to post the anchor
-    fn process<T: DuplexTransport + 'static>(&self, target: &Network<T>) -> Box<Future<Item = (), Error = ()>> {
+    fn process<T: DuplexTransport + 'static>(&self, target: &Network<T>) -> Box<dyn Future<Item = (), Error = ()>> {
         info!("anchoring block {} to {:?}", self, target.network_type);
         Box::new(SendTransaction::new(target, "anchor", self, target.retries).or_else(|_| Ok(())))
     }
@@ -34,8 +34,8 @@ impl Anchor {
 impl Tokenize for Anchor {
     fn into_tokens(self) -> Vec<Token> {
         vec![
-            Token::FixedBytes(self.block_hash.to_vec()),
-            Token::Uint(self.block_number),
+            Token::FixedBytes(self.block_hash[..].to_vec()),
+            Token::Uint(self.block_number.as_u64().into()),
         ]
     }
 }
@@ -125,7 +125,7 @@ impl FindAnchors {
                             match block_number.checked_rem(anchor_frequency.into()).map(|u| u.low_u64()) {
                                 Some(c) if c == confirmations => {
                                     let block_id =
-                                        BlockId::Number(BlockNumber::Number(block_number.low_u64() - confirmations));
+                                        BlockId::Number(BlockNumber::Number(block_number - confirmations));
 
                                     handle.spawn(
                                         web3.eth()
@@ -143,7 +143,7 @@ impl FindAnchors {
                                                     }
 
                                                     let block_hash: H256 = b.hash.unwrap();
-                                                    let block_number: U256 = b.number.unwrap().into();
+                                                    let block_number: U64 = b.number.unwrap().into();
 
                                                     let anchor = Anchor {
                                                         block_hash,

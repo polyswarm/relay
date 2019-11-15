@@ -445,7 +445,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
         &self,
         removed: bool,
         transaction_hash: H256,
-    ) -> Box<Future<Item = Option<TransactionReceipt>, Error = ()>> {
+    ) -> Box<dyn Future<Item = Option<TransactionReceipt>, Error = ()>> {
         let source = self.clone();
         let web3 = self.web3.clone();
         let network_type = self.network_type;

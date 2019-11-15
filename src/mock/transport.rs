@@ -12,13 +12,14 @@ use web3::futures::{future, Future, Stream};
 use web3::helpers;
 use web3::transports::Result;
 use web3::types::{BlockHeader, Log, H160, H2048, H256, U256};
-use web3::{BatchTransport, DuplexTransport, Error, ErrorKind, RequestId, Transport};
+use web3::error::Error;
+use web3::{BatchTransport, DuplexTransport, Error, RequestId, Transport};
 
 use crate::errors::OperationError;
 use crate::relay::{Network, NetworkType};
 
 // Result from a MockTask
-pub type MockTask<T> = Box<Future<Item = T, Error = Error>>;
+pub type MockTask<T> = Box<dyn Future<Item = T, Error = Error>>;
 
 // Just hiding the details of the sender
 type Subscription = mpsc::UnboundedSender<rpc::Value>;
@@ -132,7 +133,7 @@ impl Transport for MockTransport {
     fn send(&self, _id: RequestId, _request: rpc::Call) -> Self::Out {
         match self.responses.borrow_mut().pop_front() {
             Some(v) => Box::new(future::finished(v)),
-            None => Box::new(future::failed(ErrorKind::Unreachable.into())),
+            None => Box::new(future::failed(Error::Unreachable.into())),
         }
     }
 }
@@ -148,7 +149,7 @@ impl BatchTransport for MockTransport {
         for _ in requests {
             response.push(match self.responses.borrow_mut().pop_front() {
                 Some(v) => Ok(v),
-                None => Err(ErrorKind::Unreachable.into()),
+                None => Err(Error::Unreachable.into()),
             })
         }
         Box::new(future::finished(response))
@@ -163,7 +164,7 @@ impl DuplexTransport for MockTransport {
         if self.subscriptions.borrow_mut().insert(id.clone(), tx).is_some() {
             warn!("replacing subscription with id {:?}", id);
         }
-        Box::new(rx.map_err(|()| ErrorKind::Transport("No data available".into()).into()))
+        Box::new(rx.map_err(|()| Error::Transport("No data available".into()).into()))
     }
 
     fn unsubscribe(&self, id: &SubscriptionId) {

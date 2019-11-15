@@ -20,9 +20,11 @@ extern crate parking_lot;
 extern crate serde_derive;
 #[macro_use]
 extern crate serde_json;
+#[macro_use]
+extern crate hex_literal;
 
 extern crate core;
-extern crate ethcore_transaction;
+extern crate common_types;
 extern crate ethkey;
 extern crate ethstore;
 extern crate rlp;

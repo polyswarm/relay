@@ -39,7 +39,7 @@ impl Detokenize for BalanceOf {
         Self: Sized,
     {
         let balance = tokens[0].clone().to_uint().ok_or_else(|| {
-            contract::Error::from_kind(contract::ErrorKind::Msg(
+            contract::Error::Api(web3::Error::Decoder(
                 "cannot parse balance from contract response".to_string(),
             ))
         })?;
@@ -125,7 +125,7 @@ impl<T: DuplexTransport + 'static> Future for HandleRequests<T> {
 }
 
 pub struct StatusCheck {
-    future: Box<Future<Item = Vec<Option<U256>>, Error = ()>>,
+    future: Box<dyn Future<Item = Vec<Option<U256>>, Error = ()>>,
     tx: mpsc::UnboundedSender<Result<StatusResponse, ()>>,
 }
 
@@ -159,7 +159,7 @@ impl StatusCheck {
             .web3
             .eth()
             .block_number()
-            .and_then(move |block| Ok(Some(block)))
+            .and_then(move |block| Ok(Some(block.as_u64().into())))
             .or_else(|_| Ok(None));
 
         let side_eth_future = sidechain
@@ -185,10 +185,10 @@ impl StatusCheck {
             .web3
             .eth()
             .block_number()
-            .and_then(move |block| Ok(Some(block)))
+            .and_then(move |block| Ok(Some(block.as_u64().into())))
             .or_else(|_| Ok(None));
 
-        let futures: Vec<Box<Future<Item = Option<U256>, Error = ()>>> = vec![
+        let futures: Vec<Box<dyn Future<Item = Option<U256>, Error = ()>>> = vec![
             Box::new(home_eth_future),
             Box::new(home_last_block_future),
             Box::new(home_nct_future),

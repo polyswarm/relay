@@ -1,7 +1,7 @@
 use std::fmt;
 use web3::contract::tokens::Tokenize;
 use web3::futures::future::{err, ok, Future};
-use web3::types::{Address, TransactionReceipt, H256, U256};
+use web3::types::{Address, TransactionReceipt, H256, U256, U64};
 use web3::DuplexTransport;
 
 use eth::transaction::SendTransaction;
@@ -27,7 +27,7 @@ pub struct Transfer {
     pub amount: U256,
     pub tx_hash: H256,
     pub block_hash: H256,
-    pub block_number: U256,
+    pub block_number: U64,
     pub removed: bool,
 }
 

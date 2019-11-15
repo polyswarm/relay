@@ -2,7 +2,7 @@ use ethabi::Token;
 use std::string::ToString;
 use web3::contract;
 use web3::contract::tokens::{Detokenize, Tokenize};
-use web3::types::{Address, U256};
+use web3::types::{Address, U64};
 
 /// Fee Wallet struct for taking the FeeWalletQuery and parsing the Tokens
 #[derive(Debug, Clone)]
@@ -15,7 +15,7 @@ impl Detokenize for FeeWallet {
         Self: Sized,
     {
         let fee_wallet = tokens[0].clone().to_address().ok_or_else(|| {
-            contract::Error::from_kind(contract::ErrorKind::Msg(
+            contract::Error::Api(web3::Error::Decoder(
                 "cannot parse fee wallet from contract response".to_string(),
             ))
         })?;
@@ -36,7 +36,7 @@ impl Tokenize for FeeWalletQuery {
 
 /// struct for taking the FlushBlockQuery  and parsing the Tokens
 #[derive(Debug, Clone)]
-pub struct FlushBlock(pub U256);
+pub struct FlushBlock(pub U64);
 
 impl Detokenize for FlushBlock {
     /// Creates a new instance from parsed ABI tokens.
@@ -45,12 +45,12 @@ impl Detokenize for FlushBlock {
         Self: Sized,
     {
         let block = tokens[0].clone().to_uint().ok_or_else(|| {
-            contract::Error::from_kind(contract::ErrorKind::Msg(
+            contract::Error::Api(web3::Error::Decoder(
                 "cannot parse flush blockfrom contract response".to_string(),
             ))
         })?;
         debug!("flush block: {:?}", block);
-        Ok(FlushBlock(block))
+        Ok(FlushBlock(block.as_u64().into()))
     }
 }
 

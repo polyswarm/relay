@@ -66,31 +66,37 @@ impl ConsulConfig {
         }
     }
 
-    pub fn watch_for_config_deletion(&self, chains: &[&str]) {
-        let config = Config::new(Some(&self.consul_url), Some(&self.consul_token)).unwrap();
-        let client = Client::new(config);
-        let one_sec = time::Duration::from_secs(1);
-        let mut contract_addresses = HashMap::new();
+    pub fn watch_for_config_deletion(&self) {
+        let url = self.consul_url.clone();
+        let token = self.consul_token.clone();
+        let community = self.community.clone();
+        let chains = vec!["homechain", "sidechain"];
+        thread::spawn(move || {
+            let config = Config::new(Some(&url), Some(&token)).unwrap();
+            let client = Client::new(config);
+            let one_sec = time::Duration::from_secs(1);
+            let mut contract_addresses = HashMap::new();
 
-        loop {
-            for chain in chains.iter() {
-                let keyname = format!("chain/{}/{}", &self.community, &chain);
+            loop {
+                for chain in chains.iter() {
+                    let keyname = format!("chain/{}/{}", &community, &chain);
 
-                if let Ok((Some(keypair), _)) = client.get(&keyname, None) {
-                    contract_addresses.entry(chain).or_insert_with(|| keypair.Value.clone());
-                    let val = &contract_addresses[chain];
+                    if let Ok((Some(keypair), _)) = client.get(&keyname, None) {
+                        contract_addresses.entry(chain).or_insert_with(|| keypair.Value.clone());
+                        let val = &contract_addresses[chain];
 
-                    if &keypair.Value != val {
+                        if &keypair.Value != val {
+                            info!("config change detected, exiting...");
+                            process::exit(1);
+                        } else {
+                            thread::sleep(one_sec);
+                        }
+                    } else {
                         info!("config change detected, exiting...");
                         process::exit(1);
-                    } else {
-                        thread::sleep(one_sec);
                     }
-                } else {
-                    info!("config change detected, exiting...");
-                    process::exit(1);
                 }
             }
-        }
+        });
     }
 }

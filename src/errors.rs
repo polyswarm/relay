@@ -66,6 +66,9 @@ impl ResponseError for EndpointError {
 /// they should *only* be triggered at startup.
 #[derive(Fail, Debug, PartialEq, Clone)]
 pub enum ConfigError {
+    #[fail(display = "unable to fetch configuration from consul")]
+    ConsulError,
+
     #[fail(display = "invalid config file path")]
     InvalidConfigFilePath,
 

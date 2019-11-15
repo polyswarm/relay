@@ -124,8 +124,7 @@ impl FindAnchors {
 
                             match block_number.checked_rem(anchor_frequency.into()).map(|u| u.low_u64()) {
                                 Some(c) if c == confirmations => {
-                                    let block_id =
-                                        BlockId::Number(BlockNumber::Number(block_number - confirmations));
+                                    let block_id = BlockId::Number(BlockNumber::Number(block_number - confirmations));
 
                                     handle.spawn(
                                         web3.eth()
@@ -143,7 +142,7 @@ impl FindAnchors {
                                                     }
 
                                                     let block_hash: H256 = b.hash.unwrap();
-                                                    let block_number: U64 = b.number.unwrap().into();
+                                                    let block_number: U64 = b.number.unwrap();
 
                                                     let anchor = Anchor {
                                                         block_hash,

@@ -1,5 +1,5 @@
 use base64::decode;
-use consul::{Client, Config, kv::KV};
+use consul::{kv::KV, Client, Config};
 use errors::OperationError;
 use failure::Error;
 use serde_json;

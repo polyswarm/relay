@@ -1,8 +1,8 @@
-use common_types::transaction::{Action, UnverifiedTransaction, Transaction as RawTransactionRequest};
+use common_types::transaction::{Action, Transaction as RawTransactionRequest, UnverifiedTransaction};
 use ethstore::accounts_dir::RootDiskDirectory;
 use ethstore::{EthStore, SimpleSecretStore, StoreAccountRef};
-use rlp::RlpStream;
 use rlp::Encodable;
+use rlp::RlpStream;
 use std::sync::atomic::Ordering;
 use web3::contract::tokens::Tokenize;
 use web3::futures::prelude::*;
@@ -76,21 +76,26 @@ where
         let store = self.get_store_for_keyfiles();
         let transaction_request = RawTransactionRequest {
             action: Action::Call(self.target.relay.address()),
-            gas: gas.into(),
-            gas_price: gas_price.into(),
-            value: value.into(),
-            nonce: nonce.into(),
+            gas,
+            gas_price,
+            value,
+            nonce,
             data: input_data.to_vec(),
         };
         let password = self.target.password.clone();
         let raw_tx = transaction_request.hash(Some(self.target.chain_id));
         let signed_tx = store
-            .sign(&StoreAccountRef::root(self.target.account.0.clone().into()), &password.into(), &raw_tx)
+            .sign(
+                &StoreAccountRef::root(self.target.account.0.clone().into()),
+                &password.into(),
+                &raw_tx,
+            )
             .map_err(move |e| {
                 error!("error signing transaction: {}", e);
                 OperationError::CouldNotBuildTransaction("Could not sign transaction".to_string())
             })?;
-        let tx_with_sig: UnverifiedTransaction = transaction_request.with_signature(signed_tx, Some(self.target.chain_id));
+        let tx_with_sig: UnverifiedTransaction =
+            transaction_request.with_signature(signed_tx, Some(self.target.chain_id));
         let mut stream = RlpStream::new();
         tx_with_sig.rlp_append(&mut stream);
         Ok(stream)

@@ -124,6 +124,9 @@ impl WithdrawalApprovalQuery {
 
 impl Tokenize for WithdrawalApprovalQuery {
     fn into_tokens(self) -> Vec<Token> {
-        vec![Token::FixedBytes(self.approval_hash[..].to_vec()), Token::Uint(self.index)]
+        vec![
+            Token::FixedBytes(self.approval_hash[..].to_vec()),
+            Token::Uint(self.index),
+        ]
     }
 }

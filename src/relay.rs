@@ -338,7 +338,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
             .map_err(|e| e.into())
             .and_then(move |success| {
                 if !success {
-                    return Err(OperationError::CouldNotUnlockAccount(format!("{:?}", &account)))?;
+                    return Err(OperationError::CouldNotUnlockAccount(format!("{:?}", &account)).into());
                 }
                 Ok(())
             })

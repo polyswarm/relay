@@ -7,12 +7,12 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio_core::reactor;
 use web3::api::SubscriptionId;
+use web3::error::Error;
 use web3::futures::sync::mpsc;
 use web3::futures::{future, Future, Stream};
 use web3::helpers;
 use web3::transports::Result;
 use web3::types::{BlockHeader, Log, H160, H2048, H256, U256};
-use web3::error::Error;
 use web3::{BatchTransport, DuplexTransport, Error, RequestId, Transport};
 
 use crate::errors::OperationError;

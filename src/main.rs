@@ -23,8 +23,8 @@ extern crate serde_json;
 #[macro_use]
 extern crate hex_literal;
 
-extern crate core;
 extern crate common_types;
+extern crate core;
 extern crate ethkey;
 extern crate ethstore;
 extern crate rlp;

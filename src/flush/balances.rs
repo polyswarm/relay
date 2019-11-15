@@ -224,13 +224,13 @@ impl Wallet {
     /// * `transaction_hash`- Transaction hash of the flush
     /// * `block_hash` - Block hash of the flush
     /// * `block_number` - Modified block number of the flush. Will not match the actual block number to avoid collisions in the contract
-    pub fn get_transfer(&self, transaction_hash: &H256, block_hash: &H256, block_number: &U64) -> Transfer {
+    pub fn get_transfer(&self, transaction_hash: &H256, block_hash: &H256, block_number: U64) -> Transfer {
         Transfer {
             destination: self.address,
             amount: self.balance,
             tx_hash: *transaction_hash,
             block_hash: *block_hash,
-            block_number: *block_number,
+            block_number,
             removed: false,
         }
     }
@@ -247,14 +247,14 @@ impl Wallet {
         target: &Network<T>,
         transaction_hash: &H256,
         block_hash: &H256,
-        block_number: &U64,
+        block_number: U64,
     ) -> SendTransaction<T, ApproveParams> {
         let approve_params = ApproveParams {
             destination: self.address,
             amount: self.balance,
             tx_hash: *transaction_hash,
             block_hash: *block_hash,
-            block_number: *block_number,
+            block_number,
         };
         SendTransaction::new(&target, "approveWithdrawal", &approve_params, target.retries)
     }

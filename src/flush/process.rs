@@ -113,14 +113,14 @@ impl<T: DuplexTransport + 'static> ProcessFlush<T> {
                 let wallet = *wallet;
 
                 // Create futures
-                let transfer = wallet.get_transfer(&receipt.transaction_hash, &block_hash, &(block_number + i));
+                let transfer = wallet.get_transfer(&receipt.transaction_hash, &block_hash, block_number + i);
                 let future: Box<dyn Future<Item = (), Error = ()>> = Box::new(
                     transfer
                         .check_withdrawal(&target, Some(fees))
                         .and_then(move |needs_approval| {
                             let target = target.clone();
                             if needs_approval {
-                                Either::A(wallet.withdraw(&target, &transaction_hash, &block_hash, &(block_number + i)))
+                                Either::A(wallet.withdraw(&target, &transaction_hash, &block_hash, block_number + i))
                             } else {
                                 Either::B(ok(()))
                             }
@@ -330,7 +330,7 @@ impl<T: DuplexTransport + 'static> Future for FlushRemaining<T> {
                             let wallet = Wallet::new(&address.0, &b);
                             info!("withdrawing {} to fee wallet {}", wallet.balance, wallet.address);
                             let withdrawal =
-                                wallet.withdraw(&target, &receipt.transaction_hash, &block_hash, &block_number);
+                                wallet.withdraw(&target, &receipt.transaction_hash, &block_hash, block_number);
                             FlushRemainingState::Withdraw(withdrawal)
                         }
                         None => {

@@ -2,10 +2,10 @@ use std::ops::Add;
 use std::time::{Duration, Instant};
 use tokio_core::reactor;
 use web3::api::{SubscriptionResult, SubscriptionStream};
+use web3::error::Error;
 use web3::futures::prelude::*;
 use web3::futures::try_ready;
 use web3::DuplexTransport;
-use web3::error::Error;
 
 /// Enum for the two stages of subscribing to a timeout stream
 /// Subscribing holds a future that returns a TimeoutStream
@@ -87,9 +87,7 @@ where
                         Ok(Async::NotReady) => match self.timeout.poll() {
                             // If the timeout is triggered, error out
                             Ok(Async::Ready(_)) => {
-                                return Err(Error::Transport(
-                                    "Ethereum connection unavailable".to_string(),
-                                ));
+                                return Err(Error::Transport("Ethereum connection unavailable".to_string()));
                             }
                             // If timeout not triggered, return NotReady
                             Ok(Async::NotReady) => {

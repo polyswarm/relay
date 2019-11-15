@@ -52,9 +52,9 @@ impl CheckPastTransfers {
                         future::Either::A(future::ok(()))
                     },
                     move |block_number| {
-                        block_number.checked_rem(interval.into()).map(|u| u.low_u64()).map_or_else(|| {
-                            let message = format!("Error computing block_number({}) % interval({})", block_number, interval);
-                            future::Either::A(future::err(Error::Transport(message)))
+                        block_number.checked_rem(interval.into()).map(|u| u.as_u64()).map_or_else(|| {
+                            error!("Error computing block_number({}) % interval({})", block_number, interval);
+                            future::Either::A(future::err(Error::Internal))
                         }, move |remainder| {
                             if remainder != 0 {
                                 return future::Either::A(future::ok(()));
@@ -71,7 +71,8 @@ impl CheckPastTransfers {
                                         block.as_u64() - confirmations - LOOKBACK_RANGE
                                     };
                                     if block.as_u64() < confirmations + LOOKBACK_LEEWAY {
-                                        return Err(web3::Error::Transport("Not enough blocks to check".to_string()));
+                                        error!("Not enough blocks to check");
+                                        return Err(Error::Internal);
                                     }
                                     let to = block.as_u64() - confirmations - LOOKBACK_LEEWAY;
                                     info!(

@@ -96,7 +96,8 @@ where
                             }
                             // If timeout errors out, return error
                             Err(_) => {
-                                return Err(Error::Transport("Timeout broken".to_string()));
+                                error!("Timeout broken");
+                                return Err(Error::Internal);
                             }
                         },
                         // If the stream returns an item, reset timeout and return the item

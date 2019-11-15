@@ -1,4 +1,4 @@
-use crate::rpc;
+use jsonrpc_core as rpc;
 use serde_json;
 use std::cell::RefCell;
 use std::collections::vec_deque::VecDeque;

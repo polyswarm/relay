@@ -146,7 +146,7 @@ impl Transfer {
 }
 
 impl fmt::Display for Transfer {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
             "({} → {:?}, hash: {:?})",

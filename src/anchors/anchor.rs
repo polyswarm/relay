@@ -41,7 +41,7 @@ impl Tokenize for Anchor {
 }
 
 impl fmt::Display for Anchor {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "(#{}, hash: {:?})", self.block_number, self.block_hash)
     }
 }

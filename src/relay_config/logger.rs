@@ -19,11 +19,11 @@ mod raw_logger {
     }
 
     impl Log for RawLogger {
-        fn enabled(&self, metadata: &Metadata) -> bool {
+        fn enabled(&self, metadata: &Metadata<'_>) -> bool {
             metadata.level() <= self.level
         }
 
-        fn log(&self, record: &Record) {
+        fn log(&self, record: &Record<'_>) {
             if self.enabled(record.metadata()) {
                 eprintln!(
                     "{} {:<5} [{}] {}",
@@ -57,11 +57,11 @@ mod json_logger {
     }
 
     impl Log for JsonLogger {
-        fn enabled(&self, metadata: &Metadata) -> bool {
+        fn enabled(&self, metadata: &Metadata<'_>) -> bool {
             metadata.level() <= self.level
         }
 
-        fn log(&self, record: &Record) {
+        fn log(&self, record: &Record<'_>) {
             let json_record = json!({
                 "level": record.level().to_string(),
                 "name": self.name,

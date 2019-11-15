@@ -50,6 +50,7 @@ mod raw_logger {
 
 mod json_logger {
     use log::{Level, Log, Metadata, Record};
+    use serde_json::json;
 
     pub struct JsonLogger {
         level: Level,

@@ -1,35 +1,10 @@
-
-
-
-
-
-use ctrlc;
-
-use failure;
-
-use tokio_core;
-use web3;
-#[macro_use]
-extern crate failure_derive;
 #[macro_use]
 extern crate log;
 
-
-
-#[macro_use]
-extern crate serde_derive;
-#[macro_use]
-extern crate serde_json;
-#[macro_use]
-extern crate hex_literal;
-
-
-
-
-
-
-
-
+use ctrlc;
+use failure;
+use tokio_core;
+use web3;
 
 pub mod anchors;
 pub mod errors;
@@ -41,7 +16,6 @@ pub mod relay_config;
 pub mod server;
 pub mod transfers;
 
-use crate::consul_configs::ConsulConfig;
 use clap::{App, Arg};
 use failure::{Error, SyncFailure};
 use tokio_core::reactor;
@@ -49,6 +23,7 @@ use web3::futures::sync::mpsc;
 use web3::futures::Future;
 use web3::Web3;
 
+use crate::consul_configs::ConsulConfig;
 use crate::errors::OperationError;
 #[cfg(test)]
 mod mock;

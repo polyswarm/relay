@@ -1,3 +1,4 @@
+use serde;
 use std::ops::Add;
 use std::time::{Duration, Instant};
 use tokio_core::reactor;

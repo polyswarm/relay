@@ -1,5 +1,6 @@
 use config::{Config, Environment, File};
 use failure::Error;
+use serde_derive::Deserialize;
 use std::env;
 use std::ffi::OsString;
 use std::path::Path;

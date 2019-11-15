@@ -1,8 +1,8 @@
+use crate::relay::{Network, NetworkType};
+use crate::server::endpoint::{NetworkStatus, RequestType, StatusResponse};
+use crate::transfers::past::{FindTransferInTransaction, ValidateAndApproveTransfer};
 use ethabi::Token;
-use relay::{Network, NetworkType};
-use server::endpoint::{NetworkStatus, RequestType, StatusResponse};
 use tokio_core::reactor;
-use transfers::past::{FindTransferInTransaction, ValidateAndApproveTransfer};
 use web3::contract::tokens::{Detokenize, Tokenize};
 use web3::contract::Options;
 use web3::futures::future;

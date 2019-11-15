@@ -7,12 +7,12 @@ use web3::futures::try_ready;
 use web3::types::{Address, BlockNumber, Bytes, TransactionReceipt, U256};
 use web3::DuplexTransport;
 
-use eth::transaction::SendTransaction;
-use flush::{CheckBalances, FeeWallet, FeeWalletQuery, FilterLowBalance, Wallet};
-use relay::Network;
-use server::handler::{BalanceOf, BalanceQuery};
-use transfers::live::Event;
-use transfers::withdrawal::{ApproveParams, WaitForWithdrawalProcessed};
+use crate::eth::transaction::SendTransaction;
+use crate::flush::{CheckBalances, FeeWallet, FeeWalletQuery, FilterLowBalance, Wallet};
+use crate::relay::Network;
+use crate::server::handler::{BalanceOf, BalanceQuery};
+use crate::transfers::live::Event;
+use crate::transfers::withdrawal::{ApproveParams, WaitForWithdrawalProcessed};
 
 enum ProcessFlushState<T: DuplexTransport + 'static> {
     Wait,

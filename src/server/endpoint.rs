@@ -8,9 +8,9 @@ use web3::futures::prelude::*;
 use web3::futures::sync::mpsc;
 use web3::types::{H256, U256};
 
-use errors::EndpointError;
-use eth::utils;
-use relay::NetworkType;
+use crate::errors::EndpointError;
+use crate::eth::utils;
+use crate::relay::NetworkType;
 
 pub const HOME: &str = "HOME";
 pub const SIDE: &str = "SIDE";

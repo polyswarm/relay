@@ -1,4 +1,4 @@
-use rpc;
+use crate::rpc;
 use serde_json;
 use std::cell::RefCell;
 use std::collections::vec_deque::VecDeque;
@@ -7,7 +7,6 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio_core::reactor;
 use web3::api::SubscriptionId;
-use web3::error::Error;
 use web3::futures::sync::mpsc;
 use web3::futures::{future, Future, Stream};
 use web3::helpers;
@@ -157,7 +156,7 @@ impl BatchTransport for MockTransport {
 }
 
 impl DuplexTransport for MockTransport {
-    type NotificationStream = Box<Stream<Item = rpc::Value, Error = Error> + Send + 'static>;
+    type NotificationStream = Box<dyn Stream<Item = rpc::Value, Error = Error> + Send + 'static>;
 
     fn subscribe(&self, id: &SubscriptionId) -> Self::NotificationStream {
         let (tx, rx) = mpsc::unbounded();
@@ -359,6 +358,8 @@ mod tests {
             logs_bloom: H2048::zero(),
             timestamp: U256::from(1),
             difficulty: U256::from(1),
+            mix_hash: None,
+            nonce: None,
         };
         // Turn Log into an rpc::Value representation
         let value: rpc::Value = serde_json::to_string(&header).unwrap().into();

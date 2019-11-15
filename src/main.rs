@@ -41,28 +41,28 @@ pub mod relay_config;
 pub mod server;
 pub mod transfers;
 
+use crate::consul_configs::ConsulConfig;
 use clap::{App, Arg};
-use consul_configs::ConsulConfig;
 use failure::{Error, SyncFailure};
 use tokio_core::reactor;
 use web3::futures::sync::mpsc;
 use web3::futures::Future;
 use web3::Web3;
 
-use errors::OperationError;
+use crate::errors::OperationError;
 #[cfg(test)]
 mod mock;
-use endpoint::{Endpoint, RequestType};
-use relay::{Network, Relay};
-use settings::Settings;
+use crate::endpoint::{Endpoint, RequestType};
+use crate::relay::{Network, Relay};
+use crate::settings::Settings;
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use relay_config::{consul_configs, logger, settings};
-use server::endpoint;
+use crate::relay_config::{consul_configs, logger, settings};
+use crate::server::endpoint;
 
 use log::Level;
 

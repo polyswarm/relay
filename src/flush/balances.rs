@@ -6,12 +6,12 @@ use web3::futures::try_ready;
 use web3::types::{Address, BlockNumber, FilterBuilder, Log, H256, U256, U64};
 use web3::DuplexTransport;
 
-use eth::contracts::TRANSFER_EVENT_SIGNATURE;
-use eth::transaction::SendTransaction;
-use relay::Network;
-use transfers::transfer::Transfer;
-use transfers::withdrawal::query::{FeeQuery, Fees};
-use transfers::withdrawal::ApproveParams;
+use crate::eth::contracts::TRANSFER_EVENT_SIGNATURE;
+use crate::eth::transaction::SendTransaction;
+use crate::relay::Network;
+use crate::transfers::transfer::Transfer;
+use crate::transfers::withdrawal::query::{FeeQuery, Fees};
+use crate::transfers::withdrawal::ApproveParams;
 
 pub enum CheckBalancesState {
     GetEndingBlock(Box<dyn Future<Item = U64, Error = ()>>),

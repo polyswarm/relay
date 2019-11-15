@@ -4,7 +4,7 @@ use web3::contract;
 use web3::contract::tokens::{Detokenize, Tokenize};
 use web3::types::{Address, H256, U256};
 
-use transfers::transfer::Transfer;
+use crate::transfers::transfer::Transfer;
 
 /// Fees struct for taking the FeeQuery and parsing the Tokens
 #[derive(Debug, Clone)]

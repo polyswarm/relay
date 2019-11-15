@@ -6,7 +6,7 @@ use web3::DuplexTransport;
 
 use super::transfer::Transfer;
 use super::{FeeQuery, Fees, Withdrawal, WithdrawalApprovalQuery, WithdrawalApprovals};
-use relay::Network;
+use crate::relay::Network;
 
 pub enum DoesRequireApprovalState {
     GetFees(Box<dyn Future<Item = Fees, Error = ()>>),

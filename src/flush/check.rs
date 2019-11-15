@@ -4,10 +4,10 @@ use web3::futures::try_ready;
 use web3::types::{Address, BlockNumber, FilterBuilder, Log, TransactionReceipt, U64};
 use web3::DuplexTransport;
 
-use eth::contracts::FLUSH_EVENT_SIGNATURE;
-use flush::{FlushBlock, FlushBlockQuery};
-use relay::Network;
-use transfers::live::Event;
+use crate::eth::contracts::FLUSH_EVENT_SIGNATURE;
+use crate::flush::{FlushBlock, FlushBlockQuery};
+use crate::relay::Network;
+use crate::transfers::live::Event;
 
 enum CheckForPastFlushState {
     CheckFlushBlock(Box<dyn Future<Item = FlushBlock, Error = ()>>),

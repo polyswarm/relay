@@ -1,5 +1,5 @@
+use crate::settings::Logging;
 use log::Level;
-use settings::Logging;
 use std::io::stderr;
 use std::io::Write;
 

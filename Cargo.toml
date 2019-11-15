@@ -2,6 +2,7 @@
 name = "polyswarm-relay"
 version = "1.1.0"
 authors = ["PolySwarm Developers <info@polyswarm.io>"]
+edition = "2018"
 
 [dependencies]
 actix-web = "1.0.7"
@@ -13,7 +14,7 @@ ethabi = "9.0.1"
 failure = "0.1.2"
 failure_derive = "0.1.2"
 hex-literal = "0.2.1"
-jsonrpc-core = "8.0.1"
+jsonrpc-core = "14.0.0"
 log = "0.4.5"
 lru = "0.1.15"
 parking_lot = "0.5"

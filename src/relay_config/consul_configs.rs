@@ -1,6 +1,6 @@
+use crate::errors::OperationError;
 use base64::decode;
 use consul::{kv::KV, Client, Config};
-use errors::OperationError;
 use failure::Error;
 use serde_json;
 use std::collections::HashMap;

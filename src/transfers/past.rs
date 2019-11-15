@@ -8,9 +8,9 @@ use web3::DuplexTransport;
 use web3::Error;
 
 use super::transfer::Transfer;
-use eth::contracts::TRANSFER_EVENT_SIGNATURE;
-use extensions::timeout::Timeout;
-use relay::Network;
+use crate::eth::contracts::TRANSFER_EVENT_SIGNATURE;
+use crate::extensions::timeout::Timeout;
+use crate::relay::Network;
 
 pub const LOOKBACK_RANGE: u64 = 1_000;
 pub const LOOKBACK_LEEWAY: u64 = 5;

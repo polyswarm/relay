@@ -86,7 +86,7 @@ where
         let raw_tx = transaction_request.hash(Some(self.target.chain_id));
         let signed_tx = store
             .sign(
-                &StoreAccountRef::root(self.target.account.0.clone().into()),
+                &StoreAccountRef::root(self.target.account.0.into()),
                 &password.into(),
                 &raw_tx,
             )

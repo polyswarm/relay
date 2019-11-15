@@ -1,4 +1,4 @@
-FROM rust:1.36.0
+FROM rust:1.39.0
 LABEL maintainer="PolySwarm Developers <info@polyswarm.io>"
 
 ENV RUSTC_WRAPPER=sccache

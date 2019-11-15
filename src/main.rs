@@ -11,30 +11,30 @@ pub mod errors;
 pub mod eth;
 pub mod extensions;
 pub mod flush;
+#[cfg(test)]
+mod mock;
 pub mod relay;
 pub mod relay_config;
 pub mod server;
 pub mod transfers;
-#[cfg(test)]
-mod mock;
 
+use clap::{App, Arg};
+use failure::{Error, SyncFailure};
 use serde_json;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use clap::{App, Arg};
-use failure::{Error, SyncFailure};
 use tokio_core::reactor;
 use web3::futures::sync::mpsc;
 use web3::futures::Future;
 use web3::Web3;
 
-use crate::errors::{OperationError, ConfigError};
 use crate::endpoint::{Endpoint, RequestType};
+use crate::errors::{ConfigError, OperationError};
 use crate::relay::{Network, Relay};
-use crate::settings::Settings;
 use crate::relay_config::{consul_configs, logger, settings};
 use crate::server::endpoint;
+use crate::settings::Settings;
 
 use log::Level;
 
@@ -114,7 +114,6 @@ fn main() -> Result<(), Error> {
     let side_ws = web3::transports::WebSocket::with_event_loop(&settings.relay.sidechain.wsuri, &handle)
         .map_err(SyncFailure::new)?;
 
-
     let (tx, rx) = mpsc::unbounded();
     let endpoint = Endpoint::new(tx, settings.endpoint.port);
     endpoint.start_server();
@@ -137,8 +136,6 @@ fn main() -> Result<(), Error> {
 
     Ok(())
 }
-
-
 
 fn run(
     handle: reactor::Handle,

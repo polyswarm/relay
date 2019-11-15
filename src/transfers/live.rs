@@ -108,12 +108,10 @@ impl<T: DuplexTransport + 'static> Future for WatchLiveLogs<T> {
                             handle.spawn(self.process_log(&log));
                         }
                         Ok(Async::Ready(None)) => {
-                            self.tx
-                                .close()
-                                .map_err(move |_| {
-                                    error!("Unable to close sender");
-                                    Error::Internal
-                                })?;
+                            self.tx.close().map_err(move |_| {
+                                error!("Unable to close sender");
+                                Error::Internal
+                            })?;
                             return Ok(Async::Ready(()));
                         }
                         Ok(Async::NotReady) => {
@@ -121,12 +119,10 @@ impl<T: DuplexTransport + 'static> Future for WatchLiveLogs<T> {
                         }
                         Err(e) => {
                             error!("error reading transfer logs on {:?}. {:?}", self.source.network_type, e);
-                            self.tx
-                                .close()
-                                .map_err(move |_| {
-                                    error!("Unable to close sender");
-                                    Error::Internal
-                                })?;
+                            self.tx.close().map_err(move |_| {
+                                error!("Unable to close sender");
+                                Error::Internal
+                            })?;
                             return Err(e);
                         }
                     };

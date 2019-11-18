@@ -23,7 +23,7 @@ use super::server::{HandleRequests, RequestType};
 use super::transfers::live::ProcessTransfer;
 use super::transfers::live::WatchLiveLogs;
 use super::transfers::past::RecheckPastTransferLogs;
-use transfers::live::Event;
+use crate::transfers::live::Event;
 
 const FREE_GAS_PRICE: u64 = 0;
 const GAS_LIMIT: u64 = 200_000;
@@ -338,7 +338,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
             .map_err(|e| e.into())
             .and_then(move |success| {
                 if !success {
-                    return Err(OperationError::CouldNotUnlockAccount(format!("{:?}", &account)))?;
+                    return Err(OperationError::CouldNotUnlockAccount(format!("{:?}", &account)).into());
                 }
                 Ok(())
             })
@@ -445,7 +445,7 @@ impl<T: DuplexTransport + 'static> Network<T> {
         &self,
         removed: bool,
         transaction_hash: H256,
-    ) -> Box<Future<Item = Option<TransactionReceipt>, Error = ()>> {
+    ) -> Box<dyn Future<Item = Option<TransactionReceipt>, Error = ()>> {
         let source = self.clone();
         let web3 = self.web3.clone();
         let network_type = self.network_type;

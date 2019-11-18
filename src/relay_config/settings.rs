@@ -1,11 +1,12 @@
 use config::{Config, Environment, File};
 use failure::Error;
+use serde_derive::Deserialize;
 use std::env;
 use std::ffi::OsString;
 use std::path::Path;
 
-use errors::ConfigError;
-use transfers::past::{LOOKBACK_LEEWAY, LOOKBACK_RANGE};
+use crate::errors::ConfigError;
+use crate::transfers::past::{LOOKBACK_LEEWAY, LOOKBACK_RANGE};
 
 /// Settings for the application
 #[derive(Debug, Deserialize)]

@@ -1,13 +1,13 @@
 use std::fmt;
 use web3::contract::tokens::Tokenize;
 use web3::futures::future::{err, ok, Future};
-use web3::types::{Address, TransactionReceipt, H256, U256};
+use web3::types::{Address, TransactionReceipt, H256, U256, U64};
 use web3::DuplexTransport;
 
-use eth::transaction::SendTransaction;
-use extensions::removed::{CancelRemoved, ExitOnLogRemoved};
-use relay::Network;
-use transfers::withdrawal::{ApproveParams, DoesRequireApproval, UnapproveParams};
+use crate::eth::transaction::SendTransaction;
+use crate::extensions::removed::{CancelRemoved, ExitOnLogRemoved};
+use crate::relay::Network;
+use crate::transfers::withdrawal::{ApproveParams, DoesRequireApproval, UnapproveParams};
 
 /// Add CheckRemoved trait to SendTransaction, which is called by Transfer::approve_withdrawal
 impl<T, P> CancelRemoved<T, (), ()> for SendTransaction<T, P>
@@ -27,7 +27,7 @@ pub struct Transfer {
     pub amount: U256,
     pub tx_hash: H256,
     pub block_hash: H256,
-    pub block_number: U256,
+    pub block_number: U64,
     pub removed: bool,
 }
 
@@ -146,7 +146,7 @@ impl Transfer {
 }
 
 impl fmt::Display for Transfer {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
             "({} → {:?}, hash: {:?})",

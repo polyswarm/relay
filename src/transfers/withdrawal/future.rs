@@ -6,11 +6,11 @@ use web3::DuplexTransport;
 
 use super::transfer::Transfer;
 use super::{FeeQuery, Fees, Withdrawal, WithdrawalApprovalQuery, WithdrawalApprovals};
-use relay::Network;
+use crate::relay::Network;
 
 pub enum DoesRequireApprovalState {
-    GetFees(Box<Future<Item = Fees, Error = ()>>),
-    GetWithdrawal(U256, Box<Future<Item = Withdrawal, Error = ()>>),
+    GetFees(Box<dyn Future<Item = Fees, Error = ()>>),
+    GetWithdrawal(U256, Box<dyn Future<Item = Withdrawal, Error = ()>>),
     GetWithdrawalApprovals(usize, GetWithdrawalApprovals),
 }
 
@@ -142,7 +142,7 @@ impl<T: DuplexTransport + 'static> Future for DoesRequireApproval<T> {
     }
 }
 
-pub struct GetWithdrawalApprovals(Box<Future<Item = WithdrawalApprovals, Error = ()>>);
+pub struct GetWithdrawalApprovals(Box<dyn Future<Item = WithdrawalApprovals, Error = ()>>);
 
 impl GetWithdrawalApprovals {
     pub fn new<T: DuplexTransport + 'static>(target: &Network<T>, approval_hash: &H256, index: &U256) -> Self {
@@ -182,7 +182,7 @@ impl Future for GetWithdrawalApprovals {
 pub struct WaitForWithdrawalProcessed<T: DuplexTransport + 'static> {
     target: Network<T>,
     transfer: Transfer,
-    future: Box<Future<Item = Withdrawal, Error = ()>>,
+    future: Box<dyn Future<Item = Withdrawal, Error = ()>>,
 }
 
 impl<T: DuplexTransport + 'static> WaitForWithdrawalProcessed<T> {
@@ -195,7 +195,7 @@ impl<T: DuplexTransport + 'static> WaitForWithdrawalProcessed<T> {
         }
     }
 
-    fn check(target: &Network<T>, transfer: &Transfer) -> Box<Future<Item = Withdrawal, Error = ()>> {
+    fn check(target: &Network<T>, transfer: &Transfer) -> Box<dyn Future<Item = Withdrawal, Error = ()>> {
         let approval_hash = Withdrawal::get_withdrawal_hash(transfer);
         let account = target.account;
         let network_type = target.network_type;

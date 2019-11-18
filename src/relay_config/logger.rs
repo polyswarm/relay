@@ -1,5 +1,5 @@
+use crate::settings::Logging;
 use log::Level;
-use settings::Logging;
 use std::io::stderr;
 use std::io::Write;
 
@@ -19,11 +19,11 @@ mod raw_logger {
     }
 
     impl Log for RawLogger {
-        fn enabled(&self, metadata: &Metadata) -> bool {
+        fn enabled(&self, metadata: &Metadata<'_>) -> bool {
             metadata.level() <= self.level
         }
 
-        fn log(&self, record: &Record) {
+        fn log(&self, record: &Record<'_>) {
             if self.enabled(record.metadata()) {
                 eprintln!(
                     "{} {:<5} [{}] {}",
@@ -40,7 +40,7 @@ mod raw_logger {
         }
     }
 
-    pub fn build(name: &str, level: Level) -> Box<Log> {
+    pub fn build(name: &str, level: Level) -> Box<dyn Log> {
         Box::new(RawLogger {
             level,
             name: name.to_owned(),
@@ -50,6 +50,7 @@ mod raw_logger {
 
 mod json_logger {
     use log::{Level, Log, Metadata, Record};
+    use serde_json::json;
 
     pub struct JsonLogger {
         level: Level,
@@ -57,11 +58,11 @@ mod json_logger {
     }
 
     impl Log for JsonLogger {
-        fn enabled(&self, metadata: &Metadata) -> bool {
+        fn enabled(&self, metadata: &Metadata<'_>) -> bool {
             metadata.level() <= self.level
         }
 
-        fn log(&self, record: &Record) {
+        fn log(&self, record: &Record<'_>) {
             let json_record = json!({
                 "level": record.level().to_string(),
                 "name": self.name,
@@ -83,7 +84,7 @@ mod json_logger {
         }
     }
 
-    pub fn build(name: &str, level: Level) -> Box<Log> {
+    pub fn build(name: &str, level: Level) -> Box<dyn Log> {
         Box::new(JsonLogger {
             level,
             name: name.to_owned(),

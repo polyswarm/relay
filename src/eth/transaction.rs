@@ -1,7 +1,8 @@
-use ethcore_transaction::{Action, Transaction as RawTransactionRequest};
+use common_types::transaction::{Action, Transaction as RawTransactionRequest, UnverifiedTransaction};
 use ethstore::accounts_dir::RootDiskDirectory;
 use ethstore::{EthStore, SimpleSecretStore, StoreAccountRef};
-use rlp::{Encodable, RlpStream};
+use rlp::Encodable;
+use rlp::RlpStream;
 use std::sync::atomic::Ordering;
 use web3::contract::tokens::Tokenize;
 use web3::futures::prelude::*;
@@ -9,8 +10,8 @@ use web3::futures::try_ready;
 use web3::types::{TransactionReceipt, U256};
 use web3::DuplexTransport;
 
-use errors::OperationError;
-use relay::Network;
+use crate::errors::OperationError;
+use crate::relay::Network;
 
 pub enum TransactionState<T, P>
 where
@@ -18,8 +19,8 @@ where
     P: Tokenize + Clone,
 {
     Build(BuildTransaction<T, P>),
-    Send(Box<Future<Item = TransactionReceipt, Error = web3::error::Error>>),
-    ResyncNonce(Box<Future<Item = U256, Error = ()>>),
+    Send(Box<dyn Future<Item = TransactionReceipt, Error = web3::error::Error>>),
+    ResyncNonce(Box<dyn Future<Item = U256, Error = ()>>),
 }
 
 /// This struct implements Future so that it is easy to build a transaction, with the proper gas price in a future
@@ -32,7 +33,7 @@ where
     function: String,
     params: P,
     nonce: Option<U256>,
-    gas_future: Box<Future<Item = U256, Error = ()>>,
+    gas_future: Box<dyn Future<Item = U256, Error = ()>>,
 }
 
 impl<T, P> BuildTransaction<T, P>
@@ -84,12 +85,17 @@ where
         let password = self.target.password.clone();
         let raw_tx = transaction_request.hash(Some(self.target.chain_id));
         let signed_tx = store
-            .sign(&StoreAccountRef::root(self.target.account), &password.into(), &raw_tx)
+            .sign(
+                &StoreAccountRef::root(self.target.account.0.into()),
+                &password.into(),
+                &raw_tx,
+            )
             .map_err(move |e| {
                 error!("error signing transaction: {}", e);
                 OperationError::CouldNotBuildTransaction("Could not sign transaction".to_string())
             })?;
-        let tx_with_sig = transaction_request.with_signature(signed_tx, Some(self.target.chain_id));
+        let tx_with_sig: UnverifiedTransaction =
+            transaction_request.with_signature(signed_tx, Some(self.target.chain_id));
         let mut stream = RlpStream::new();
         tx_with_sig.rlp_append(&mut stream);
         Ok(stream)

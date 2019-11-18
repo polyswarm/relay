@@ -1,4 +1,4 @@
-FROM rust:1.36.0
+FROM rust:1.39.0-buster
 LABEL maintainer="PolySwarm Developers <info@polyswarm.io>"
 
 ENV RUSTC_WRAPPER=sccache
@@ -13,7 +13,9 @@ RUN wget https://github.com/mozilla/sccache/releases/download/$SCCACHE_VERSION/s
     # Keep dockerize for now, this should probably go away in future versions
     && wget https://github.com/jwilder/dockerize/releases/download/$DOCKERIZE_VERSION/dockerize-alpine-linux-amd64-$DOCKERIZE_VERSION.tar.gz \
     && tar -C /usr/local/bin -xzvf dockerize-alpine-linux-amd64-$DOCKERIZE_VERSION.tar.gz \
-    && rm dockerize-alpine-linux-amd64-$DOCKERIZE_VERSION.tar.gz
+    && rm dockerize-alpine-linux-amd64-$DOCKERIZE_VERSION.tar.gz \
+    && apt-get update \
+    && apt-get install cmake -y
 
 WORKDIR /polyswarm-relay
 

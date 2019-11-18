@@ -3,19 +3,19 @@ use std::collections::HashMap;
 use web3::contract::Options;
 use web3::futures::prelude::*;
 use web3::futures::try_ready;
-use web3::types::{Address, BlockNumber, FilterBuilder, Log, H256, U256};
+use web3::types::{Address, BlockNumber, FilterBuilder, Log, H256, U256, U64};
 use web3::DuplexTransport;
 
-use eth::contracts::TRANSFER_EVENT_SIGNATURE;
-use eth::transaction::SendTransaction;
-use relay::Network;
-use transfers::transfer::Transfer;
-use transfers::withdrawal::query::{FeeQuery, Fees};
-use transfers::withdrawal::ApproveParams;
+use crate::eth::contracts::TRANSFER_EVENT_SIGNATURE;
+use crate::eth::transaction::SendTransaction;
+use crate::relay::Network;
+use crate::transfers::transfer::Transfer;
+use crate::transfers::withdrawal::query::{FeeQuery, Fees};
+use crate::transfers::withdrawal::ApproveParams;
 
 pub enum CheckBalancesState {
-    GetEndingBlock(Box<Future<Item = U256, Error = ()>>),
-    GetLogWindow(u64, u64, Box<Future<Item = Vec<Log>, Error = ()>>),
+    GetEndingBlock(Box<dyn Future<Item = U64, Error = ()>>),
+    GetLogWindow(u64, u64, Box<dyn Future<Item = Vec<Log>, Error = ()>>),
 }
 
 /// Get all balances for all wallets with tokens by looking over the entire history of the chain.
@@ -33,7 +33,7 @@ impl<T: DuplexTransport + 'static> CheckBalances<T> {
     ///
     /// * `source` - Network where the transfers were performed
     /// * `block` - Optional ending block, gets latest if None
-    pub fn new(source: &Network<T>, block: Option<U256>) -> Self {
+    pub fn new(source: &Network<T>, block: Option<U64>) -> Self {
         let state = match block {
             Some(b) => {
                 let window_end = cmp::min(b.as_u64(), 1000);
@@ -63,12 +63,12 @@ impl<T: DuplexTransport + 'static> CheckBalances<T> {
     /// * `source` - Network where the transfers were performed
     /// * `start` - Start of the next window
     /// * `end` - End of the next window
-    fn build_next_window(source: &Network<T>, start: u64, end: u64) -> Box<Future<Item = Vec<Log>, Error = ()>> {
+    fn build_next_window(source: &Network<T>, start: u64, end: u64) -> Box<dyn Future<Item = Vec<Log>, Error = ()>> {
         let token_address: Address = source.token.address();
         let filter = FilterBuilder::default()
             .address(vec![token_address])
             .from_block(BlockNumber::from(start))
-            .to_block(BlockNumber::Number(end))
+            .to_block(BlockNumber::from(end))
             .topics(Some(vec![TRANSFER_EVENT_SIGNATURE.into()]), None, None, None)
             .build();
         //self.state = ;
@@ -145,7 +145,7 @@ impl<T: DuplexTransport + 'static> Future for CheckBalances<T> {
 
 /// FilterLowBalance Future that takes a list of wallets, and filters out that have a balance below the fee cost to withdraw
 pub struct FilterLowBalance {
-    future: Box<Future<Item = Fees, Error = ()>>,
+    future: Box<dyn Future<Item = Fees, Error = ()>>,
     wallets: Vec<Wallet>,
 }
 
@@ -224,13 +224,13 @@ impl Wallet {
     /// * `transaction_hash`- Transaction hash of the flush
     /// * `block_hash` - Block hash of the flush
     /// * `block_number` - Modified block number of the flush. Will not match the actual block number to avoid collisions in the contract
-    pub fn get_transfer(&self, transaction_hash: &H256, block_hash: &H256, block_number: &U256) -> Transfer {
+    pub fn get_transfer(&self, transaction_hash: &H256, block_hash: &H256, block_number: U64) -> Transfer {
         Transfer {
             destination: self.address,
             amount: self.balance,
             tx_hash: *transaction_hash,
             block_hash: *block_hash,
-            block_number: *block_number,
+            block_number,
             removed: false,
         }
     }
@@ -247,14 +247,14 @@ impl Wallet {
         target: &Network<T>,
         transaction_hash: &H256,
         block_hash: &H256,
-        block_number: &U256,
+        block_number: U64,
     ) -> SendTransaction<T, ApproveParams> {
         let approve_params = ApproveParams {
             destination: self.address,
             amount: self.balance,
             tx_hash: *transaction_hash,
             block_hash: *block_hash,
-            block_number: *block_number,
+            block_number,
         };
         SendTransaction::new(&target, "approveWithdrawal", &approve_params, target.retries)
     }

@@ -2,7 +2,7 @@ use web3::futures::prelude::*;
 use web3::types::H256;
 use web3::DuplexTransport;
 
-use relay::{Network, TransferApprovalState};
+use crate::relay::{Network, TransferApprovalState};
 
 pub struct ExitOnLogRemoved<T, I, E>
 where
@@ -10,14 +10,14 @@ where
 {
     target: Network<T>,
     tx_hash: H256,
-    future: Box<Future<Item = I, Error = E>>,
+    future: Box<dyn Future<Item = I, Error = E>>,
 }
 
 impl<T, I, E> ExitOnLogRemoved<T, I, E>
 where
     T: DuplexTransport + 'static,
 {
-    pub fn new(target: &Network<T>, tx_hash: H256, future: Box<Future<Item = I, Error = E>>) -> Self {
+    pub fn new(target: &Network<T>, tx_hash: H256, future: Box<dyn Future<Item = I, Error = E>>) -> Self {
         ExitOnLogRemoved {
             target: target.clone(),
             tx_hash,
@@ -67,13 +67,13 @@ where
 mod tests {
     use super::*;
     use crate::mock::transport::MockTransport;
-    use relay::NetworkType;
+    use crate::relay::NetworkType;
     use std::time::Duration;
     use tokio_core::reactor;
     use web3::futures::try_ready;
 
     struct TestCheckRemoved {
-        inner: Box<Future<Item = (), Error = ()>>,
+        inner: Box<dyn Future<Item = (), Error = ()>>,
     }
 
     impl TestCheckRemoved {

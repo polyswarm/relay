@@ -1,18 +1,18 @@
 use web3::contract::Options;
 use web3::futures::prelude::*;
 use web3::futures::try_ready;
-use web3::types::{Address, BlockNumber, FilterBuilder, Log, TransactionReceipt};
+use web3::types::{Address, BlockNumber, FilterBuilder, Log, TransactionReceipt, U64};
 use web3::DuplexTransport;
 
-use eth::contracts::FLUSH_EVENT_SIGNATURE;
-use flush::{FlushBlock, FlushBlockQuery};
-use relay::Network;
-use transfers::live::Event;
+use crate::eth::contracts::FLUSH_EVENT_SIGNATURE;
+use crate::flush::{FlushBlock, FlushBlockQuery};
+use crate::relay::Network;
+use crate::transfers::live::Event;
 
 enum CheckForPastFlushState {
-    CheckFlushBlock(Box<Future<Item = FlushBlock, Error = ()>>),
-    GetFlushLog(Box<Future<Item = Vec<Log>, Error = ()>>),
-    GetFlushReceipt(Box<Log>, Box<Future<Item = Option<TransactionReceipt>, Error = ()>>),
+    CheckFlushBlock(Box<dyn Future<Item = FlushBlock, Error = ()>>),
+    GetFlushLog(Box<dyn Future<Item = Vec<Log>, Error = ()>>),
+    GetFlushReceipt(Box<Log>, Box<dyn Future<Item = Option<TransactionReceipt>, Error = ()>>),
 }
 
 /// Future for checking if the flush block is set in relay, then getting the transaction receipt if so
@@ -49,7 +49,7 @@ impl<T: DuplexTransport + 'static> CheckForPastFlush<T> {
     /// # Arguments
     ///
     /// * `block` - Block number for the flush event
-    pub fn get_flush_log(&self, block_number: u64) -> Box<Future<Item = Vec<Log>, Error = ()>> {
+    pub fn get_flush_log(&self, block_number: U64) -> Box<dyn Future<Item = Vec<Log>, Error = ()>> {
         // Not sure if there is a better way to get the log we want, probably get block or something
         let filter = FilterBuilder::default()
             .address(vec![self.source.relay.address()])
@@ -72,9 +72,9 @@ impl<T: DuplexTransport + 'static> Future for CheckForPastFlush<T> {
             let next = match self.state {
                 CheckForPastFlushState::CheckFlushBlock(ref mut future) => {
                     let block = try_ready!(future.poll());
-                    let block_number = block.0.as_u64();
+                    let block_number = block.0;
                     info!("flush block on start is {}", block_number);
-                    if block_number > 0 {
+                    if block_number > U64::zero() {
                         let future = self.get_flush_log(block_number);
                         CheckForPastFlushState::GetFlushLog(future)
                     } else {

@@ -4,12 +4,13 @@ use web3::futures::prelude::*;
 use web3::futures::sync::mpsc;
 use web3::futures::try_ready;
 use web3::types::{Address, BlockNumber, FilterBuilder, TransactionReceipt, H256, U256};
-use web3::{DuplexTransport, ErrorKind};
+use web3::DuplexTransport;
+use web3::Error;
 
 use super::transfer::Transfer;
-use eth::contracts::TRANSFER_EVENT_SIGNATURE;
-use extensions::timeout::Timeout;
-use relay::Network;
+use crate::eth::contracts::TRANSFER_EVENT_SIGNATURE;
+use crate::extensions::timeout::Timeout;
+use crate::relay::Network;
 
 pub const LOOKBACK_RANGE: u64 = 1_000;
 pub const LOOKBACK_LEEWAY: u64 = 5;
@@ -51,9 +52,9 @@ impl CheckPastTransfers {
                         future::Either::A(future::ok(()))
                     },
                     move |block_number| {
-                        block_number.checked_rem(interval.into()).map(|u| u.low_u64()).map_or_else(|| {
-                            let message = format!("Error computing block_number({}) % interval({})", block_number, interval);
-                            future::Either::A(future::err(web3::Error::from_kind(ErrorKind::Msg(message))))
+                        block_number.checked_rem(interval.into()).map(|u| u.as_u64()).map_or_else(|| {
+                            error!("Error computing block_number({}) % interval({})", block_number, interval);
+                            future::Either::A(future::err(Error::Internal))
                         }, move |remainder| {
                             if remainder != 0 {
                                 return future::Either::A(future::ok(()));
@@ -70,7 +71,8 @@ impl CheckPastTransfers {
                                         block.as_u64() - confirmations - LOOKBACK_RANGE
                                     };
                                     if block.as_u64() < confirmations + LOOKBACK_LEEWAY {
-                                        return Err(web3::Error::from_kind(web3::ErrorKind::Msg("Not enough blocks to check".to_string())));
+                                        error!("Not enough blocks to check");
+                                        return Err(Error::Internal);
                                     }
                                     let to = block.as_u64() - confirmations - LOOKBACK_LEEWAY;
                                     info!(
@@ -181,7 +183,7 @@ impl Stream for CheckPastTransfers {
 }
 
 /// Future to handle the Stream of missed transfers by checking them, and approving them
-pub struct RecheckPastTransferLogs(Box<Future<Item = (), Error = ()>>);
+pub struct RecheckPastTransferLogs(Box<dyn Future<Item = (), Error = ()>>);
 
 impl RecheckPastTransferLogs {
     /// Returns a newly created HandleMissedTransfers Future
@@ -227,7 +229,7 @@ pub struct ValidateAndApproveTransfer<T: DuplexTransport + 'static> {
     target: Network<T>,
     handle: reactor::Handle,
     transfer: Transfer,
-    future: Box<Future<Item = bool, Error = ()>>,
+    future: Box<dyn Future<Item = bool, Error = ()>>,
 }
 
 impl<T: DuplexTransport + 'static> ValidateAndApproveTransfer<T> {
@@ -274,8 +276,8 @@ impl<T: DuplexTransport + 'static> Future for ValidateAndApproveTransfer<T> {
 }
 
 pub enum FindTransferState {
-    ExtractTransfers(Box<Future<Item = Vec<Transfer>, Error = ()>>),
-    FetchReceipt(Box<Future<Item = Option<TransactionReceipt>, Error = ()>>),
+    ExtractTransfers(Box<dyn Future<Item = Vec<Transfer>, Error = ()>>),
+    FetchReceipt(Box<dyn Future<Item = Option<TransactionReceipt>, Error = ()>>),
 }
 
 /// Future to find a vec of transfers at a specific transaction

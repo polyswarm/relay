@@ -4,7 +4,7 @@ use web3::contract;
 use web3::contract::tokens::{Detokenize, Tokenize};
 use web3::types::{Address, H256, U256};
 
-use transfers::transfer::Transfer;
+use crate::transfers::transfer::Transfer;
 
 /// Fees struct for taking the FeeQuery and parsing the Tokens
 #[derive(Debug, Clone)]
@@ -17,7 +17,7 @@ impl Detokenize for Fees {
         Self: Sized,
     {
         let fee = tokens[0].clone().to_uint().ok_or_else(|| {
-            contract::Error::from_kind(contract::ErrorKind::Msg(
+            contract::Error::Api(web3::Error::Decoder(
                 "cannot parse fees from contract response".to_string(),
             ))
         })?;
@@ -65,17 +65,17 @@ impl Detokenize for Withdrawal {
         Self: Sized,
     {
         let destination = tokens[0].clone().to_address().ok_or_else(|| {
-            contract::Error::from_kind(contract::ErrorKind::Msg(
+            contract::Error::Api(web3::Error::Decoder(
                 "cannot parse destination address from contract response".to_string(),
             ))
         })?;
         let amount = tokens[1].clone().to_uint().ok_or_else(|| {
-            contract::Error::from_kind(contract::ErrorKind::Msg(
+            contract::Error::Api(web3::Error::Decoder(
                 "cannot parse amount uint from contract response".to_string(),
             ))
         })?;
         let processed = tokens[2].clone().to_bool().ok_or_else(|| {
-            contract::Error::from_kind(contract::ErrorKind::Msg(
+            contract::Error::Api(web3::Error::Decoder(
                 "cannot parse processed bool from contract response".to_string(),
             ))
         })?;
@@ -98,7 +98,7 @@ impl Detokenize for WithdrawalApprovals {
         Self: Sized,
     {
         let approval = tokens[0].clone().to_address().ok_or_else(|| {
-            contract::Error::from_kind(contract::ErrorKind::Msg(
+            contract::Error::Api(web3::Error::Decoder(
                 "cannot parse approvers from contract response".to_string(),
             ))
         })?;
@@ -124,6 +124,9 @@ impl WithdrawalApprovalQuery {
 
 impl Tokenize for WithdrawalApprovalQuery {
     fn into_tokens(self) -> Vec<Token> {
-        vec![Token::FixedBytes(self.approval_hash.to_vec()), Token::Uint(self.index)]
+        vec![
+            Token::FixedBytes(self.approval_hash[..].to_vec()),
+            Token::Uint(self.index),
+        ]
     }
 }

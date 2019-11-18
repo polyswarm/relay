@@ -7,19 +7,19 @@ use web3::futures::try_ready;
 use web3::types::{Address, BlockNumber, Bytes, TransactionReceipt, U256};
 use web3::DuplexTransport;
 
-use eth::transaction::SendTransaction;
-use flush::{CheckBalances, FeeWallet, FeeWalletQuery, FilterLowBalance, Wallet};
-use relay::Network;
-use server::handler::{BalanceOf, BalanceQuery};
-use transfers::live::Event;
-use transfers::withdrawal::{ApproveParams, WaitForWithdrawalProcessed};
+use crate::eth::transaction::SendTransaction;
+use crate::flush::{CheckBalances, FeeWallet, FeeWalletQuery, FilterLowBalance, Wallet};
+use crate::relay::Network;
+use crate::server::handler::{BalanceOf, BalanceQuery};
+use crate::transfers::live::Event;
+use crate::transfers::withdrawal::{ApproveParams, WaitForWithdrawalProcessed};
 
 enum ProcessFlushState<T: DuplexTransport + 'static> {
     Wait,
     CheckBalances(CheckBalances<T>),
     FilterContracts(FilterContracts),
     FilterLowBalance(FilterLowBalance),
-    WithdrawWallets(Box<Future<Item = Vec<()>, Error = ()>>),
+    WithdrawWallets(Box<dyn Future<Item = Vec<()>, Error = ()>>),
     WithdrawLeftovers(FlushRemaining<T>),
 }
 
@@ -103,7 +103,7 @@ impl<T: DuplexTransport + 'static> ProcessFlush<T> {
         let fees = *fees;
         wallets.sort();
 
-        let futures: Vec<Box<Future<Item = (), Error = ()>>> = wallets
+        let futures: Vec<Box<dyn Future<Item = (), Error = ()>>> = wallets
             .iter()
             .enumerate()
             .map(|(i, wallet)| {
@@ -113,14 +113,14 @@ impl<T: DuplexTransport + 'static> ProcessFlush<T> {
                 let wallet = *wallet;
 
                 // Create futures
-                let transfer = wallet.get_transfer(&receipt.transaction_hash, &block_hash, &(block_number + i));
-                let future: Box<Future<Item = (), Error = ()>> = Box::new(
+                let transfer = wallet.get_transfer(&receipt.transaction_hash, &block_hash, block_number + i);
+                let future: Box<dyn Future<Item = (), Error = ()>> = Box::new(
                     transfer
                         .check_withdrawal(&target, Some(fees))
                         .and_then(move |needs_approval| {
                             let target = target.clone();
                             if needs_approval {
-                                Either::A(wallet.withdraw(&target, &transaction_hash, &block_hash, &(block_number + i)))
+                                Either::A(wallet.withdraw(&target, &transaction_hash, &block_hash, block_number + i))
                             } else {
                                 Either::B(ok(()))
                             }
@@ -215,8 +215,8 @@ impl<T: DuplexTransport + 'static> Future for ProcessFlush<T> {
 }
 
 enum FlushRemainingState<T: DuplexTransport + 'static> {
-    GetBalance(Box<Future<Item = BalanceOf, Error = ()>>),
-    GetFeeWallet(Box<Future<Item = FeeWallet, Error = ()>>),
+    GetBalance(Box<dyn Future<Item = BalanceOf, Error = ()>>),
+    GetFeeWallet(Box<dyn Future<Item = FeeWallet, Error = ()>>),
     Withdraw(SendTransaction<T, ApproveParams>),
 }
 
@@ -252,7 +252,7 @@ impl<T: DuplexTransport + 'static> FlushRemaining<T> {
     /// # Arguments
     ///
     /// * `target` - Network being flushed
-    fn get_balance(target: &Network<T>) -> Box<Future<Item = BalanceOf, Error = ()>> {
+    fn get_balance(target: &Network<T>) -> Box<dyn Future<Item = BalanceOf, Error = ()>> {
         let relay_contract_balance_query = BalanceQuery::new(target.relay.address());
         let target = target.clone();
         Box::new(
@@ -275,7 +275,7 @@ impl<T: DuplexTransport + 'static> FlushRemaining<T> {
     /// # Arguments
     ///
     /// * `target` - Network being flushed
-    fn get_fee_wallet(target: &Network<T>) -> Box<Future<Item = FeeWallet, Error = ()>> {
+    fn get_fee_wallet(target: &Network<T>) -> Box<dyn Future<Item = FeeWallet, Error = ()>> {
         let target = target.clone();
         Box::new(
             target
@@ -330,7 +330,7 @@ impl<T: DuplexTransport + 'static> Future for FlushRemaining<T> {
                             let wallet = Wallet::new(&address.0, &b);
                             info!("withdrawing {} to fee wallet {}", wallet.balance, wallet.address);
                             let withdrawal =
-                                wallet.withdraw(&target, &receipt.transaction_hash, &block_hash, &block_number);
+                                wallet.withdraw(&target, &receipt.transaction_hash, &block_hash, block_number);
                             FlushRemainingState::Withdraw(withdrawal)
                         }
                         None => {
@@ -351,7 +351,7 @@ impl<T: DuplexTransport + 'static> Future for FlushRemaining<T> {
 
 /// FilterContract Future that takes a list of wallets, and filters out any that are contracts
 pub struct FilterContracts {
-    future: Box<Future<Item = Vec<Bytes>, Error = ()>>,
+    future: Box<dyn Future<Item = Vec<Bytes>, Error = ()>>,
     wallets: Vec<Wallet>,
 }
 

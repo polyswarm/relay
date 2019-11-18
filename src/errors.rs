@@ -1,8 +1,9 @@
+use actix_web::{http, HttpResponse, ResponseError};
 /// # Rationale
 /// Relay defines multiple failure types to have an easy way to delineate
 /// between errors we may want to emit during verbose logging or to allow the
 /// user to filter errors on which "unit" an error arises from.
-use actix_web::{http, HttpResponse, ResponseError};
+use failure_derive::Fail;
 
 /// OperationError defines errors resulting from interaction from, between or
 /// with the chains.
@@ -65,6 +66,9 @@ impl ResponseError for EndpointError {
 /// they should *only* be triggered at startup.
 #[derive(Fail, Debug, PartialEq, Clone)]
 pub enum ConfigError {
+    #[fail(display = "unable to fetch configuration from consul")]
+    ConsulError,
+
     #[fail(display = "invalid config file path")]
     InvalidConfigFilePath,
 

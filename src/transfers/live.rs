@@ -6,11 +6,12 @@ use web3::futures::prelude::*;
 use web3::futures::sync::mpsc;
 use web3::futures::try_ready;
 use web3::types::{Address, Filter, Log, TransactionReceipt, H256, U256};
-use web3::{DuplexTransport, ErrorKind};
+use web3::DuplexTransport;
+use web3::Error;
 
 use super::transfer::Transfer;
-use extensions::timeout::SubscriptionState;
-use relay::{Network, TransferApprovalState};
+use crate::extensions::timeout::SubscriptionState;
+use crate::relay::{Network, TransferApprovalState};
 
 #[derive(Clone)]
 pub struct Event {
@@ -59,7 +60,7 @@ impl<T: DuplexTransport + 'static> WatchLiveLogs<T> {
         }
     }
 
-    fn process_log(&self, log: &Log) -> Box<Future<Item = (), Error = ()>> {
+    fn process_log(&self, log: &Log) -> Box<dyn Future<Item = (), Error = ()>> {
         let network_type = self.source.network_type;
         let source = self.source.clone();
         let tx = self.tx.clone();
@@ -108,7 +109,8 @@ impl<T: DuplexTransport + 'static> Future for WatchLiveLogs<T> {
                         }
                         Ok(Async::Ready(None)) => {
                             self.tx.close().map_err(move |_| {
-                                web3::Error::from_kind(ErrorKind::Msg("Unable to close sender".to_string()))
+                                error!("Unable to close sender");
+                                Error::Internal
                             })?;
                             return Ok(Async::Ready(()));
                         }
@@ -118,7 +120,8 @@ impl<T: DuplexTransport + 'static> Future for WatchLiveLogs<T> {
                         Err(e) => {
                             error!("error reading transfer logs on {:?}. {:?}", self.source.network_type, e);
                             self.tx.close().map_err(move |_| {
-                                web3::Error::from_kind(ErrorKind::Msg("Unable to close sender".to_string()))
+                                error!("Unable to close sender");
+                                Error::Internal
                             })?;
                             return Err(e);
                         }
@@ -272,8 +275,8 @@ impl<T: DuplexTransport + 'static> Future for ProcessTransfer<T> {
 mod tests {
     use super::*;
     use crate::mock::transport::MockTransport;
-    use relay::NetworkType;
-    use web3::types::{H256, U256};
+    use crate::relay::NetworkType;
+    use web3::types::{H256, U256, U64};
 
     #[test]
     fn should_build_network_with_mock() {
@@ -297,7 +300,7 @@ mod tests {
             amount: U256::zero(),
             tx_hash: H256::zero(),
             block_hash: H256::zero(),
-            block_number: U256::zero(),
+            block_number: U64::zero(),
             removed: false,
         };
         // act
@@ -324,7 +327,7 @@ mod tests {
             amount: U256::zero(),
             tx_hash: H256::zero(),
             block_hash: H256::zero(),
-            block_number: U256::zero(),
+            block_number: U64::zero(),
             removed: false,
         };
         // act
@@ -350,7 +353,7 @@ mod tests {
             amount: U256::zero(),
             tx_hash: H256::zero(),
             block_hash: H256::zero(),
-            block_number: U256::zero(),
+            block_number: U64::zero(),
             removed: false,
         };
         // act
@@ -379,7 +382,7 @@ mod tests {
             amount: U256::zero(),
             tx_hash: H256::zero(),
             block_hash: H256::zero(),
-            block_number: U256::zero(),
+            block_number: U64::zero(),
             removed: true,
         };
         // act
@@ -408,7 +411,7 @@ mod tests {
             amount: U256::zero(),
             tx_hash: H256::zero(),
             block_hash: H256::zero(),
-            block_number: U256::zero(),
+            block_number: U64::zero(),
             removed: true,
         };
         // act
@@ -435,7 +438,7 @@ mod tests {
             amount: U256::zero(),
             tx_hash: H256::zero(),
             block_hash: H256::zero(),
-            block_number: U256::zero(),
+            block_number: U64::zero(),
             removed: true,
         };
         // act

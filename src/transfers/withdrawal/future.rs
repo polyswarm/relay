@@ -3,12 +3,12 @@ use web3::futures::prelude::*;
 use web3::futures::try_ready;
 use web3::types::{Address, BlockNumber, H256, U256};
 
-use web3::DuplexTransport;
 use super::transfer::Transfer;
-use super::{FeeQuery, Fees, Withdrawal, WithdrawalApprovalQuery, WithdrawalApprovals, ApproveParams};
-use crate::relay::Network;
-use crate::extensions::removed::CancelRemoved;
+use super::{ApproveParams, FeeQuery, Fees, Withdrawal, WithdrawalApprovalQuery, WithdrawalApprovals};
 use crate::eth::transaction::SendTransaction;
+use crate::extensions::removed::CancelRemoved;
+use crate::relay::Network;
+use web3::DuplexTransport;
 
 pub enum DoesRequireApprovalState {
     GetFees(Box<dyn Future<Item = Fees, Error = ()>>),
@@ -268,36 +268,35 @@ impl<T: DuplexTransport + 'static> Future for ApproveWithdrawal<T> {
         let transfer = self.transfer;
         loop {
             let next = match self.state {
-                ApproveWithdrawalState::CheckFlush => {
-                    match source.flushed.read() {
-                        Ok(lock) => {
-                            if lock.is_some() {
-                                warn!(
-                                    "cannot approve withdrawal after flush on {:?}: {} ",
-                                    source.network_type, transfer
-                                );
-                                return Ok(Async::Ready(()));
-                            } else {
-                                let future = target
-                                    .relay
-                                    .query::<Fees, Address, BlockNumber, FeeQuery>(
-                                        "fees",
-                                        FeeQuery::default(),
-                                        target.account,
-                                        Options::default(),
-                                        BlockNumber::Latest,
-                                    ).map_err(|e| {
+                ApproveWithdrawalState::CheckFlush => match source.flushed.read() {
+                    Ok(lock) => {
+                        if lock.is_some() {
+                            warn!(
+                                "cannot approve withdrawal after flush on {:?}: {} ",
+                                source.network_type, transfer
+                            );
+                            return Ok(Async::Ready(()));
+                        } else {
+                            let future = target
+                                .relay
+                                .query::<Fees, Address, BlockNumber, FeeQuery>(
+                                    "fees",
+                                    FeeQuery::default(),
+                                    target.account,
+                                    Options::default(),
+                                    BlockNumber::Latest,
+                                )
+                                .map_err(|e| {
                                     error!("error getting current fees: {:?}", e);
                                 });
-                                ApproveWithdrawalState::CheckFees(Box::new(future))
-                            }
-                        }
-                        Err(e) => {
-                            error!("error acquiring flush event lock: {:?}", e);
-                            return Err(());
+                            ApproveWithdrawalState::CheckFees(Box::new(future))
                         }
                     }
-                }
+                    Err(e) => {
+                        error!("error acquiring flush event lock: {:?}", e);
+                        return Err(());
+                    }
+                },
                 ApproveWithdrawalState::CheckFees(ref mut future) => {
                     let fees = try_ready!(future.poll());
                     if fees.0 >= transfer.amount {
@@ -309,7 +308,8 @@ impl<T: DuplexTransport + 'static> Future for ApproveWithdrawal<T> {
                             "approveWithdrawal",
                             &ApproveParams::from(transfer),
                             target.retries,
-                        ).cancel_removed(&source, transfer.tx_hash);
+                        )
+                        .cancel_removed(&source, transfer.tx_hash);
                         ApproveWithdrawalState::SendTransaction(Box::new(future))
                     }
                 }

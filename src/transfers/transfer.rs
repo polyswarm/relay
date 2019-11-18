@@ -1,13 +1,13 @@
 use std::fmt;
 use web3::contract::tokens::Tokenize;
-use web3::futures::future::{Future};
+use web3::futures::future::Future;
 use web3::types::{Address, TransactionReceipt, H256, U256, U64};
 use web3::DuplexTransport;
 
 use crate::eth::transaction::SendTransaction;
 use crate::extensions::removed::{CancelRemoved, ExitOnLogRemoved};
 use crate::relay::Network;
-use crate::transfers::withdrawal::{DoesRequireApproval, UnapproveParams, ApproveWithdrawal};
+use crate::transfers::withdrawal::{ApproveWithdrawal, DoesRequireApproval, UnapproveParams};
 
 /// Add CheckRemoved trait to SendTransaction, which is called by Transfer::approve_withdrawal
 impl<T, P> CancelRemoved<T, (), ()> for SendTransaction<T, P>

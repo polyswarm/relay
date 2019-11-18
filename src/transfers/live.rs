@@ -242,6 +242,10 @@ impl<T: DuplexTransport + 'static> Future for ProcessTransfer<T> {
             match next {
                 Some(event) => {
                     let destination: Address = event.log.topics[1].into();
+                    if destination == Address::zero() {
+                        warn!("Received transaction to the zero address");
+                        return Ok(Async::Ready(()));
+                    }
                     let amount: U256 = event.log.data.0[..32].into();
                     let removed = event.log.removed.unwrap_or(false);
                     let transfer =

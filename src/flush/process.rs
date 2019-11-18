@@ -350,6 +350,7 @@ impl<T: DuplexTransport + 'static> Future for FlushRemaining<T> {
 }
 
 /// FilterContract Future that takes a list of wallets, and filters out any that are contracts
+/// Also removes any zero address wallets
 pub struct FilterContracts {
     future: Box<dyn Future<Item = Vec<Bytes>, Error = ()>>,
     wallets: Vec<Wallet>,
@@ -364,17 +365,18 @@ impl FilterContracts {
     pub fn new<T: DuplexTransport + 'static>(source: &Network<T>, wallets: Vec<Wallet>) -> Self {
         // Get contract data
         // For whatever reason, doing this as an iter().map().collect() did not work
+        let wallets: Vec<Wallet> = wallets.iter().filter(|wallet| wallet.address != Address::zero()).cloned().collect();
         let mut futures = Vec::new();
+        let source = source.clone();
         for wallet in wallets.clone() {
-            let future = source.web3.eth().code(wallet.address, None).map_err(move |e| {
+            futures.push(Box::new(source.web3.eth().code(wallet.address, None).map_err(move |e| {
                 error!("error retrieving code for wallet {}: {:?}", wallet.address, e);
-            });
-            futures.push(Box::new(future));
+            })));
         }
 
         FilterContracts {
             future: Box::new(join_all(futures)),
-            wallets: wallets.clone(),
+            wallets,
         }
     }
 }

@@ -2,11 +2,13 @@ use web3::contract::Options;
 use web3::futures::prelude::*;
 use web3::futures::try_ready;
 use web3::types::{Address, BlockNumber, H256, U256};
-use web3::DuplexTransport;
 
+use web3::DuplexTransport;
 use super::transfer::Transfer;
-use super::{FeeQuery, Fees, Withdrawal, WithdrawalApprovalQuery, WithdrawalApprovals};
+use super::{FeeQuery, Fees, Withdrawal, WithdrawalApprovalQuery, WithdrawalApprovals, ApproveParams};
 use crate::relay::Network;
+use crate::extensions::removed::CancelRemoved;
+use crate::eth::transaction::SendTransaction;
 
 pub enum DoesRequireApprovalState {
     GetFees(Box<dyn Future<Item = Fees, Error = ()>>),
@@ -227,6 +229,103 @@ impl<T: DuplexTransport + 'static> Future for WaitForWithdrawalProcessed<T> {
             } else {
                 self.future = WaitForWithdrawalProcessed::check(&self.target, &self.transfer);
             }
+        }
+    }
+}
+
+pub enum ApproveWithdrawalState {
+    CheckFlush,
+    CheckFees(Box<dyn Future<Item = Fees, Error = ()>>),
+    SendTransaction(Box<dyn Future<Item = Option<()>, Error = ()>>),
+}
+
+pub struct ApproveWithdrawal<T: DuplexTransport + 'static> {
+    state: ApproveWithdrawalState,
+    transfer: Transfer,
+    source: Network<T>,
+    target: Network<T>,
+}
+
+impl<T: DuplexTransport + 'static> ApproveWithdrawal<T> {
+    pub fn new(source: &Network<T>, target: &Network<T>, transfer: &Transfer) -> Self {
+        let state = ApproveWithdrawalState::CheckFlush;
+        ApproveWithdrawal {
+            source: source.clone(),
+            target: target.clone(),
+            transfer: *transfer,
+            state,
+        }
+    }
+}
+
+impl<T: DuplexTransport + 'static> Future for ApproveWithdrawal<T> {
+    type Item = ();
+    type Error = ();
+
+    fn poll(&mut self) -> Result<Async<Self::Item>, Self::Error> {
+        let source = self.source.clone();
+        let target = self.target.clone();
+        let transfer = self.transfer;
+        loop {
+            let next = match self.state {
+                ApproveWithdrawalState::CheckFlush => {
+                    match source.flushed.read() {
+                        Ok(lock) => {
+                            if lock.is_some() {
+                                warn!(
+                                    "cannot approve withdrawal after flush on {:?}: {} ",
+                                    source.network_type, transfer
+                                );
+                                return Ok(Async::Ready(()));
+                            } else {
+                                let future = target
+                                    .relay
+                                    .query::<Fees, Address, BlockNumber, FeeQuery>(
+                                        "fees",
+                                        FeeQuery::default(),
+                                        target.account,
+                                        Options::default(),
+                                        BlockNumber::Latest,
+                                    ).map_err(|e| {
+                                    error!("error getting current fees: {:?}", e);
+                                });
+                                ApproveWithdrawalState::CheckFees(Box::new(future))
+                            }
+                        }
+                        Err(e) => {
+                            error!("error acquiring flush event lock: {:?}", e);
+                            return Err(());
+                        }
+                    }
+                }
+                ApproveWithdrawalState::CheckFees(ref mut future) => {
+                    let fees = try_ready!(future.poll());
+                    if fees.0 >= transfer.amount {
+                        warn!("transfer amount is lower than fees, not performing withdrawal");
+                        return Ok(Async::Ready(()));
+                    } else {
+                        let future = SendTransaction::new(
+                            &target,
+                            "approveWithdrawal",
+                            &ApproveParams::from(transfer),
+                            target.retries,
+                        ).cancel_removed(&source, transfer.tx_hash);
+                        ApproveWithdrawalState::SendTransaction(Box::new(future))
+                    }
+                }
+                ApproveWithdrawalState::SendTransaction(ref mut future) => {
+                    let success = try_ready!(future.poll());
+                    if success.is_none() {
+                        warn!(
+                            "log removed from originating chain while waiting on approval confirmations on target {:?}",
+                            target.network_type
+                        );
+                    }
+                    return Ok(Async::Ready(()));
+                }
+            };
+
+            self.state = next;
         }
     }
 }

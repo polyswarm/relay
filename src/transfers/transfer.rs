@@ -1,13 +1,13 @@
 use std::fmt;
 use web3::contract::tokens::Tokenize;
-use web3::futures::future::{err, ok, Future};
+use web3::futures::future::{Future};
 use web3::types::{Address, TransactionReceipt, H256, U256, U64};
 use web3::DuplexTransport;
 
 use crate::eth::transaction::SendTransaction;
 use crate::extensions::removed::{CancelRemoved, ExitOnLogRemoved};
 use crate::relay::Network;
-use crate::transfers::withdrawal::{ApproveParams, DoesRequireApproval, UnapproveParams};
+use crate::transfers::withdrawal::{DoesRequireApproval, UnapproveParams, ApproveWithdrawal};
 
 /// Add CheckRemoved trait to SendTransaction, which is called by Transfer::approve_withdrawal
 impl<T, P> CancelRemoved<T, (), ()> for SendTransaction<T, P>
@@ -89,45 +89,8 @@ impl Transfer {
         &self,
         source: &Network<T>,
         target: &Network<T>,
-    ) -> Box<dyn Future<Item = (), Error = ()>> {
-        match source.flushed.read() {
-            Ok(lock) => {
-                if lock.is_some() {
-                    warn!(
-                        "cannot approve withdrawal after flush on {:?}: {} ",
-                        source.network_type, self
-                    );
-                    Box::new(ok(()))
-                } else {
-                    info!("approving withdrawal on {:?}: {} ", target.network_type, self);
-                    let target = target.clone();
-                    Box::new(SendTransaction::new(
-                        &target,
-                        "approveWithdrawal",
-                        &ApproveParams::from(*self),
-                        target.retries,
-                    )
-                        .cancel_removed(&source, self.tx_hash)
-                        .and_then(move |success| {
-                            success.map_or_else(
-                                || {
-                                    warn!(
-                                        "log removed from originating chain while waiting on approval confirmations on target {:?}",
-                                        target.network_type
-                                    );
-                                    Ok(())
-                                },
-                                |_| Ok(()),
-                            )
-                        })
-                        .or_else(|_| Ok(())))
-                }
-            }
-            Err(e) => {
-                error!("error acquiring flush event lock: {:?}", e);
-                Box::new(err(()))
-            }
-        }
+    ) -> ApproveWithdrawal<T> {
+        ApproveWithdrawal::new(source, target, self)
     }
 
     pub fn unapprove_withdrawal<T: DuplexTransport + 'static>(

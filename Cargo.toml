@@ -29,7 +29,7 @@ common-types = { git = "https://github.com/paritytech/parity-ethereum" }
 ethstore = { git = "https://github.com/paritytech/parity-ethereum" }
 ethkey = { git = "https://github.com/paritytech/parity-ethereum" }
 web3 = { git = "https://github.com/polyswarm/rust-web3", branch = "master" }
-consul = { git = "https://github.com/polyswarm/consul-rust", branch = "feature/refactor-token-headers" }
+consul = { git = "https://github.com/polyswarm/consul-rust", branch = "master" }
 
 [profile.dev]
 opt-level = 0

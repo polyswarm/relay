@@ -1,16 +1,15 @@
 use web3::contract::Options;
 use web3::futures::prelude::*;
 use web3::futures::try_ready;
-use web3::types::{Address, BlockNumber, FilterBuilder, Log, TransactionReceipt, U64};
-use web3::DuplexTransport;
+use web3::types::{Address, BlockNumber, FilterBuilder, Log, TransactionReceipt, U64, U256};
 
+use web3::DuplexTransport;
 use crate::eth::contracts::FLUSH_EVENT_SIGNATURE;
-use crate::flush::{FlushBlock, FlushBlockQuery};
 use crate::relay::Network;
 use crate::transfers::live::Event;
 
 enum CheckForPastFlushState {
-    CheckFlushBlock(Box<dyn Future<Item = FlushBlock, Error = ()>>),
+    CheckFlushBlock(Box<dyn Future<Item = U256, Error = ()>>),
     GetFlushLog(Box<dyn Future<Item = Vec<Log>, Error = ()>>),
     GetFlushReceipt(Box<Log>, Box<dyn Future<Item = Option<TransactionReceipt>, Error = ()>>),
 }
@@ -30,9 +29,9 @@ impl<T: DuplexTransport + 'static> CheckForPastFlush<T> {
     pub fn new(source: &Network<T>) -> Self {
         let flush_block_future = source
             .relay
-            .query::<FlushBlock, Address, BlockNumber, FlushBlockQuery>(
+            .query::<U256, Address, BlockNumber, ()>(
                 "flushBlock",
-                FlushBlockQuery::default(),
+                (),
                 source.account,
                 Options::default(),
                 BlockNumber::Latest,
@@ -72,7 +71,7 @@ impl<T: DuplexTransport + 'static> Future for CheckForPastFlush<T> {
             let next = match self.state {
                 CheckForPastFlushState::CheckFlushBlock(ref mut future) => {
                     let block = try_ready!(future.poll());
-                    let block_number = block.0;
+                    let block_number = block.as_u64().into();
                     info!("flush block on start is {}", block_number);
                     if block_number > U64::zero() {
                         let future = self.get_flush_log(block_number);

@@ -31,7 +31,7 @@ impl CheckPastTransfers {
         let relay_address = source.relay.address();
         let network_type = source.network_type;
         let interval = source.interval;
-        let confirmations = source.confirmations;
+        let confirmations = source.confirmations * 2;
         let web3 = source.web3.clone();
         let timeout = source.timeout;
 
@@ -75,7 +75,7 @@ impl CheckPastTransfers {
                                         return Err(Error::Internal);
                                     }
                                     let to = block.as_u64() - confirmations - LOOKBACK_LEEWAY;
-                                    info!(
+                                    debug!(
                                         "checking logs between {} and {} on {:?}",
                                         from,
                                         to,
@@ -97,7 +97,7 @@ impl CheckPastTransfers {
                                         let tx = tx.clone();
                                         let web3 = web3.clone();
                                         let handle = handle.clone();
-                                        info!(
+                                        debug!(
                                             "found {} transfers on {:?}",
                                             logs.len(),
                                             network_type

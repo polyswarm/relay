@@ -6,36 +6,6 @@ use web3::types::{Address, H256, U256};
 
 use crate::transfers::transfer::Transfer;
 
-/// Fees struct for taking the FeeQuery and parsing the Tokens
-#[derive(Debug, Clone)]
-pub struct Fees(pub U256);
-
-impl Detokenize for Fees {
-    /// Creates a new instance from parsed ABI tokens.
-    fn from_tokens(tokens: Vec<Token>) -> Result<Self, contract::Error>
-    where
-        Self: Sized,
-    {
-        let fee = tokens[0].clone().to_uint().ok_or_else(|| {
-            contract::Error::Api(web3::Error::Decoder(
-                "cannot parse fees from contract response".to_string(),
-            ))
-        })?;
-        debug!("fees: {:?}", fee);
-        Ok(Fees(fee))
-    }
-}
-
-/// Query with args for getting the fees
-#[derive(Default)]
-pub struct FeeQuery {}
-
-impl Tokenize for FeeQuery {
-    fn into_tokens(self) -> Vec<Token> {
-        vec![]
-    }
-}
-
 /// struct for parsing tokens from getting a Withdrawal
 #[derive(Debug, Clone)]
 pub struct Withdrawal {
@@ -87,26 +57,6 @@ impl Detokenize for Withdrawal {
     }
 }
 
-/// Deconstruct withdrawal approval values from contract into usabale values
-#[derive(Debug, Clone)]
-pub struct WithdrawalApprovals(pub Address);
-
-impl Detokenize for WithdrawalApprovals {
-    /// Creates a new instance from parsed ABI tokens.
-    fn from_tokens(tokens: Vec<Token>) -> Result<Self, contract::Error>
-    where
-        Self: Sized,
-    {
-        let approval = tokens[0].clone().to_address().ok_or_else(|| {
-            contract::Error::Api(web3::Error::Decoder(
-                "cannot parse approvers from contract response".to_string(),
-            ))
-        })?;
-        info!("withdrawal approval: {:?}", approval);
-        Ok(WithdrawalApprovals(approval))
-    }
-}
-
 /// Query Args for finding approvals
 pub struct WithdrawalApprovalQuery {
     approval_hash: H256,
@@ -125,7 +75,7 @@ impl WithdrawalApprovalQuery {
 impl Tokenize for WithdrawalApprovalQuery {
     fn into_tokens(self) -> Vec<Token> {
         vec![
-            Token::FixedBytes(self.approval_hash[..].to_vec()),
+            Token::FixedBytes(self.approval_hash.0.to_vec()),
             Token::Uint(self.index),
         ]
     }

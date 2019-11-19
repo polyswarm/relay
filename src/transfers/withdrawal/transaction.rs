@@ -22,8 +22,8 @@ impl Tokenize for ApproveParams {
         let mut tokens = Vec::new();
         tokens.push(Token::Address(self.destination));
         tokens.push(Token::Uint(self.amount));
-        tokens.push(Token::FixedBytes(self.tx_hash[..].to_vec()));
-        tokens.push(Token::FixedBytes(self.block_hash[..].to_vec()));
+        tokens.push(Token::FixedBytes(self.tx_hash.0.to_vec()));
+        tokens.push(Token::FixedBytes(self.block_hash.0.to_vec()));
         tokens.push(Token::Uint(self.block_number.as_u64().into()));
         tokens
     }
@@ -55,8 +55,8 @@ pub struct UnapproveParams {
 impl Tokenize for UnapproveParams {
     fn into_tokens(self) -> Vec<Token> {
         let mut tokens = Vec::new();
-        tokens.push(Token::FixedBytes(self.tx_hash[..].to_vec()));
-        tokens.push(Token::FixedBytes(self.block_hash[..].to_vec()));
+        tokens.push(Token::FixedBytes(self.tx_hash.0.to_vec()));
+        tokens.push(Token::FixedBytes(self.block_hash.0.to_vec()));
         tokens.push(Token::Uint(self.block_number.as_u64().into()));
         tokens
     }

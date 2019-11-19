@@ -1,17 +1,17 @@
 use web3::contract::Options;
 use web3::futures::prelude::*;
 use web3::futures::try_ready;
+use web3::DuplexTransport;
 use web3::types::{Address, BlockNumber, H256, U256};
 
 use super::transfer::Transfer;
-use super::{ApproveParams, FeeQuery, Fees, Withdrawal, WithdrawalApprovalQuery, WithdrawalApprovals};
+use super::{ApproveParams, Withdrawal, WithdrawalApprovalQuery};
 use crate::eth::transaction::SendTransaction;
 use crate::extensions::removed::CancelRemoved;
 use crate::relay::Network;
-use web3::DuplexTransport;
 
 pub enum DoesRequireApprovalState {
-    GetFees(Box<dyn Future<Item = Fees, Error = ()>>),
+    GetFees(Box<dyn Future<Item = U256, Error = ()>>),
     GetWithdrawal(U256, Box<dyn Future<Item = Withdrawal, Error = ()>>),
     GetWithdrawalApprovals(usize, GetWithdrawalApprovals),
 }
@@ -40,12 +40,12 @@ impl<T: DuplexTransport + 'static> DoesRequireApproval<T> {
         }
     }
 
-    pub fn get_fees(target: &Network<T>) -> impl Future<Item = Fees, Error = ()> {
+    pub fn get_fees(target: &Network<T>) -> impl Future<Item = U256, Error = ()> {
         target
             .relay
-            .query::<Fees, Address, BlockNumber, FeeQuery>(
+            .query::<U256, Address, BlockNumber, ()>(
                 "fees",
-                FeeQuery::default(),
+                (),
                 target.account,
                 Options::default(),
                 BlockNumber::Latest,
@@ -86,8 +86,12 @@ impl<T: DuplexTransport + 'static> Future for DoesRequireApproval<T> {
             let next = match self.state {
                 DoesRequireApprovalState::GetFees(ref mut future) => {
                     let fees = try_ready!(future.poll());
+                    info!("Got fees, maybe: {}", fees);
+                    if fees >= transfer.amount {
+                        return Ok(Async::Ready(false));
+                    }
                     DoesRequireApprovalState::GetWithdrawal(
-                        fees.0,
+                        fees,
                         Box::new(DoesRequireApproval::get_withdrawal(&target, &transfer)),
                     )
                 }
@@ -97,7 +101,7 @@ impl<T: DuplexTransport + 'static> Future for DoesRequireApproval<T> {
                         || (withdrawal.destination == self.transfer.destination
                             && withdrawal.amount == self.transfer.amount - fees)
                     {
-                        info!("found withdrawal on {:?}: {:?}", network_type, withdrawal);
+                        info!("retrieved withdrawal on target {:?}: {:?}", network_type, withdrawal);
                         if withdrawal.processed {
                             return Ok(Async::Ready(false));
                         } else {
@@ -119,7 +123,7 @@ impl<T: DuplexTransport + 'static> Future for DoesRequireApproval<T> {
                     match polled {
                         Ok(Async::Ready(approval)) => {
                             let account = self.target.account;
-                            if approval.0 == account {
+                            if approval == account {
                                 return Ok(Async::Ready(false));
                             } else {
                                 let i = index + 1;
@@ -144,19 +148,20 @@ impl<T: DuplexTransport + 'static> Future for DoesRequireApproval<T> {
     }
 }
 
-pub struct GetWithdrawalApprovals(Box<dyn Future<Item = WithdrawalApprovals, Error = ()>>);
+pub struct GetWithdrawalApprovals(Box<dyn Future<Item = Address, Error = ()>>);
 
 impl GetWithdrawalApprovals {
     pub fn new<T: DuplexTransport + 'static>(target: &Network<T>, approval_hash: &H256, index: &U256) -> Self {
         let target = target.clone();
         let account = target.account;
         let network_type = target.network_type;
-        let approval_query = WithdrawalApprovalQuery::new(&approval_hash, &index);
+        let index = *index;
         let approval_hash = *approval_hash;
+        let approval_query = WithdrawalApprovalQuery::new(&approval_hash, &index);
         let future = Box::new(
             target
                 .relay
-                .query::<WithdrawalApprovals, Address, BlockNumber, WithdrawalApprovalQuery>(
+                .query::<Address, Address, BlockNumber, WithdrawalApprovalQuery>(
                     "withdrawalApprovals",
                     approval_query,
                     account,
@@ -165,7 +170,7 @@ impl GetWithdrawalApprovals {
                 )
                 .map_err(move |_| {
                     // We expect this error
-                    info!("found all approvers for {:?} on {:?}", network_type, approval_hash);
+                    info!("found all {} approvers for {:?} on {:?}", index, network_type, approval_hash);
                 }),
         );
         GetWithdrawalApprovals(future)
@@ -173,7 +178,7 @@ impl GetWithdrawalApprovals {
 }
 
 impl Future for GetWithdrawalApprovals {
-    type Item = WithdrawalApprovals;
+    type Item = Address;
     type Error = ();
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
@@ -235,7 +240,7 @@ impl<T: DuplexTransport + 'static> Future for WaitForWithdrawalProcessed<T> {
 
 pub enum ApproveWithdrawalState {
     CheckFlush,
-    CheckFees(Box<dyn Future<Item = Fees, Error = ()>>),
+    CheckFees(Box<dyn Future<Item = U256, Error = ()>>),
     SendTransaction(Box<dyn Future<Item = Option<()>, Error = ()>>),
 }
 
@@ -279,15 +284,15 @@ impl<T: DuplexTransport + 'static> Future for ApproveWithdrawal<T> {
                         } else {
                             let future = target
                                 .relay
-                                .query::<Fees, Address, BlockNumber, FeeQuery>(
+                                .query::<U256, Address, BlockNumber, ()>(
                                     "fees",
-                                    FeeQuery::default(),
+                                    (),
                                     target.account,
                                     Options::default(),
                                     BlockNumber::Latest,
                                 )
                                 .map_err(|e| {
-                                    error!("error getting current fees: {:?}", e);
+                                    error!("error getting fees: {:?}", e);
                                 });
                             ApproveWithdrawalState::CheckFees(Box::new(future))
                         }
@@ -299,7 +304,7 @@ impl<T: DuplexTransport + 'static> Future for ApproveWithdrawal<T> {
                 },
                 ApproveWithdrawalState::CheckFees(ref mut future) => {
                     let fees = try_ready!(future.poll());
-                    if fees.0 >= transfer.amount {
+                    if fees >= transfer.amount {
                         warn!("transfer amount is lower than fees, not performing withdrawal");
                         return Ok(Async::Ready(()));
                     } else {

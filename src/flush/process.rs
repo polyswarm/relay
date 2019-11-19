@@ -8,9 +8,8 @@ use web3::types::{Address, BlockNumber, Bytes, TransactionReceipt, U256};
 use web3::DuplexTransport;
 
 use crate::eth::transaction::SendTransaction;
-use crate::flush::{CheckBalances, FeeWallet, FeeWalletQuery, FilterLowBalance, Wallet};
+use crate::flush::{CheckBalances, FilterLowBalance, Wallet};
 use crate::relay::Network;
-use crate::server::handler::{BalanceOf, BalanceQuery};
 use crate::transfers::live::Event;
 use crate::transfers::withdrawal::{ApproveParams, WaitForWithdrawalProcessed};
 
@@ -180,7 +179,7 @@ impl<T: DuplexTransport + 'static> Future for ProcessFlush<T> {
                     info!("{} wallets above minimum balances", balances.len());
                     match flush {
                         Some(flush_event) => {
-                            let futures = self.handle_final_wallets(&flush_event, &fees.0, &mut balances)?;
+                            let futures = self.handle_final_wallets(&flush_event, &fees, &mut balances)?;
                             ProcessFlushState::WithdrawWallets(Box::new(futures))
                         }
                         None => {
@@ -215,8 +214,8 @@ impl<T: DuplexTransport + 'static> Future for ProcessFlush<T> {
 }
 
 enum FlushRemainingState<T: DuplexTransport + 'static> {
-    GetBalance(Box<dyn Future<Item = BalanceOf, Error = ()>>),
-    GetFeeWallet(Box<dyn Future<Item = FeeWallet, Error = ()>>),
+    GetBalance(Box<dyn Future<Item = U256, Error = ()>>),
+    GetFeeWallet(Box<dyn Future<Item = Address, Error = ()>>),
     Withdraw(SendTransaction<T, ApproveParams>),
 }
 
@@ -252,15 +251,14 @@ impl<T: DuplexTransport + 'static> FlushRemaining<T> {
     /// # Arguments
     ///
     /// * `target` - Network being flushed
-    fn get_balance(target: &Network<T>) -> Box<dyn Future<Item = BalanceOf, Error = ()>> {
-        let relay_contract_balance_query = BalanceQuery::new(target.relay.address());
+    fn get_balance(target: &Network<T>) -> Box<dyn Future<Item = U256, Error = ()>> {
         let target = target.clone();
         Box::new(
             target
                 .token
-                .query::<BalanceOf, Address, BlockNumber, BalanceQuery>(
+                .query::<U256, Address, BlockNumber, Address>(
                     "balanceOf",
-                    relay_contract_balance_query,
+                    target.relay.address(),
                     target.account,
                     Options::default(),
                     BlockNumber::Latest,
@@ -275,14 +273,14 @@ impl<T: DuplexTransport + 'static> FlushRemaining<T> {
     /// # Arguments
     ///
     /// * `target` - Network being flushed
-    fn get_fee_wallet(target: &Network<T>) -> Box<dyn Future<Item = FeeWallet, Error = ()>> {
+    fn get_fee_wallet(target: &Network<T>) -> Box<dyn Future<Item = Address, Error = ()>> {
         let target = target.clone();
         Box::new(
             target
                 .relay
-                .query::<FeeWallet, Address, BlockNumber, FeeWalletQuery>(
+                .query::<Address, Address, BlockNumber, ()>(
                     "feeWallet",
-                    FeeWalletQuery::default(),
+                    (),
                     target.account,
                     Options::default(),
                     BlockNumber::Latest,
@@ -305,11 +303,11 @@ impl<T: DuplexTransport + 'static> Future for FlushRemaining<T> {
             let next = match self.state {
                 FlushRemainingState::GetBalance(ref mut future) => {
                     let balance = try_ready!(future.poll());
-                    if balance.0 == U256::zero() {
+                    if balance == U256::zero() {
                         info!("contract balance is zero, no remaining NCT to withdraw");
                         return Ok(Async::Ready(()));
                     }
-                    self.balance = Some(balance.0);
+                    self.balance = Some(balance);
                     FlushRemainingState::GetFeeWallet(FlushRemaining::get_fee_wallet(&target))
                 }
                 FlushRemainingState::GetFeeWallet(ref mut future) => {
@@ -327,7 +325,7 @@ impl<T: DuplexTransport + 'static> Future for FlushRemaining<T> {
                             }
                             let block_hash = receipt.block_hash.unwrap();
                             let block_number = receipt.block_number.unwrap() + offset;
-                            let wallet = Wallet::new(&address.0, &b);
+                            let wallet = Wallet::new(&address, &b);
                             info!("withdrawing {} to fee wallet {}", wallet.balance, wallet.address);
                             let withdrawal =
                                 wallet.withdraw(&target, &receipt.transaction_hash, &block_hash, block_number);

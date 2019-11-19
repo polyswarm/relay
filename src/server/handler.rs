@@ -1,52 +1,14 @@
 use crate::relay::{Network, NetworkType};
 use crate::server::endpoint::{NetworkStatus, RequestType, StatusResponse};
 use crate::transfers::past::{FindTransferInTransaction, ValidateAndApproveTransfer};
-use ethabi::Token;
 use tokio_core::reactor;
-use web3::contract::tokens::{Detokenize, Tokenize};
 use web3::contract::Options;
 use web3::futures::future;
 use web3::futures::prelude::*;
 use web3::futures::sync::mpsc;
 use web3::futures::try_ready;
 use web3::types::{Address, BlockNumber, U256};
-use web3::{contract, DuplexTransport};
-
-pub struct BalanceQuery {
-    address: Address,
-}
-
-impl BalanceQuery {
-    pub fn new(address: Address) -> Self {
-        BalanceQuery { address }
-    }
-}
-
-impl Tokenize for BalanceQuery {
-    fn into_tokens(self) -> Vec<Token> {
-        vec![Token::Address(self.address)]
-    }
-}
-
-/// Withdrawal event added to contract after a transfer
-#[derive(Debug, Clone)]
-pub struct BalanceOf(pub U256);
-
-impl Detokenize for BalanceOf {
-    /// Creates a new instance from parsed ABI tokens.
-    fn from_tokens(tokens: Vec<Token>) -> Result<Self, contract::Error>
-    where
-        Self: Sized,
-    {
-        let balance = tokens[0].clone().to_uint().ok_or_else(|| {
-            contract::Error::Api(web3::Error::Decoder(
-                "cannot parse balance from contract response".to_string(),
-            ))
-        })?;
-        debug!("balance of: {:?}", balance);
-        Ok(BalanceOf(balance))
-    }
-}
+use web3::DuplexTransport;
 
 pub struct HandleRequests<T: DuplexTransport + 'static> {
     listen: mpsc::UnboundedReceiver<RequestType>,
@@ -142,17 +104,16 @@ impl StatusCheck {
             .and_then(move |balance| Ok(Some(balance)))
             .or_else(|_| Ok(None));
 
-        let home_balance_query = BalanceQuery::new(homechain.relay.address());
         let home_nct_future = homechain
             .token
-            .query::<BalanceOf, Address, BlockNumber, BalanceQuery>(
+            .query::<U256, Address, BlockNumber, Address>(
                 "balanceOf",
-                home_balance_query,
+                homechain.relay.address(),
                 homechain.account,
                 Options::default(),
                 BlockNumber::Latest,
             )
-            .and_then(move |balance| Ok(Some(balance.0)))
+            .and_then(move |balance| Ok(Some(balance)))
             .or_else(move |_| Ok(None));
 
         let home_last_block_future = homechain
@@ -168,17 +129,16 @@ impl StatusCheck {
             .balance(sidechain.account, None)
             .and_then(move |balance| Ok(Some(balance)))
             .or_else(|_| Ok(None));
-        let side_balance_query = BalanceQuery::new(sidechain.relay.address());
         let side_nct_future = sidechain
             .token
-            .query::<BalanceOf, Address, BlockNumber, BalanceQuery>(
+            .query::<U256, Address, BlockNumber, Address>(
                 "balanceOf",
-                side_balance_query,
+                sidechain.relay.address(),
                 sidechain.account,
                 Options::default(),
                 BlockNumber::Latest,
             )
-            .and_then(move |balance| Ok(Some(balance.0)))
+            .and_then(move |balance| Ok(Some(balance)))
             .or_else(move |_| Ok(None));
 
         let side_last_block_future = sidechain

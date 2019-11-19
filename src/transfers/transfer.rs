@@ -1,4 +1,5 @@
 use std::fmt;
+use tiny_keccak::keccak256;
 use web3::contract::tokens::Tokenize;
 use web3::futures::future::Future;
 use web3::types::{Address, TransactionReceipt, H256, U256, U64};
@@ -105,6 +106,20 @@ impl Transfer {
             target.retries,
         )
         .or_else(|_| Ok(()))
+    }
+
+    pub fn get_withdrawal_hash(&self) -> H256 {
+        let tx_hash = self.tx_hash;
+        let block_hash = self.block_hash;
+        let block_number: &mut [u8] = &mut [0; 32];
+        // Must be 256 bit version of block number to match the hash
+        let block_number_256: U256 = self.block_number.as_u64().into();
+        block_number_256.to_big_endian(block_number);
+        let mut grouped: Vec<u8> = Vec::new();
+        grouped.extend_from_slice(&tx_hash.0);
+        grouped.extend_from_slice(&block_hash.0);
+        grouped.extend_from_slice(block_number);
+        H256(keccak256(&grouped[..]))
     }
 }
 

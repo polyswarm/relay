@@ -5,12 +5,12 @@ use web3::futures::prelude::*;
 use web3::futures::try_ready;
 use web3::types::{Address, BlockNumber, FilterBuilder, Log, H256, U256, U64};
 
-use web3::DuplexTransport;
 use crate::eth::contracts::TRANSFER_EVENT_SIGNATURE;
 use crate::eth::transaction::SendTransaction;
 use crate::relay::Network;
 use crate::transfers::transfer::Transfer;
 use crate::transfers::withdrawal::ApproveParams;
+use web3::DuplexTransport;
 
 pub enum CheckBalancesState {
     GetEndingBlock(Box<dyn Future<Item = U64, Error = ()>>),
@@ -158,13 +158,7 @@ impl FilterLowBalance {
         // Get contract data
         let future = target
             .relay
-            .query::<U256, Address, BlockNumber, ()>(
-                "fees",
-                (),
-                target.account,
-                Options::default(),
-                BlockNumber::Latest,
-            )
+            .query("fees", (), None, Options::default(), BlockNumber::Latest)
             .map_err(|e| {
                 error!("error getting relay fees: {:?}", e);
             });
@@ -184,13 +178,7 @@ impl Future for FilterLowBalance {
         let filtered = self
             .wallets
             .iter()
-            .filter_map(|wallet| {
-                if wallet.balance > fees {
-                    Some(*wallet)
-                } else {
-                    None
-                }
-            })
+            .filter_map(|wallet| if wallet.balance > fees { Some(*wallet) } else { None })
             .collect();
         Ok(Async::Ready((fees, filtered)))
     }

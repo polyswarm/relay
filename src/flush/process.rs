@@ -256,10 +256,10 @@ impl<T: DuplexTransport + 'static> FlushRemaining<T> {
         Box::new(
             target
                 .token
-                .query::<U256, Address, BlockNumber, Address>(
+                .query(
                     "balanceOf",
                     target.relay.address(),
-                    target.account,
+                    None,
                     Options::default(),
                     BlockNumber::Latest,
                 )
@@ -278,13 +278,7 @@ impl<T: DuplexTransport + 'static> FlushRemaining<T> {
         Box::new(
             target
                 .relay
-                .query::<Address, Address, BlockNumber, ()>(
-                    "feeWallet",
-                    (),
-                    target.account,
-                    Options::default(),
-                    BlockNumber::Latest,
-                )
+                .query("feeWallet", (), None, Options::default(), BlockNumber::Latest)
                 .map_err(|e| {
                     error!("error retrieving fee wallet: {:?}", e);
                 }),

@@ -7,7 +7,7 @@ use web3::futures::future;
 use web3::futures::prelude::*;
 use web3::futures::sync::mpsc;
 use web3::futures::try_ready;
-use web3::types::{Address, BlockNumber, U256};
+use web3::types::{BlockNumber, U256};
 use web3::DuplexTransport;
 
 pub struct HandleRequests<T: DuplexTransport + 'static> {
@@ -106,10 +106,10 @@ impl StatusCheck {
 
         let home_nct_future = homechain
             .token
-            .query::<U256, Address, BlockNumber, Address>(
+            .query(
                 "balanceOf",
                 homechain.relay.address(),
-                homechain.account,
+                None,
                 Options::default(),
                 BlockNumber::Latest,
             )
@@ -131,10 +131,10 @@ impl StatusCheck {
             .or_else(|_| Ok(None));
         let side_nct_future = sidechain
             .token
-            .query::<U256, Address, BlockNumber, Address>(
+            .query(
                 "balanceOf",
                 sidechain.relay.address(),
-                sidechain.account,
+                None,
                 Options::default(),
                 BlockNumber::Latest,
             )

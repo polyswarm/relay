@@ -266,8 +266,8 @@ impl<T: DuplexTransport + 'static> Future for ValidateAndApproveTransfer<T> {
             let target = self.target.clone();
             let handle = self.handle.clone();
             info!(
-                "approving missed transfer on {:?}: {:?}",
-                target.network_type, self.transfer
+                "approving withdrawal on {:?} from missed transfer on {:?}: {:?}",
+                target.network_type, source.network_type, self.transfer
             );
             handle.spawn(self.transfer.approve_withdrawal(&source, &target));
         }

@@ -4,14 +4,13 @@ use web3::contract::Options;
 use web3::futures::prelude::*;
 use web3::futures::try_ready;
 use web3::types::{Address, BlockNumber, FilterBuilder, Log, H256, U256, U64};
-use web3::DuplexTransport;
 
 use crate::eth::contracts::TRANSFER_EVENT_SIGNATURE;
 use crate::eth::transaction::SendTransaction;
 use crate::relay::Network;
 use crate::transfers::transfer::Transfer;
-use crate::transfers::withdrawal::query::{FeeQuery, Fees};
 use crate::transfers::withdrawal::ApproveParams;
+use web3::DuplexTransport;
 
 pub enum CheckBalancesState {
     GetEndingBlock(Box<dyn Future<Item = U64, Error = ()>>),
@@ -145,7 +144,7 @@ impl<T: DuplexTransport + 'static> Future for CheckBalances<T> {
 
 /// FilterLowBalance Future that takes a list of wallets, and filters out that have a balance below the fee cost to withdraw
 pub struct FilterLowBalance {
-    future: Box<dyn Future<Item = Fees, Error = ()>>,
+    future: Box<dyn Future<Item = U256, Error = ()>>,
     wallets: Vec<Wallet>,
 }
 
@@ -159,13 +158,7 @@ impl FilterLowBalance {
         // Get contract data
         let future = target
             .relay
-            .query::<Fees, Address, BlockNumber, FeeQuery>(
-                "fees",
-                FeeQuery::default(),
-                target.account,
-                Options::default(),
-                BlockNumber::Latest,
-            )
+            .query("fees", (), None, Options::default(), BlockNumber::Latest)
             .map_err(|e| {
                 error!("error getting relay fees: {:?}", e);
             });
@@ -178,23 +171,16 @@ impl FilterLowBalance {
 }
 
 impl Future for FilterLowBalance {
-    type Item = (Fees, Vec<Wallet>);
+    type Item = (U256, Vec<Wallet>);
     type Error = ();
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        let fee = try_ready!(self.future.poll());
-        let fee_value = fee.0;
+        let fees = try_ready!(self.future.poll());
         let filtered = self
             .wallets
             .iter()
-            .filter_map(|wallet| {
-                if wallet.balance > fee_value {
-                    Some(*wallet)
-                } else {
-                    None
-                }
-            })
+            .filter_map(|wallet| if wallet.balance > fees { Some(*wallet) } else { None })
             .collect();
-        Ok(Async::Ready((fee, filtered)))
+        Ok(Async::Ready((fees, filtered)))
     }
 }
 

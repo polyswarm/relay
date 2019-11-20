@@ -8,9 +8,8 @@ use web3::types::{Address, BlockNumber, Bytes, TransactionReceipt, U256};
 use web3::DuplexTransport;
 
 use crate::eth::transaction::SendTransaction;
-use crate::flush::{CheckBalances, FeeWallet, FeeWalletQuery, FilterLowBalance, Wallet};
+use crate::flush::{CheckBalances, FilterLowBalance, Wallet};
 use crate::relay::Network;
-use crate::server::handler::{BalanceOf, BalanceQuery};
 use crate::transfers::live::Event;
 use crate::transfers::withdrawal::{ApproveParams, WaitForWithdrawalProcessed};
 
@@ -180,7 +179,7 @@ impl<T: DuplexTransport + 'static> Future for ProcessFlush<T> {
                     info!("{} wallets above minimum balances", balances.len());
                     match flush {
                         Some(flush_event) => {
-                            let futures = self.handle_final_wallets(&flush_event, &fees.0, &mut balances)?;
+                            let futures = self.handle_final_wallets(&flush_event, &fees, &mut balances)?;
                             ProcessFlushState::WithdrawWallets(Box::new(futures))
                         }
                         None => {
@@ -215,8 +214,8 @@ impl<T: DuplexTransport + 'static> Future for ProcessFlush<T> {
 }
 
 enum FlushRemainingState<T: DuplexTransport + 'static> {
-    GetBalance(Box<dyn Future<Item = BalanceOf, Error = ()>>),
-    GetFeeWallet(Box<dyn Future<Item = FeeWallet, Error = ()>>),
+    GetBalance(Box<dyn Future<Item = U256, Error = ()>>),
+    GetFeeWallet(Box<dyn Future<Item = Address, Error = ()>>),
     Withdraw(SendTransaction<T, ApproveParams>),
 }
 
@@ -252,16 +251,15 @@ impl<T: DuplexTransport + 'static> FlushRemaining<T> {
     /// # Arguments
     ///
     /// * `target` - Network being flushed
-    fn get_balance(target: &Network<T>) -> Box<dyn Future<Item = BalanceOf, Error = ()>> {
-        let relay_contract_balance_query = BalanceQuery::new(target.relay.address());
+    fn get_balance(target: &Network<T>) -> Box<dyn Future<Item = U256, Error = ()>> {
         let target = target.clone();
         Box::new(
             target
                 .token
-                .query::<BalanceOf, Address, BlockNumber, BalanceQuery>(
+                .query(
                     "balanceOf",
-                    relay_contract_balance_query,
-                    target.account,
+                    target.relay.address(),
+                    None,
                     Options::default(),
                     BlockNumber::Latest,
                 )
@@ -275,18 +273,12 @@ impl<T: DuplexTransport + 'static> FlushRemaining<T> {
     /// # Arguments
     ///
     /// * `target` - Network being flushed
-    fn get_fee_wallet(target: &Network<T>) -> Box<dyn Future<Item = FeeWallet, Error = ()>> {
+    fn get_fee_wallet(target: &Network<T>) -> Box<dyn Future<Item = Address, Error = ()>> {
         let target = target.clone();
         Box::new(
             target
                 .relay
-                .query::<FeeWallet, Address, BlockNumber, FeeWalletQuery>(
-                    "feeWallet",
-                    FeeWalletQuery::default(),
-                    target.account,
-                    Options::default(),
-                    BlockNumber::Latest,
-                )
+                .query("feeWallet", (), None, Options::default(), BlockNumber::Latest)
                 .map_err(|e| {
                     error!("error retrieving fee wallet: {:?}", e);
                 }),
@@ -305,11 +297,11 @@ impl<T: DuplexTransport + 'static> Future for FlushRemaining<T> {
             let next = match self.state {
                 FlushRemainingState::GetBalance(ref mut future) => {
                     let balance = try_ready!(future.poll());
-                    if balance.0 == U256::zero() {
+                    if balance == U256::zero() {
                         info!("contract balance is zero, no remaining NCT to withdraw");
                         return Ok(Async::Ready(()));
                     }
-                    self.balance = Some(balance.0);
+                    self.balance = Some(balance);
                     FlushRemainingState::GetFeeWallet(FlushRemaining::get_fee_wallet(&target))
                 }
                 FlushRemainingState::GetFeeWallet(ref mut future) => {
@@ -327,7 +319,7 @@ impl<T: DuplexTransport + 'static> Future for FlushRemaining<T> {
                             }
                             let block_hash = receipt.block_hash.unwrap();
                             let block_number = receipt.block_number.unwrap() + offset;
-                            let wallet = Wallet::new(&address.0, &b);
+                            let wallet = Wallet::new(&address, &b);
                             info!("withdrawing {} to fee wallet {}", wallet.balance, wallet.address);
                             let withdrawal =
                                 wallet.withdraw(&target, &receipt.transaction_hash, &block_hash, block_number);
@@ -350,6 +342,7 @@ impl<T: DuplexTransport + 'static> Future for FlushRemaining<T> {
 }
 
 /// FilterContract Future that takes a list of wallets, and filters out any that are contracts
+/// Also removes any zero address wallets
 pub struct FilterContracts {
     future: Box<dyn Future<Item = Vec<Bytes>, Error = ()>>,
     wallets: Vec<Wallet>,
@@ -364,17 +357,24 @@ impl FilterContracts {
     pub fn new<T: DuplexTransport + 'static>(source: &Network<T>, wallets: Vec<Wallet>) -> Self {
         // Get contract data
         // For whatever reason, doing this as an iter().map().collect() did not work
+        let wallets: Vec<Wallet> = wallets
+            .iter()
+            .filter(|wallet| wallet.address != Address::zero())
+            .cloned()
+            .collect();
         let mut futures = Vec::new();
+        let source = source.clone();
         for wallet in wallets.clone() {
-            let future = source.web3.eth().code(wallet.address, None).map_err(move |e| {
-                error!("error retrieving code for wallet {}: {:?}", wallet.address, e);
-            });
-            futures.push(Box::new(future));
+            futures.push(Box::new(source.web3.eth().code(wallet.address, None).map_err(
+                move |e| {
+                    error!("error retrieving code for wallet {}: {:?}", wallet.address, e);
+                },
+            )));
         }
 
         FilterContracts {
             future: Box::new(join_all(futures)),
-            wallets: wallets.clone(),
+            wallets,
         }
     }
 }

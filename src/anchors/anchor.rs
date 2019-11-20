@@ -34,7 +34,7 @@ impl Anchor {
 impl Tokenize for Anchor {
     fn into_tokens(self) -> Vec<Token> {
         vec![
-            Token::FixedBytes(self.block_hash[..].to_vec()),
+            Token::FixedBytes(self.block_hash.0.to_vec()),
             Token::Uint(self.block_number.as_u64().into()),
         ]
     }

@@ -48,6 +48,7 @@ impl fmt::Display for Anchor {
 
 /// Future to handle the Stream of anchors & post them to the chain
 pub struct HandleAnchors<T: DuplexTransport + 'static> {
+    source: Network<T>,
     target: Network<T>,
     stream: FindAnchors,
     handle: reactor::Handle,
@@ -63,9 +64,15 @@ impl<T: DuplexTransport + 'static> HandleAnchors<T> {
     /// * `handle` - Handle to spawn new futures
     pub fn new(source: &Network<T>, target: &Network<T>, handle: &reactor::Handle) -> Self {
         let handle = handle.clone();
+        let source = source.clone();
         let target = target.clone();
-        let stream = FindAnchors::new(source, &handle);
-        HandleAnchors { target, stream, handle }
+        let stream = FindAnchors::new(&source, &handle);
+        HandleAnchors {
+            source,
+            target,
+            stream,
+            handle,
+        }
     }
 }
 
@@ -77,6 +84,17 @@ impl<T: DuplexTransport + 'static> Future for HandleAnchors<T> {
             let anchor = try_ready!(self.stream.poll());
             match anchor {
                 Some(a) => {
+                    match self.source.flushed.read() {
+                        Ok(lock) => {
+                            if lock.is_some() {
+                                return Ok(Async::Ready(()));
+                            }
+                        }
+                        Err(e) => {
+                            error!("error acquiring flush event lock: {:?}", e);
+                            return Err(());
+                        }
+                    };
                     self.handle.spawn(a.process(&self.target));
                 }
                 None => {

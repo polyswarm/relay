@@ -65,8 +65,12 @@ impl<T: DuplexTransport + 'static> HandleAnchors<T> {
     pub fn new(source: &Network<T>, target: &Network<T>, handle: &reactor::Handle) -> Self {
         let handle = handle.clone();
         let target = target.clone();
-        let stream = FindAnchors::new(source, &handle);
-        HandleAnchors { target, stream, handle }
+        let stream = FindAnchors::new(&source, &handle);
+        HandleAnchors {
+            target,
+            stream,
+            handle,
+        }
     }
 }
 

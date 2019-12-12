@@ -5,7 +5,7 @@ use web3::types::{BlockNumber, FilterBuilder, Log, TransactionReceipt, U256, U64
 
 use crate::eth::contracts::FLUSH_EVENT_SIGNATURE;
 use crate::relay::Network;
-use crate::transfers::live::Event;
+use crate::eth::Event;
 use web3::DuplexTransport;
 
 enum CheckForPastFlushState {

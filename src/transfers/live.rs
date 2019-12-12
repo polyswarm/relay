@@ -6,13 +6,14 @@ use web3::futures::future::{ok, Either, Future};
 use web3::futures::prelude::*;
 use web3::futures::sync::mpsc;
 use web3::futures::try_ready;
-use web3::types::{Address, Filter, Log, TransactionReceipt, H256, U256};
+use web3::types::{Address, Filter, Log, H256, U256};
 use web3::DuplexTransport;
 use web3::Error;
 
 use super::transfer::Transfer;
 use crate::extensions::flushed::{Flushed, FlushedStream};
 use crate::relay::{Network, TransferApprovalState};
+use crate::eth::Event;
 
 /// Enum for the two stages of subscribing to a timeout stream
 /// Subscribing holds a future that returns a TimeoutStream
@@ -26,20 +27,6 @@ where
     Subscribed(FlushedStream<I>),
 }
 
-#[derive(Clone)]
-pub struct Event {
-    pub log: Log,
-    pub receipt: TransactionReceipt,
-}
-
-impl Event {
-    pub fn new(log: &Log, receipt: &TransactionReceipt) -> Self {
-        Event {
-            log: log.clone(),
-            receipt: receipt.clone(),
-        }
-    }
-}
 
 /// Stream of events that have match the given filter.
 /// Passes the transaction receipt and log over the given tx upon confirmation (or removal)

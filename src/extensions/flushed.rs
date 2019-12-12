@@ -6,7 +6,7 @@ use web3::DuplexTransport;
 use web3::api::SubscriptionStream;
 
 use super::timeout::TimeoutStream;
-use crate::transfers::live::Event;
+use crate::eth::Event;
 
 /// FlushedStream adds a timeout to an existing Stream.
 /// returns Err if too much time has passed since the last object from the stream

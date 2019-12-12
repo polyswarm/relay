@@ -10,7 +10,7 @@ use web3::DuplexTransport;
 use crate::eth::transaction::SendTransaction;
 use crate::flush::{CheckBalances, FilterLowBalance, Wallet};
 use crate::relay::Network;
-use crate::transfers::live::Event;
+use crate::eth::Event;
 use crate::transfers::withdrawal::{ApproveParams, WaitForWithdrawalProcessed};
 
 enum ProcessFlushState<T: DuplexTransport + 'static> {

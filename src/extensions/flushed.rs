@@ -21,7 +21,7 @@ where
 }
 
 /// FlushedStream adds a flush check to an existing Stream.
-/// It exists and unsubscribes
+/// It exits and calls unsubscribe on original stream
 pub struct FlushedStream<T, I>
 where
     T: DuplexTransport + 'static,

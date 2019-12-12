@@ -8,9 +8,9 @@ use web3::types::{Address, BlockNumber, Bytes, TransactionReceipt, U256};
 use web3::DuplexTransport;
 
 use crate::eth::transaction::SendTransaction;
+use crate::eth::Event;
 use crate::flush::{CheckBalances, FilterLowBalance, Wallet};
 use crate::relay::Network;
-use crate::eth::Event;
 use crate::transfers::withdrawal::{ApproveParams, WaitForWithdrawalProcessed};
 
 enum ProcessFlushState<T: DuplexTransport + 'static> {

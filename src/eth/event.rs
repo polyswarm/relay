@@ -1,4 +1,4 @@
-use web3::types::{TransactionReceipt, Log};
+use web3::types::{Log, TransactionReceipt};
 
 #[derive(Clone)]
 pub struct Event {

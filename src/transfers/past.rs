@@ -9,8 +9,8 @@ use web3::Error;
 
 use super::transfer::Transfer;
 use crate::eth::contracts::TRANSFER_EVENT_SIGNATURE;
-use crate::extensions::timeout::Timeout;
 use crate::extensions::flushed::Flushed;
+use crate::extensions::timeout::Timeout;
 use crate::relay::Network;
 
 pub const LOOKBACK_RANGE: u64 = 1_000;
@@ -44,8 +44,8 @@ impl CheckPastTransfers {
             .clone()
             .eth_subscribe()
             .subscribe_new_heads()
-            .timeout(timeout, &handle)
             .flushed(&flushed)
+            .timeout(timeout, &handle)
             .for_each(move |head| {
                     let web3 = web3.clone();
                     let handle = handle.clone();
@@ -204,16 +204,11 @@ impl RecheckPastTransferLogs {
         let handle = handle.clone();
         let target = target.clone();
         let source = source.clone();
-        let future = CheckPastTransfers::new(&source, &handle)
-            .for_each(move |transfer| {
-                let target = target.clone();
-                let handle = handle.clone();
-                ValidateAndApproveTransfer::new(&source, &target, &handle, &transfer)
-            })
-            .and_then(move |_| {
-                // This is only ever triggered when the FindMissedTransfers has an error, and closes the Sender.
-                Err(())
-            });
+        let future = CheckPastTransfers::new(&source, &handle).for_each(move |transfer| {
+            let target = target.clone();
+            let handle = handle.clone();
+            ValidateAndApproveTransfer::new(&source, &target, &handle, &transfer)
+        });
         RecheckPastTransferLogs(Box::new(future))
     }
 }

@@ -110,7 +110,8 @@ impl<T: DuplexTransport + 'static> Relay<T> {
                         .and_then(|_| Ok(())),
                 )
             })
-            .map_err(|_| {
+            .map_err(|e| {
+                error!("error at top level: {:?}", e);
                 process::exit(-1);
             })
     }

@@ -9,8 +9,8 @@ use web3::types::{BlockId, BlockNumber, H256, U64};
 use web3::DuplexTransport;
 
 use crate::eth::transaction::SendTransaction;
-use crate::extensions::timeout::Timeout;
 use crate::extensions::flushed::Flushed;
+use crate::extensions::timeout::Timeout;
 use crate::relay::Network;
 
 /// Represents a block on the sidechain to be anchored to the homechain
@@ -66,11 +66,7 @@ impl<T: DuplexTransport + 'static> HandleAnchors<T> {
         let handle = handle.clone();
         let target = target.clone();
         let stream = FindAnchors::new(&source, &handle);
-        HandleAnchors {
-            target,
-            stream,
-            handle,
-        }
+        HandleAnchors { target, stream, handle }
     }
 }
 
@@ -85,7 +81,7 @@ impl<T: DuplexTransport + 'static> Future for HandleAnchors<T> {
                     self.handle.spawn(a.process(&self.target));
                 }
                 None => {
-                    return Err(());
+                    return Ok(Async::Ready(()));
                 }
             };
         }
@@ -118,8 +114,8 @@ impl FindAnchors {
                 .web3
                 .eth_subscribe()
                 .subscribe_new_heads()
-                .timeout(timeout, &h)
                 .flushed(&flushed)
+                .timeout(timeout, &h)
                 .for_each(move |head| {
                     head.number.map_or_else(
                         || {

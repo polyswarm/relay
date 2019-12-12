@@ -3,6 +3,7 @@ use std::sync::{Arc, RwLock};
 use web3::error::Error;
 use web3::futures::prelude::*;
 use web3::DuplexTransport;
+use web3::api::SubscriptionStream;
 
 use super::timeout::TimeoutStream;
 use crate::transfers::live::Event;
@@ -103,3 +104,14 @@ where
         FlushedStream::new(flushed, Box::new(self))
     }
 }
+
+impl<T, I> Flushed<I> for SubscriptionStream<T, I>
+where
+    T: DuplexTransport + 'static,
+    I: serde::de::DeserializeOwned + 'static,
+{
+    fn flushed(self, flushed: &Arc<RwLock<Option<Event>>>) -> FlushedStream<I> {
+        FlushedStream::new(flushed, Box::new(self))
+    }
+}
+

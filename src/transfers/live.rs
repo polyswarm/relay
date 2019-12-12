@@ -1,6 +1,7 @@
 use lru::LruCache;
 use std::sync::{PoisonError, RwLockWriteGuard};
 use tokio_core::reactor;
+use web3::api::SubscriptionStream;
 use web3::futures::future::{ok, Either, Future};
 use web3::futures::prelude::*;
 use web3::futures::sync::mpsc;
@@ -10,8 +11,20 @@ use web3::DuplexTransport;
 use web3::Error;
 
 use super::transfer::Transfer;
-use crate::extensions::timeout::SubscriptionState;
+use crate::extensions::flushed::{Flushed, FlushedStream};
 use crate::relay::{Network, TransferApprovalState};
+
+/// Enum for the two stages of subscribing to a timeout stream
+/// Subscribing holds a future that returns a TimeoutStream
+/// Subscribed holds a TimeoutStream
+pub enum SubscriptionState<T, I>
+where
+    T: DuplexTransport + 'static,
+    I: serde::de::DeserializeOwned + 'static,
+{
+    Subscribing(Box<dyn Future<Item = SubscriptionStream<T, I>, Error = web3::Error>>),
+    Subscribed(FlushedStream<I>),
+}
 
 #[derive(Clone)]
 pub struct Event {
@@ -95,10 +108,11 @@ impl<T: DuplexTransport + 'static> Future for WatchLiveLogs<T> {
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         loop {
             let handle = self.handle.clone();
+            let flushed = self.source.flushed.clone();
             let next = match self.state {
                 SubscriptionState::Subscribing(ref mut future) => {
                     let stream = try_ready!(future.poll());
-                    Some(SubscriptionState::Subscribed(stream))
+                    Some(SubscriptionState::Subscribed(stream.flushed(&flushed)))
                 }
                 SubscriptionState::Subscribed(ref mut stream) => {
                     match stream.poll() {

@@ -8,18 +8,6 @@ use web3::DuplexTransport;
 
 use crate::eth::Event;
 
-/// Enum for the two stages of subscribing to a timeout stream
-/// Subscribing holds a future that returns a TimeoutStream
-/// Subscribed holds a TimeoutStream
-pub enum SubscriptionState<T, I>
-where
-    T: DuplexTransport + 'static,
-    I: serde::de::DeserializeOwned + 'static,
-{
-    Subscribing(SubscriptionResult<T, I>),
-    Subscribed(SubscriptionStream<T, I>),
-}
-
 /// FlushedStream adds a flush check to an existing Stream.
 /// It exits and calls unsubscribe on original stream
 pub struct FlushedStream<T, I>
@@ -28,7 +16,9 @@ where
     I: serde::de::DeserializeOwned + 'static,
 {
     flushed: Arc<RwLock<Option<Event>>>,
-    state: SubscriptionState<T, I>,
+    subscribe_future: SubscriptionResult<T, I>,
+    subscription_stream: Option<SubscriptionStream<T, I>>,
+    unsubscribe_future: Option<Box<dyn Future<Item = bool, Error = web3::Error>>>,
 }
 
 impl<T, I> FlushedStream<T, I>
@@ -42,10 +32,12 @@ where
     ///
     /// * `flushed` - Event marking the flush
     /// * `state` - SubscriptionResult from eth_subscribe()
-    pub fn new(flushed: &Arc<RwLock<Option<Event>>>, state: SubscriptionState<T, I>) -> Self {
+    pub fn new(flushed: &Arc<RwLock<Option<Event>>>, state: SubscriptionResult<T, I>) -> Self {
         FlushedStream {
             flushed: flushed.clone(),
-            state,
+            subscribe_future: state,
+            subscription_stream: None,
+            unsubscribe_future: None,
         }
     }
 }
@@ -58,47 +50,33 @@ where
     type Item = I;
     type Error = web3::Error;
 
-    /// Returns Items from the stream, or Err if timed out
+    /// Returns an item from the stream, or None if flushed
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
         let flushed = self.flushed.clone();
         loop {
-            let next = match self.state {
-                SubscriptionState::Subscribing(ref mut future) => {
-                    let stream = try_ready!(future.poll());
-                    Some(SubscriptionState::Subscribed(stream))
-                }
-                SubscriptionState::Subscribed(ref mut stream) => match stream.poll() {
-                    // If the stream does not have the next element, check the lock
-                    Ok(Async::NotReady) => match flushed.read() {
-                        Ok(lock) => {
-                            if lock.is_some() {
-                                // End stream if locked
-                                return Ok(Async::Ready(None));
-                            } else {
-                                return Ok(Async::NotReady);
-                            }
+            if let Some(future) = &mut self.unsubscribe_future {
+                try_ready!(future.poll());
+                return Ok(Async::Ready(None));
+            } else if let Some(stream) = &mut self.subscription_stream {
+                match flushed.read() {
+                    Ok(lock) => {
+                        if lock.is_some() {
+                            // End stream if flushed
+                            let stream = self.subscription_stream.take().unwrap();
+                            self.unsubscribe_future = Some(Box::new(stream.unsubscribe()));
+                        } else {
+                            let message = try_ready!(stream.poll());
+                            return Ok(Async::Ready(message));
                         }
-                        Err(e) => {
-                            error!("error acquiring flush event lock: {:?}", e);
-                            return Err(Error::Internal);
-                        }
-                    },
-                    Ok(Async::Ready(Some(msg))) => {
-                        return Ok(Async::Ready(Some(msg)));
                     }
-                    // Forward stream done
-                    Ok(Async::Ready(None)) => {
-                        return Ok(Async::Ready(None));
-                    }
-                    // Forward errors
                     Err(e) => {
-                        return Err(e);
+                        error!("error acquiring flush event lock: {:?}", e);
+                        return Err(Error::Internal);
                     }
-                },
-            };
-            // If the Future finished, set the state to subscribed
-            if let Some(next_state) = next {
-                self.state = next_state;
+                }
+            } else {
+                let stream = try_ready!(self.subscribe_future.poll());
+                self.subscription_stream = Some(stream);
             }
         }
     }
@@ -126,6 +104,6 @@ where
     I: serde::de::DeserializeOwned + 'static,
 {
     fn flushed(self, flushed: &Arc<RwLock<Option<Event>>>) -> FlushedStream<T, I> {
-        FlushedStream::new(flushed, SubscriptionState::Subscribing(self))
+        FlushedStream::new(flushed, self)
     }
 }

@@ -69,13 +69,9 @@ where
             // If the stream does not have the next element, check the timeout
             Ok(Async::NotReady) => match self.timeout.poll() {
                 // If the timeout is triggered, error out
-                Ok(Async::Ready(_)) => {
-                    Err(Error::Unreachable)
-                }
+                Ok(Async::Ready(_)) => Err(Error::Unreachable),
                 // If timeout not triggered, return NotReady
-                Ok(Async::NotReady) => {
-                    Ok(Async::NotReady)
-                }
+                Ok(Async::NotReady) => Ok(Async::NotReady),
                 // If timeout errors out, return error
                 Err(_) => {
                     error!("Timeout broken");
@@ -88,13 +84,9 @@ where
                 Ok(Async::Ready(Some(msg)))
             }
             // Forward stream done
-            Ok(Async::Ready(None)) => {
-                Ok(Async::Ready(None))
-            }
+            Ok(Async::Ready(None)) => Ok(Async::Ready(None)),
             // Forward errors
-            Err(e) => {
-                Err(e)
-            }
+            Err(e) => Err(e),
         }
     }
 }

@@ -10,6 +10,7 @@ use web3::DuplexTransport;
 
 use crate::eth::transaction::SendTransaction;
 use crate::extensions::timeout::Timeout;
+use crate::extensions::flushed::Flushed;
 use crate::relay::Network;
 
 /// Represents a block on the sidechain to be anchored to the homechain
@@ -107,12 +108,14 @@ impl FindAnchors {
             let handle = handle.clone();
             let web3 = source.web3.clone();
             let timeout = source.timeout;
+            let flushed = source.flushed.clone();
 
             source
                 .web3
                 .eth_subscribe()
                 .subscribe_new_heads()
                 .timeout(timeout, &h)
+                .flushed(&flushed)
                 .for_each(move |head| {
                     head.number.map_or_else(
                         || {

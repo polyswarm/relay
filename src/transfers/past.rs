@@ -10,6 +10,7 @@ use web3::Error;
 use super::transfer::Transfer;
 use crate::eth::contracts::TRANSFER_EVENT_SIGNATURE;
 use crate::extensions::timeout::Timeout;
+use crate::extensions::flushed::Flushed;
 use crate::relay::Network;
 
 pub const LOOKBACK_RANGE: u64 = 1_000;
@@ -34,6 +35,7 @@ impl CheckPastTransfers {
         let confirmations = source.confirmations * 2;
         let web3 = source.web3.clone();
         let timeout = source.timeout;
+        let flushed = source.flushed.clone();
 
         let future = {
             let handle = handle.clone();
@@ -43,6 +45,7 @@ impl CheckPastTransfers {
             .eth_subscribe()
             .subscribe_new_heads()
             .timeout(timeout, &handle)
+            .flushed(&flushed)
             .for_each(move |head| {
                     let web3 = web3.clone();
                     let handle = handle.clone();

@@ -83,7 +83,7 @@ impl<T: DuplexTransport + 'static> Future for HandleAnchors<T> {
                 None => {
                     return Err(());
                 }
-            }
+            };
         }
     }
 }

@@ -65,38 +65,36 @@ where
 
     /// Returns Items from the stream, or Err if timed out
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        loop {
-            match self.stream.poll() {
-                // If the stream does not have the next element, check the timeout
-                Ok(Async::NotReady) => match self.timeout.poll() {
-                    // If the timeout is triggered, error out
-                    Ok(Async::Ready(_)) => {
-                        return Err(Error::Unreachable);
-                    }
-                    // If timeout not triggered, return NotReady
-                    Ok(Async::NotReady) => {
-                        return Ok(Async::NotReady);
-                    }
-                    // If timeout errors out, return error
-                    Err(_) => {
-                        error!("Timeout broken");
-                        return Err(Error::Internal);
-                    }
-                },
-                // If the stream returns an item, reset timeout and return the item
-                Ok(Async::Ready(Some(msg))) => {
-                    TimeoutStream::<I>::reset_timeout(&mut self.timeout, &self.duration);
-                    return Ok(Async::Ready(Some(msg)));
+        match self.stream.poll() {
+            // If the stream does not have the next element, check the timeout
+            Ok(Async::NotReady) => match self.timeout.poll() {
+                // If the timeout is triggered, error out
+                Ok(Async::Ready(_)) => {
+                    Err(Error::Unreachable)
                 }
-                // Forward stream done
-                Ok(Async::Ready(None)) => {
-                    return Ok(Async::Ready(None));
+                // If timeout not triggered, return NotReady
+                Ok(Async::NotReady) => {
+                    Ok(Async::NotReady)
                 }
-                // Forward errors
-                Err(e) => {
-                    return Err(e);
+                // If timeout errors out, return error
+                Err(_) => {
+                    error!("Timeout broken");
+                    Err(Error::Internal)
                 }
-            };
+            },
+            // If the stream returns an item, reset timeout and return the item
+            Ok(Async::Ready(Some(msg))) => {
+                TimeoutStream::<I>::reset_timeout(&mut self.timeout, &self.duration);
+                Ok(Async::Ready(Some(msg)))
+            }
+            // Forward stream done
+            Ok(Async::Ready(None)) => {
+                Ok(Async::Ready(None))
+            }
+            // Forward errors
+            Err(e) => {
+                Err(e)
+            }
         }
     }
 }

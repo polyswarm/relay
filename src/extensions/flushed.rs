@@ -16,7 +16,7 @@ where
     T: DuplexTransport + 'static,
     I: serde::de::DeserializeOwned + 'static,
 {
-    Subscribing(Box<SubscriptionResult<T, I>>),
+    Subscribing(SubscriptionResult<T, I>),
     Subscribed(SubscriptionStream<T, I>),
 }
 
@@ -126,6 +126,6 @@ where
     I: serde::de::DeserializeOwned + 'static,
 {
     fn flushed(self, flushed: &Arc<RwLock<Option<Event>>>) -> FlushedStream<T, I> {
-        FlushedStream::new(flushed, SubscriptionState::Subscribing(Box::new(self)))
+        FlushedStream::new(flushed, SubscriptionState::Subscribing(self))
     }
 }

@@ -93,7 +93,7 @@ where
     /// # Arguments
     ///
     /// * `self` - Existing Stream that this is added to. Consumes self.
-    /// * `flsuhed` - Event that triggered flush
+    /// * `flushed` - Event that triggered flush
     fn flushed(self, flushed: &Arc<RwLock<Option<Event>>>) -> FlushedStream<T, I>;
 }
 

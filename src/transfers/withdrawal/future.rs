@@ -258,6 +258,13 @@ impl<T: DuplexTransport + 'static> ApproveWithdrawal<T> {
             state,
         }
     }
+
+    fn check_flushed(&self, chain: &Network<T>) -> Result<bool, ()> {
+        Ok(chain.flushed.read().map_err(|e| {
+            error!("error getting lock: {:?}", e);
+            ()
+        })?.is_some())
+    }
 }
 
 impl<T: DuplexTransport + 'static> Future for ApproveWithdrawal<T> {
@@ -270,27 +277,18 @@ impl<T: DuplexTransport + 'static> Future for ApproveWithdrawal<T> {
         let transfer = self.transfer;
         loop {
             let next = match self.state {
-                ApproveWithdrawalState::CheckFlush => match source.flushed.read() {
-                    Ok(lock) => {
-                        if lock.is_some() {
-                            warn!(
-                                "cannot approve withdrawal after flush on {:?}: {} ",
-                                source.network_type, transfer
-                            );
-                            return Ok(Async::Ready(()));
-                        } else {
-                            let future = target
-                                .relay
-                                .query("fees", (), target.account, Options::default(), BlockNumber::Latest)
-                                .map_err(|e| {
-                                    error!("error getting fees: {:?}", e);
-                                });
-                            ApproveWithdrawalState::CheckFees(Box::new(future))
-                        }
-                    }
-                    Err(e) => {
-                        error!("error acquiring flush event lock: {:?}", e);
-                        return Err(());
+                ApproveWithdrawalState::CheckFlush => {
+                    if self.check_flushed(&source)? || self.check_flushed(&target)? {
+                        warn!("cannot approve withdrawal after flush: {} ", transfer);
+                        continue;
+                    } else {
+                        let future = target
+                        .relay
+                        .query("fees", (), target.account, Options::default(), BlockNumber::Latest)
+                        .map_err(|e| {
+                            error!("error getting fees: {:?}", e);
+                        });
+                        ApproveWithdrawalState::CheckFees(Box::new(future))
                     }
                 },
                 ApproveWithdrawalState::CheckFees(ref mut future) => {

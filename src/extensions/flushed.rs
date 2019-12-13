@@ -97,7 +97,7 @@ where
     fn flushed(self, flushed: &Arc<RwLock<Option<Event>>>) -> FlushedStream<T, I>;
 }
 
-/// Add Timeout trait to SubscriptionResult, which is returned by web3.eth_subscribe()
+/// Add Flushed trait to SubscriptionResult, which is returned by web3.eth_subscribe()
 impl<T, I> Flushed<T, I> for SubscriptionResult<T, I>
 where
     T: DuplexTransport + 'static,

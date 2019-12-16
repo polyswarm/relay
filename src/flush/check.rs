@@ -4,8 +4,8 @@ use web3::futures::try_ready;
 use web3::types::{BlockNumber, FilterBuilder, Log, TransactionReceipt, U256, U64};
 
 use crate::eth::contracts::FLUSH_EVENT_SIGNATURE;
+use crate::eth::Event;
 use crate::relay::Network;
-use crate::transfers::live::Event;
 use web3::DuplexTransport;
 
 enum CheckForPastFlushState {

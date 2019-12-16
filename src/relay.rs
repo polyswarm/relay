@@ -1,8 +1,7 @@
 use failure::{Error, SyncFailure};
 use lru::LruCache;
-use std::rc::Rc;
 use std::sync::atomic::AtomicUsize;
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 use std::{process, time};
 use tokio_core::reactor;
 use web3::confirm::{wait_for_transaction_confirmation, SendTransactionWithConfirmation};
@@ -23,7 +22,7 @@ use super::server::{HandleRequests, RequestType};
 use super::transfers::live::ProcessTransfer;
 use super::transfers::live::WatchLiveLogs;
 use super::transfers::past::RecheckPastTransferLogs;
-use crate::transfers::live::Event;
+use crate::eth::Event;
 
 const FREE_GAS_PRICE: u64 = 0;
 const GAS_LIMIT: u64 = 200_000;
@@ -111,7 +110,8 @@ impl<T: DuplexTransport + 'static> Relay<T> {
                         .and_then(|_| Ok(())),
                 )
             })
-            .map_err(|_| {
+            .map_err(|e| {
+                error!("error at top level: {:?}", e);
                 process::exit(-1);
             })
     }
@@ -139,8 +139,8 @@ pub struct Network<T: DuplexTransport + 'static> {
     pub network_type: NetworkType,
     pub web3: Web3<T>,
     pub account: Address,
-    pub token: Rc<Contract<T>>,
-    pub relay: Rc<Contract<T>>,
+    pub token: Arc<Contract<T>>,
+    pub relay: Arc<Contract<T>>,
     pub free: bool,
     pub confirmations: u64,
     pub anchor_frequency: u64,
@@ -149,10 +149,10 @@ pub struct Network<T: DuplexTransport + 'static> {
     pub chain_id: u64,
     pub keydir: String,
     pub password: String,
-    pub nonce: Rc<AtomicUsize>,
-    pub pending: Rc<RwLock<LruCache<H256, TransferApprovalState>>>,
+    pub nonce: Arc<AtomicUsize>,
+    pub pending: Arc<RwLock<LruCache<H256, TransferApprovalState>>>,
     pub retries: u64,
-    pub flushed: Rc<RwLock<Option<Event>>>,
+    pub flushed: Arc<RwLock<Option<Event>>>,
 }
 
 impl<T: DuplexTransport + 'static> Network<T> {
@@ -199,12 +199,12 @@ impl<T: DuplexTransport + 'static> Network<T> {
             .parse()
             .or_else(|_| Err(OperationError::InvalidAddress(relay.into())))?;
 
-        let token = Rc::new(
+        let token = Arc::new(
             Contract::from_json(web3.eth(), token_address, token_abi.as_bytes())
                 .or(Err(OperationError::InvalidContractAbi))?,
         );
 
-        let relay = Rc::new(
+        let relay = Arc::new(
             Contract::from_json(web3.eth(), relay_address, relay_abi.as_bytes())
                 .or(Err(OperationError::InvalidContractAbi))?,
         );
@@ -223,10 +223,10 @@ impl<T: DuplexTransport + 'static> Network<T> {
             chain_id,
             keydir: keydir.to_string(),
             password: password.to_string(),
-            nonce: Rc::new(nonce),
-            pending: Rc::new(RwLock::new(LruCache::new(4096))),
+            nonce: Arc::new(nonce),
+            pending: Arc::new(RwLock::new(LruCache::new(4096))),
             retries,
-            flushed: Rc::new(RwLock::new(None)),
+            flushed: Arc::new(RwLock::new(None)),
         })
     }
 

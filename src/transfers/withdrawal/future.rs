@@ -236,7 +236,7 @@ impl<T: DuplexTransport + 'static> Future for WaitForWithdrawalProcessed<T> {
 }
 
 pub enum ApproveWithdrawalState {
-    CheckFlush,
+    CheckFlush(bool, Box<dyn Future<Item = U256, Error = ()>>),
     CheckFees(Box<dyn Future<Item = U256, Error = ()>>),
     SendTransaction(Box<dyn Future<Item = Option<()>, Error = ()>>),
 }
@@ -250,13 +250,24 @@ pub struct ApproveWithdrawal<T: DuplexTransport + 'static> {
 
 impl<T: DuplexTransport + 'static> ApproveWithdrawal<T> {
     pub fn new(source: &Network<T>, target: &Network<T>, transfer: &Transfer) -> Self {
-        let state = ApproveWithdrawalState::CheckFlush;
+        let state = ApproveWithdrawalState::CheckFlush(true, ApproveWithdrawal::check_flushed(source));
         ApproveWithdrawal {
             source: source.clone(),
             target: target.clone(),
             transfer: *transfer,
             state,
         }
+    }
+
+    fn check_flushed(network: &Network<T>) -> Box<dyn Future<Item = U256, Error = ()>> {
+        Box::new(
+            network
+                .relay
+                .query("flushBlock", (), None, Options::default(), BlockNumber::Latest)
+                .map_err(|e| {
+                    error!("error retrieving flush block: {:?}", e);
+                }),
+        )
     }
 }
 
@@ -270,29 +281,30 @@ impl<T: DuplexTransport + 'static> Future for ApproveWithdrawal<T> {
         let transfer = self.transfer;
         loop {
             let next = match self.state {
-                ApproveWithdrawalState::CheckFlush => match source.flushed.read() {
-                    Ok(lock) => {
-                        if lock.is_some() {
-                            warn!(
-                                "cannot approve withdrawal after flush on {:?}: {} ",
-                                source.network_type, transfer
-                            );
-                            return Ok(Async::Ready(()));
+                ApproveWithdrawalState::CheckFlush(is_source, ref mut future) => {
+                    let block = try_ready!(future.poll());
+                    if block > U256::zero() {
+                        let network = if is_source {
+                            source.network_type
                         } else {
-                            let future = target
-                                .relay
-                                .query("fees", (), target.account, Options::default(), BlockNumber::Latest)
-                                .map_err(|e| {
-                                    error!("error getting fees: {:?}", e);
-                                });
-                            ApproveWithdrawalState::CheckFees(Box::new(future))
-                        }
+                            target.network_type
+                        };
+                        warn!("cannot approve withdrawal after flush on {:?}: {} ", network, transfer);
+                        return Ok(Async::Ready(()));
                     }
-                    Err(e) => {
-                        error!("error acquiring flush event lock: {:?}", e);
-                        return Err(());
+
+                    if is_source {
+                        ApproveWithdrawalState::CheckFlush(false, ApproveWithdrawal::check_flushed(&target))
+                    } else {
+                        let future = target
+                            .relay
+                            .query("fees", (), target.account, Options::default(), BlockNumber::Latest)
+                            .map_err(|e| {
+                                error!("error getting fees: {:?}", e);
+                            });
+                        ApproveWithdrawalState::CheckFees(Box::new(future))
                     }
-                },
+                }
                 ApproveWithdrawalState::CheckFees(ref mut future) => {
                     let fees = try_ready!(future.poll());
                     if fees >= transfer.amount {

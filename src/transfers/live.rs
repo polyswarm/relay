@@ -5,33 +5,19 @@ use web3::futures::future::{ok, Either, Future};
 use web3::futures::prelude::*;
 use web3::futures::sync::mpsc;
 use web3::futures::try_ready;
-use web3::types::{Address, Filter, Log, TransactionReceipt, H256, U256};
+use web3::types::{Address, Filter, Log, H256, U256};
 use web3::DuplexTransport;
 use web3::Error;
 
 use super::transfer::Transfer;
-use crate::extensions::timeout::SubscriptionState;
+use crate::eth::Event;
+use crate::extensions::flushed::{Flushed, FlushedStream};
 use crate::relay::{Network, TransferApprovalState};
-
-#[derive(Clone)]
-pub struct Event {
-    pub log: Log,
-    pub receipt: TransactionReceipt,
-}
-
-impl Event {
-    pub fn new(log: &Log, receipt: &TransactionReceipt) -> Self {
-        Event {
-            log: log.clone(),
-            receipt: receipt.clone(),
-        }
-    }
-}
 
 /// Stream of events that have match the given filter.
 /// Passes the transaction receipt and log over the given tx upon confirmation (or removal)
 pub struct WatchLiveLogs<T: DuplexTransport + 'static> {
-    state: SubscriptionState<T, Log>,
+    stream: FlushedStream<T, Log>,
     handle: reactor::Handle,
     source: Network<T>,
     tx: mpsc::UnboundedSender<Event>,
@@ -50,11 +36,16 @@ impl<T: DuplexTransport + 'static> WatchLiveLogs<T> {
         tx: &mpsc::UnboundedSender<Event>,
         handle: &reactor::Handle,
     ) -> Self {
-        let future = Box::new(source.web3.clone().eth_subscribe().subscribe_logs(filter.clone()));
+        let stream = source
+            .web3
+            .clone()
+            .eth_subscribe()
+            .subscribe_logs(filter.clone())
+            .flushed(&source.flushed.clone());
 
         WatchLiveLogs {
             source: source.clone(),
-            state: SubscriptionState::Subscribing(future),
+            stream,
             handle: handle.clone(),
             tx: tx.clone(),
         }
@@ -93,45 +84,33 @@ impl<T: DuplexTransport + 'static> Future for WatchLiveLogs<T> {
     type Item = ();
     type Error = web3::Error;
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        let handle = self.handle.clone();
         loop {
-            let handle = self.handle.clone();
-            let next = match self.state {
-                SubscriptionState::Subscribing(ref mut future) => {
-                    let stream = try_ready!(future.poll());
-                    Some(SubscriptionState::Subscribed(stream))
+            match self.stream.poll() {
+                Ok(Async::Ready(Some(log))) => {
+                    // On receiving a valid log, spawn the waiting for a receipt, as it takes
+                    // 20 blocks which is 20 seconds or 300 seconds and we don't want to block
+                    handle.spawn(self.process_log(&log));
                 }
-                SubscriptionState::Subscribed(ref mut stream) => {
-                    match stream.poll() {
-                        Ok(Async::Ready(Some(log))) => {
-                            // On receiving a valid log, spawn the waiting for a receipt, as it takes
-                            // 20 blocks which is 20 seconds or 300 seconds and we don't want to block
-                            handle.spawn(self.process_log(&log));
-                        }
-                        Ok(Async::Ready(None)) => {
-                            self.tx.close().map_err(move |_| {
-                                error!("Unable to close sender");
-                                Error::Internal
-                            })?;
-                            return Ok(Async::Ready(()));
-                        }
-                        Ok(Async::NotReady) => {
-                            return Ok(Async::NotReady);
-                        }
-                        Err(e) => {
-                            error!("error reading transfer logs on {:?}. {:?}", self.source.network_type, e);
-                            self.tx.close().map_err(move |_| {
-                                error!("Unable to close sender");
-                                Error::Internal
-                            })?;
-                            return Err(e);
-                        }
-                    };
-                    None
+                Ok(Async::Ready(None)) => {
+                    self.tx.close().map_err(move |_| {
+                        error!("Unable to close sender");
+                        Error::Internal
+                    })?;
+                    return Ok(Async::Ready(()));
+                }
+                Ok(Async::NotReady) => {
+                    return Ok(Async::NotReady);
+                }
+                Err(e) => {
+                    error!("error reading transfer logs on {:?}. {:?}", self.source.network_type, e);
+                    self.tx.close().map_err(move |_| {
+                        error!("Unable to close sender");
+                        Error::Internal
+                    })?;
+                    return Err(e);
                 }
             };
-            if let Some(next_state) = next {
-                self.state = next_state;
-            }
         }
     }
 }

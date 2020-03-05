@@ -53,14 +53,12 @@ where
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
         let flushed = self.flushed.clone();
         loop {
-            // Trying to unsubscribe
             if let Some(future) = &mut self.unsubscribe {
+                // Trying to unsubscribe
                 try_ready!(future.poll());
                 return Ok(Async::Ready(None));
-            }
-
-            // Have an open subscription
-            if let Some(stream) = &mut self.stream {
+            } else if let Some(stream) = &mut self.stream {
+                // Have an open subscription
                 let lock = flushed.read().map_err(|e| {
                     error!("error acquiring flush event lock: {:?}", e);
                     web3::Error::Internal
@@ -73,11 +71,11 @@ where
                     let message = try_ready!(stream.poll());
                     return Ok(Async::Ready(message));
                 }
+            } else {
+                // Opening the subscription
+                let stream = try_ready!(self.subscribe.poll());
+                self.stream = Some(stream);
             }
-
-            // Opening the subscription
-            let stream = try_ready!(self.subscribe.poll());
-            self.stream = Some(stream);
         }
     }
 }

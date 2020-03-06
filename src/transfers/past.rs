@@ -16,18 +16,137 @@ use crate::relay::Network;
 pub const LOOKBACK_RANGE: u64 = 1_000;
 pub const LOOKBACK_LEEWAY: u64 = 5;
 
-/// Stream of Transfer that were missed, either from downtime, or failed approvals
-pub struct CheckPastTransfers(mpsc::UnboundedReceiver<Transfer>);
+/// Future to handle the Stream of missed transfers by checking them, and approving them
+pub struct ProcessPastTransfers<T: DuplexTransport + 'static> {
+    stream: mpsc::UnboundedReceiver<Transfer>,
+    future: Option<ValidateAndApproveTransfer<T>>,
+    source: Network<T>,
+    target: Network<T>,
+    handle: reactor::Handle,
+}
 
-impl CheckPastTransfers {
-    /// Returns a newly created FindMissedTransfers Stream
+impl<T: DuplexTransport + 'static> ProcessPastTransfers<T> {
+    /// Returns a newly created ProcessPastTransfers Future
+    ///
+    /// # Arguments
+    ///
+    /// * `source` - Network where the missed transfers are captured
+    /// * `target` - Network where the transfer will be approved for a withdrawal
+    /// * `handle` - Handle to spawn new futures
+    pub fn new(
+        source: &Network<T>,
+        rx: mpsc::UnboundedReceiver<Transfer>,
+        target: &Network<T>,
+        handle: &reactor::Handle,
+    ) -> Self {
+        let handle = handle.clone();
+        let target = target.clone();
+        let source = source.clone();
+        ProcessPastTransfers {
+            stream: rx,
+            future: None,
+            source,
+            target,
+            handle,
+        }
+    }
+}
+
+impl<T: DuplexTransport + 'static> Future for ProcessPastTransfers<T> {
+    type Item = ();
+    type Error = ();
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        loop {
+            if let Some(ref mut future) = self.future {
+                try_ready!(future.poll());
+                self.future = None;
+            } else {
+                let transfer_option = try_ready!(self.stream.poll());
+                match transfer_option {
+                    Some(transfer) => {
+                        self.future = Some(ValidateAndApproveTransfer::new(
+                            &self.source,
+                            &self.target,
+                            &self.handle,
+                            &transfer,
+                        ))
+                    }
+                    None => {
+                        return Ok(Async::Ready(()));
+                    }
+                };
+            }
+        }
+    }
+}
+
+/// Future to check a transfer against the contract and approve is necessary
+pub struct ValidateAndApproveTransfer<T: DuplexTransport + 'static> {
+    source: Network<T>,
+    target: Network<T>,
+    handle: reactor::Handle,
+    transfer: Transfer,
+    future: Box<dyn Future<Item = bool, Error = ()>>,
+}
+
+impl<T: DuplexTransport + 'static> ValidateAndApproveTransfer<T> {
+    /// Returns a newly created HandleMissedTransfers Future
+    ///
+    /// # Arguments
+    ///
+    /// * `target` - Network where the transfer will be approved for a withdrawal
+    /// * `handle` - Handle to spawn new futures
+    /// * `transfer` - Transfer event to check/approve
+    pub fn new(source: &Network<T>, target: &Network<T>, handle: &reactor::Handle, transfer: &Transfer) -> Self {
+        let network_type = target.network_type;
+        let future = transfer.check_withdrawal(&target, None).map_err(move |e| {
+            error!("error checking withdrawal for approval on {:?}: {:?}", network_type, e);
+        });
+
+        ValidateAndApproveTransfer {
+            source: source.clone(),
+            target: target.clone(),
+            handle: handle.clone(),
+            transfer: *transfer,
+            future: Box::new(future),
+        }
+    }
+}
+
+impl<T: DuplexTransport + 'static> Future for ValidateAndApproveTransfer<T> {
+    type Item = ();
+    type Error = ();
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        let needs_approval = try_ready!(self.future.poll());
+        if needs_approval {
+            let source = self.source.clone();
+            let target = self.target.clone();
+            let handle = self.handle.clone();
+            info!(
+                "approving withdrawal on {:?} from missed transfer on {:?}: {:?}",
+                target.network_type, source.network_type, self.transfer
+            );
+            handle.spawn(self.transfer.approve_withdrawal(&source, &target));
+        }
+        Ok(Async::Ready(()))
+    }
+}
+
+/// Stream of Transfer that were missed, either from downtime, or failed approvals
+pub struct WatchPastTransfers(Box<dyn Future<Item = (), Error = ()>>);
+
+impl WatchPastTransfers {
+    /// Returns a newly created WatchPastTransfers Stream
     ///
     /// # Arguments
     ///
     /// * `source` - Network where the missed transfers are found
     /// * `handle` - Handle to spawn new futures
-    pub fn new<T: DuplexTransport + 'static>(source: &Network<T>, handle: &reactor::Handle) -> Self {
-        let (tx, rx) = mpsc::unbounded();
+    pub fn new<T: DuplexTransport + 'static>(
+        source: &Network<T>,
+        tx: mpsc::UnboundedSender<Transfer>,
+        handle: &reactor::Handle,
+    ) -> Self {
         let token_address = source.token.address();
         let relay_address = source.relay.address();
         let network_type = source.network_type;
@@ -172,104 +291,15 @@ impl CheckPastTransfers {
                 error!("error in block head stream on {:?}: {:?}", network_type, e);
             })
         };
-        handle.spawn(future);
-        CheckPastTransfers(rx)
+        WatchPastTransfers(Box::new(future))
     }
 }
 
-impl Stream for CheckPastTransfers {
-    type Item = Transfer;
-    type Error = ();
-    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        self.0.poll()
-    }
-}
-
-/// Future to handle the Stream of missed transfers by checking them, and approving them
-pub struct RecheckPastTransferLogs(Box<dyn Future<Item = (), Error = ()>>);
-
-impl RecheckPastTransferLogs {
-    /// Returns a newly created HandleMissedTransfers Future
-    ///
-    /// # Arguments
-    ///
-    /// * `source` - Network where the missed transfers are captured
-    /// * `target` - Network where the transfer will be approved for a withdrawal
-    /// * `handle` - Handle to spawn new futures
-    pub fn new<T: DuplexTransport + 'static>(
-        source: &Network<T>,
-        target: &Network<T>,
-        handle: &reactor::Handle,
-    ) -> Self {
-        let handle = handle.clone();
-        let target = target.clone();
-        let source = source.clone();
-        let future = CheckPastTransfers::new(&source, &handle).for_each(move |transfer| {
-            let target = target.clone();
-            let handle = handle.clone();
-            ValidateAndApproveTransfer::new(&source, &target, &handle, &transfer)
-        });
-        RecheckPastTransferLogs(Box::new(future))
-    }
-}
-
-impl Future for RecheckPastTransferLogs {
+impl Future for WatchPastTransfers {
     type Item = ();
     type Error = ();
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         self.0.poll()
-    }
-}
-
-/// Future to check a transfer against the contract and approve is necessary
-pub struct ValidateAndApproveTransfer<T: DuplexTransport + 'static> {
-    source: Network<T>,
-    target: Network<T>,
-    handle: reactor::Handle,
-    transfer: Transfer,
-    future: Box<dyn Future<Item = bool, Error = ()>>,
-}
-
-impl<T: DuplexTransport + 'static> ValidateAndApproveTransfer<T> {
-    /// Returns a newly created HandleMissedTransfers Future
-    ///
-    /// # Arguments
-    ///
-    /// * `target` - Network where the transfer will be approved for a withdrawal
-    /// * `handle` - Handle to spawn new futures
-    /// * `transfer` - Transfer event to check/approve
-    pub fn new(source: &Network<T>, target: &Network<T>, handle: &reactor::Handle, transfer: &Transfer) -> Self {
-        let network_type = target.network_type;
-        let future = transfer.check_withdrawal(&target, None).map_err(move |e| {
-            error!("error checking withdrawal for approval on {:?}: {:?}", network_type, e);
-        });
-
-        ValidateAndApproveTransfer {
-            source: source.clone(),
-            target: target.clone(),
-            handle: handle.clone(),
-            transfer: *transfer,
-            future: Box::new(future),
-        }
-    }
-}
-
-impl<T: DuplexTransport + 'static> Future for ValidateAndApproveTransfer<T> {
-    type Item = ();
-    type Error = ();
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        let needs_approval = try_ready!(self.future.poll());
-        if needs_approval {
-            let source = self.source.clone();
-            let target = self.target.clone();
-            let handle = self.handle.clone();
-            info!(
-                "approving withdrawal on {:?} from missed transfer on {:?}: {:?}",
-                target.network_type, source.network_type, self.transfer
-            );
-            handle.spawn(self.transfer.approve_withdrawal(&source, &target));
-        }
-        Ok(Async::Ready(()))
     }
 }
 
@@ -295,7 +325,7 @@ impl<T: DuplexTransport + 'static> FindTransferInTransaction<T> {
     pub fn new(source: &Network<T>, hash: &H256) -> Self {
         let web3 = source.web3.clone();
         let network_type = source.network_type;
-        let future = web3.clone().eth().transaction_receipt(*hash).map_err(move |e| {
+        let future = web3.eth().transaction_receipt(*hash).map_err(move |e| {
             error!("error getting transaction receipt on {:?}: {:?}", network_type, e);
         });
         let state = FindTransferState::FetchReceipt(Box::new(future));

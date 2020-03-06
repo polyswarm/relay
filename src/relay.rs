@@ -12,7 +12,7 @@ use web3::futures::Future;
 use web3::types::{Address, FilterBuilder, TransactionReceipt, H256, U256};
 use web3::{DuplexTransport, Web3};
 
-use super::anchors::anchor::HandleAnchors;
+use super::anchors::anchor::ProcessAnchors;
 use super::errors::OperationError;
 use super::eth::contracts::{FLUSH_EVENT_SIGNATURE, TRANSFER_EVENT_SIGNATURE};
 use super::eth::utils::clean_0x;
@@ -21,8 +21,10 @@ use super::flush::{CheckForPastFlush, ProcessFlush};
 use super::server::{HandleRequests, RequestType};
 use super::transfers::live::ProcessTransfer;
 use super::transfers::live::WatchLiveLogs;
-use super::transfers::past::RecheckPastTransferLogs;
+use super::transfers::past::ProcessPastTransfers;
+use crate::anchors::anchor::WatchAnchors;
 use crate::eth::Event;
+use crate::transfers::past::WatchPastTransfers;
 
 const FREE_GAS_PRICE: u64 = 0;
 const GAS_LIMIT: u64 = 200_000;
@@ -98,13 +100,19 @@ impl<T: DuplexTransport + 'static> Relay<T> {
                     return Either::B(err(()));
                 }
 
+                let (watch_anchors, process_anchors) = sidechain.handle_anchors(&homechain, &handle);
+                let (watch_side_past, process_side_past) = sidechain.recheck_past_transfer_logs(&homechain, &handle);
+                let (watch_home_past, process_home_past) = homechain.recheck_past_transfer_logs(&sidechain, &handle);
+
                 Either::A(
-                    sidechain
-                        .handle_anchors(&homechain, &handle)
+                    watch_anchors
+                        .join(process_anchors)
+                        .join(watch_side_past)
+                        .join(process_side_past)
+                        .join(watch_home_past)
+                        .join(process_home_past)
                         .join(homechain.watch_transfer_logs(&sidechain, &handle))
-                        .join(homechain.recheck_past_transfer_logs(&sidechain, &handle))
                         .join(sidechain.watch_transfer_logs(&homechain, &handle))
-                        .join(sidechain.recheck_past_transfer_logs(&homechain, &handle))
                         .join(sidechain.watch_flush_logs(&homechain, flush_option, &handle))
                         .join(Relay::handle_requests(&homechain, &sidechain, rx, &handle))
                         .and_then(|_| Ok(())),
@@ -410,19 +418,33 @@ impl<T: DuplexTransport + 'static> Network<T> {
     ///
     /// * `target` - Network where to anchor the block headers
     /// * `handle` - Handle to spawn new tasks
-    pub fn recheck_past_transfer_logs(&self, target: &Network<T>, handle: &reactor::Handle) -> RecheckPastTransferLogs {
-        RecheckPastTransferLogs::new(self, target, handle)
+    pub fn recheck_past_transfer_logs(
+        &self,
+        target: &Network<T>,
+        handle: &reactor::Handle,
+    ) -> (WatchPastTransfers, ProcessPastTransfers<T>) {
+        let (tx, rx) = mpsc::unbounded();
+        let watch = WatchPastTransfers::new(self, tx, handle);
+        let process = ProcessPastTransfers::new(self, rx, target, handle);
+        (watch, process)
     }
 
-    /// Returns a HandleAnchors Future for this chain.
+    /// Returns a tuple with WatchAnchors and ProcessAnchors Futures Future for this chain.
     /// Will anchor block headers from this network to the target network.
     ///
     /// # Arguments
     ///
     /// * `target` - Network where to anchor the block headers
     /// * `handle` - Handle to spawn new tasks
-    pub fn handle_anchors(&self, target: &Network<T>, handle: &reactor::Handle) -> HandleAnchors<T> {
-        HandleAnchors::new(self, target, handle)
+    pub fn handle_anchors(
+        &self,
+        target: &Network<T>,
+        handle: &reactor::Handle,
+    ) -> (WatchAnchors<T>, ProcessAnchors<T>) {
+        let (tx, rx) = mpsc::unbounded();
+        let watch = WatchAnchors::new(self, tx, handle);
+        let process = ProcessAnchors::new(self, target, rx, handle);
+        (watch, process)
     }
 
     /// Returns the gas limit for the network as a U256

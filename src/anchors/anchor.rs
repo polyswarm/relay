@@ -5,7 +5,7 @@ use web3::contract::tokens::Tokenize;
 use web3::futures::prelude::*;
 use web3::futures::sync::mpsc;
 use web3::futures::try_ready;
-use web3::types::{BlockId, BlockNumber, H256, U64};
+use web3::types::{BlockHeader, BlockId, BlockNumber, H256, U64};
 use web3::DuplexTransport;
 
 use crate::eth::transaction::SendTransaction;
@@ -21,7 +21,7 @@ pub struct Anchor {
 }
 
 impl Anchor {
-    ///Returns a ProcessAnchor Future to post the anchor to the ERC20Relay contract
+    ///Returns a SendTransaction Future to post the anchor to the ERC20Relay contract
     ///
     /// # Arguments
     ///
@@ -48,36 +48,40 @@ impl fmt::Display for Anchor {
 }
 
 /// Future to handle the Stream of anchors & post them to the chain
-pub struct HandleAnchors<T: DuplexTransport + 'static> {
+pub struct ProcessAnchors<T: DuplexTransport + 'static> {
     source: Network<T>,
     target: Network<T>,
-    stream: FindAnchors,
+    stream: mpsc::UnboundedReceiver<Anchor>,
     handle: reactor::Handle,
 }
 
-impl<T: DuplexTransport + 'static> HandleAnchors<T> {
-    /// Returns a newly created HandleAnchors Future
+impl<T: DuplexTransport + 'static> ProcessAnchors<T> {
+    /// Returns a newly created ProcessAnchors Future
     ///
     /// # Arguments
     ///
     /// * `source` - Network where the block headers are captured
     /// * `target` - Network where the headers will be anchored
     /// * `handle` - Handle to spawn new futures
-    pub fn new(source: &Network<T>, target: &Network<T>, handle: &reactor::Handle) -> Self {
+    pub fn new(
+        source: &Network<T>,
+        target: &Network<T>,
+        rx: mpsc::UnboundedReceiver<Anchor>,
+        handle: &reactor::Handle,
+    ) -> Self {
         let handle = handle.clone();
         let source = source.clone();
         let target = target.clone();
-        let stream = FindAnchors::new(&source, &handle);
-        HandleAnchors {
+        ProcessAnchors {
             source,
             target,
-            stream,
+            stream: rx,
             handle,
         }
     }
 }
 
-impl<T: DuplexTransport + 'static> Future for HandleAnchors<T> {
+impl<T: DuplexTransport + 'static> Future for ProcessAnchors<T> {
     type Item = ();
     type Error = ();
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
@@ -107,115 +111,133 @@ impl<T: DuplexTransport + 'static> Future for HandleAnchors<T> {
 }
 
 /// Stream of block headers on one chain to be posted to the other
-pub struct FindAnchors(mpsc::UnboundedReceiver<Anchor>);
+pub struct WatchAnchors<T: DuplexTransport + 'static> {
+    stream: Box<dyn Stream<Item = BlockHeader, Error = ()>>,
+    header: Option<BlockHeader>,
+    tx: mpsc::UnboundedSender<Anchor>,
+    source: Network<T>,
+    handle: reactor::Handle,
+}
 
-impl FindAnchors {
-    /// Returns a newly created FindAnchors Future
+impl<T: DuplexTransport + 'static> WatchAnchors<T> {
+    /// Returns a newly created WatchAnchors Future
     ///
     /// # Arguments
     ///
     /// * `source` - Network where the block headers are found
     /// * `handle` - Handle to spawn new futures
-    pub fn new<T: DuplexTransport + 'static>(source: &Network<T>, handle: &reactor::Handle) -> Self {
-        let (tx, rx) = mpsc::unbounded();
-        let future = {
-            let network_type = source.network_type;
-            let anchor_frequency = source.anchor_frequency;
-            let confirmations = source.confirmations;
-            let h = handle.clone();
-            let handle = handle.clone();
-            let web3 = source.web3.clone();
-            let timeout = source.timeout;
-            let flushed = source.flushed.clone();
+    pub fn new(source: &Network<T>, tx: mpsc::UnboundedSender<Anchor>, handle: &reactor::Handle) -> Self {
+        let network_type = source.network_type;
+        let h = handle.clone();
+        let handle = handle.clone();
+        let timeout = source.timeout;
+        let flushed = source.flushed.clone();
 
-            source
-                .web3
-                .eth_subscribe()
-                .subscribe_new_heads()
-                .flushed(&flushed)
-                .timeout(timeout, &h)
-                .for_each(move |head| {
-                    head.number.map_or_else(
-                        || {
-                            warn!("no block number in block head event on {:?}", network_type);
-                            Ok(())
-                        },
-                        |block_number| {
-                            let tx = tx.clone();
+        let block_stream = source
+            .web3
+            .eth_subscribe()
+            .subscribe_new_heads()
+            .flushed(&flushed)
+            .timeout(timeout, &h)
+            .map_err(move |e| {
+                error!("error in anchor stream on {:?}: {:?}", network_type, e);
+            });
 
-                            match block_number.checked_rem(anchor_frequency.into()).map(|u| u.low_u64()) {
-                                Some(c) if c == confirmations => {
-                                    let block_id = BlockId::Number(BlockNumber::Number(block_number - confirmations));
+        WatchAnchors {
+            stream: Box::new(block_stream),
+            header: None,
+            tx,
+            source: source.clone(),
+            handle,
+        }
+    }
 
-                                    handle.spawn(
-                                        web3.eth()
-                                            .block(block_id)
-                                            .and_then(move |block| match block {
-                                                Some(b) => {
-                                                    if b.number.is_none() {
-                                                        warn!("no block number in anchor block on {:?}", network_type);
-                                                        return Ok(());
-                                                    }
+    fn process_header(&self, header: &BlockHeader) {
+        header
+            .number
+            .map_or_else(|| self.no_block_number(), |number| self.send_anchor(number));
+    }
 
-                                                    if b.hash.is_none() {
-                                                        warn!("no block hash in anchor block on {:?}", network_type);
-                                                        return Ok(());
-                                                    }
+    fn no_block_number(&self) {
+        warn!("no block number in block head event on {:?}", self.source.network_type);
+    }
 
-                                                    let block_hash: H256 = b.hash.unwrap();
-                                                    let block_number: U64 = b.number.unwrap();
+    fn send_anchor(&self, block_number: U64) {
+        let tx = self.tx.clone();
+        let network_type = self.source.network_type;
+        let web3 = self.source.web3.clone();
+        let handle = self.handle.clone();
+        let confirmations = self.source.confirmations;
+        match block_number
+            .checked_rem(self.source.anchor_frequency.into())
+            .map(|u| u.low_u64())
+        {
+            Some(c) if c == self.source.confirmations => {
+                let block_id = BlockId::Number(BlockNumber::Number(block_number - confirmations));
 
-                                                    let anchor = Anchor {
-                                                        block_hash,
-                                                        block_number,
-                                                    };
-
-                                                    info!(
-                                                        "anchor block confirmed, anchoring on {:?}: {}",
-                                                        network_type, &anchor
-                                                    );
-
-                                                    tx.unbounded_send(anchor).unwrap();
-                                                    Ok(())
-                                                }
-                                                None => {
-                                                    warn!(
-                                                        "no block found for anchor confirmations on {:?}",
-                                                        network_type
-                                                    );
-                                                    Ok(())
-                                                }
-                                            })
-                                            .or_else(move |e| {
-                                                error!(
-                                                    "error waiting for anchor confirmations on {:?}: {:?}",
-                                                    network_type, e
-                                                );
-                                                Ok(())
-                                            }),
-                                    );
+                handle.spawn(
+                    web3.eth()
+                        .block(block_id)
+                        .and_then(move |block| match block {
+                            Some(b) => {
+                                if b.number.is_none() {
+                                    warn!("no block number in anchor block on {:?}", network_type);
+                                    return Ok(());
                                 }
-                                _ => (),
-                            };
 
+                                if b.hash.is_none() {
+                                    warn!("no block hash in anchor block on {:?}", network_type);
+                                    return Ok(());
+                                }
+
+                                let block_hash: H256 = b.hash.unwrap();
+                                let block_number: U64 = b.number.unwrap();
+
+                                let anchor = Anchor {
+                                    block_hash,
+                                    block_number,
+                                };
+
+                                info!("anchor block confirmed, anchoring on {:?}: {}", network_type, &anchor);
+
+                                tx.unbounded_send(anchor).unwrap();
+                                Ok(())
+                            }
+                            None => {
+                                warn!("no block found for anchor confirmations on {:?}", network_type);
+                                Ok(())
+                            }
+                        })
+                        .or_else(move |e| {
+                            error!("error waiting for anchor confirmations on {:?}: {:?}", network_type, e);
                             Ok(())
-                        },
-                    )
-                })
-                .map_err(move |e| {
-                    error!("error in anchor stream on {:?}: {:?}", network_type, e);
-                })
+                        }),
+                );
+            }
+            _ => (),
         };
-
-        handle.spawn(future);
-        FindAnchors(rx)
     }
 }
 
-impl Stream for FindAnchors {
-    type Item = Anchor;
+impl<T: DuplexTransport + 'static> Future for WatchAnchors<T> {
+    type Item = ();
     type Error = ();
-    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        self.0.poll()
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        loop {
+            if let Some(ref blockheader) = self.header {
+                self.process_header(blockheader);
+                self.header = None;
+            } else {
+                let header_option = try_ready!(self.stream.poll());
+                match header_option {
+                    Some(header) => {
+                        self.header = Some(header);
+                    }
+                    None => {
+                        return Ok(Async::Ready(()));
+                    }
+                }
+            }
+        }
     }
 }

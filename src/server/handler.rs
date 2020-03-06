@@ -61,7 +61,6 @@ impl<T: DuplexTransport + 'static> Future for HandleRequests<T> {
                         .and_then(move |transfers| {
                             let handle = handle.clone();
                             let source = source.clone();
-                            let target = target.clone();
                             let futures: Vec<ValidateAndApproveTransfer<T>> = transfers
                                 .iter()
                                 .map(move |transfer| {

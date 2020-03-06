@@ -21,7 +21,7 @@ pub struct Anchor {
 }
 
 impl Anchor {
-    ///Returns a ProcessAnchor Future to post the anchor to the ERC20Relay contract
+    ///Returns a SendTransaction Future to post the anchor to the ERC20Relay contract
     ///
     /// # Arguments
     ///
@@ -56,7 +56,7 @@ pub struct ProcessAnchors<T: DuplexTransport + 'static> {
 }
 
 impl<T: DuplexTransport + 'static> ProcessAnchors<T> {
-    /// Returns a newly created HandleAnchors Future
+    /// Returns a newly created ProcessAnchors Future
     ///
     /// # Arguments
     ///
@@ -120,7 +120,7 @@ pub struct WatchAnchors<T: DuplexTransport + 'static> {
 }
 
 impl<T: DuplexTransport + 'static> WatchAnchors<T> {
-    /// Returns a newly created FindAnchors Future
+    /// Returns a newly created WatchAnchors Future
     ///
     /// # Arguments
     ///

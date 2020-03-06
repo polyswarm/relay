@@ -21,9 +21,10 @@ use super::flush::{CheckForPastFlush, ProcessFlush};
 use super::server::{HandleRequests, RequestType};
 use super::transfers::live::ProcessTransfer;
 use super::transfers::live::WatchLiveLogs;
-use super::transfers::past::RecheckPastTransferLogs;
+use super::transfers::past::ProcessPastTransfers;
 use crate::anchors::anchor::WatchAnchors;
 use crate::eth::Event;
+use crate::transfers::past::WatchPastTransfers;
 
 const FREE_GAS_PRICE: u64 = 0;
 const GAS_LIMIT: u64 = 200_000;
@@ -100,14 +101,18 @@ impl<T: DuplexTransport + 'static> Relay<T> {
                 }
 
                 let (watch_anchors, process_anchors) = sidechain.handle_anchors(&homechain, &handle);
+                let (watch_side_past, process_side_past) = sidechain.recheck_past_transfer_logs(&homechain, &handle);
+                let (watch_home_past, process_home_past) = homechain.recheck_past_transfer_logs(&sidechain, &handle);
 
                 Either::A(
                     watch_anchors
                         .join(process_anchors)
+                        .join(watch_side_past)
+                        .join(process_side_past)
+                        .join(watch_home_past)
+                        .join(process_home_past)
                         .join(homechain.watch_transfer_logs(&sidechain, &handle))
-                        .join(homechain.recheck_past_transfer_logs(&sidechain, &handle))
                         .join(sidechain.watch_transfer_logs(&homechain, &handle))
-                        .join(sidechain.recheck_past_transfer_logs(&homechain, &handle))
                         .join(sidechain.watch_flush_logs(&homechain, flush_option, &handle))
                         .join(Relay::handle_requests(&homechain, &sidechain, rx, &handle))
                         .and_then(|_| Ok(())),
@@ -413,8 +418,15 @@ impl<T: DuplexTransport + 'static> Network<T> {
     ///
     /// * `target` - Network where to anchor the block headers
     /// * `handle` - Handle to spawn new tasks
-    pub fn recheck_past_transfer_logs(&self, target: &Network<T>, handle: &reactor::Handle) -> RecheckPastTransferLogs {
-        RecheckPastTransferLogs::new(self, target, handle)
+    pub fn recheck_past_transfer_logs(
+        &self,
+        target: &Network<T>,
+        handle: &reactor::Handle,
+    ) -> (WatchPastTransfers, ProcessPastTransfers<T>) {
+        let (tx, rx) = mpsc::unbounded();
+        let watch = WatchPastTransfers::new(self, tx, handle);
+        let process = ProcessPastTransfers::new(self, rx, target, handle);
+        (watch, process)
     }
 
     /// Returns a tuple with WatchAnchors and ProcessAnchors Futures Future for this chain.

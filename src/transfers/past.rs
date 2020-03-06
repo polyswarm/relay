@@ -325,7 +325,7 @@ impl<T: DuplexTransport + 'static> FindTransferInTransaction<T> {
     pub fn new(source: &Network<T>, hash: &H256) -> Self {
         let web3 = source.web3.clone();
         let network_type = source.network_type;
-        let future = web3.clone().eth().transaction_receipt(*hash).map_err(move |e| {
+        let future = web3.eth().transaction_receipt(*hash).map_err(move |e| {
             error!("error getting transaction receipt on {:?}: {:?}", network_type, e);
         });
         let state = FindTransferState::FetchReceipt(Box::new(future));

@@ -12,7 +12,7 @@ use web3::futures::Future;
 use web3::types::{Address, FilterBuilder, TransactionReceipt, H256, U256};
 use web3::{DuplexTransport, Web3};
 
-use super::anchors::anchor::HandleAnchors;
+use super::anchors::anchor::ProcessAnchors;
 use super::errors::OperationError;
 use super::eth::contracts::{FLUSH_EVENT_SIGNATURE, TRANSFER_EVENT_SIGNATURE};
 use super::eth::utils::clean_0x;
@@ -22,6 +22,7 @@ use super::server::{HandleRequests, RequestType};
 use super::transfers::live::ProcessTransfer;
 use super::transfers::live::WatchLiveLogs;
 use super::transfers::past::RecheckPastTransferLogs;
+use crate::anchors::anchor::WatchAnchors;
 use crate::eth::Event;
 
 const FREE_GAS_PRICE: u64 = 0;
@@ -98,9 +99,11 @@ impl<T: DuplexTransport + 'static> Relay<T> {
                     return Either::B(err(()));
                 }
 
+                let (watch_anchors, process_anchors) = sidechain.handle_anchors(&homechain, &handle);
+
                 Either::A(
-                    sidechain
-                        .handle_anchors(&homechain, &handle)
+                    watch_anchors
+                        .join(process_anchors)
                         .join(homechain.watch_transfer_logs(&sidechain, &handle))
                         .join(homechain.recheck_past_transfer_logs(&sidechain, &handle))
                         .join(sidechain.watch_transfer_logs(&homechain, &handle))
@@ -414,15 +417,22 @@ impl<T: DuplexTransport + 'static> Network<T> {
         RecheckPastTransferLogs::new(self, target, handle)
     }
 
-    /// Returns a HandleAnchors Future for this chain.
+    /// Returns a tuple with WatchAnchors and ProcessAnchors Futures Future for this chain.
     /// Will anchor block headers from this network to the target network.
     ///
     /// # Arguments
     ///
     /// * `target` - Network where to anchor the block headers
     /// * `handle` - Handle to spawn new tasks
-    pub fn handle_anchors(&self, target: &Network<T>, handle: &reactor::Handle) -> HandleAnchors<T> {
-        HandleAnchors::new(self, target, handle)
+    pub fn handle_anchors(
+        &self,
+        target: &Network<T>,
+        handle: &reactor::Handle,
+    ) -> (WatchAnchors<T>, ProcessAnchors<T>) {
+        let (tx, rx) = mpsc::unbounded();
+        let watch = WatchAnchors::new(self, tx, handle);
+        let process = ProcessAnchors::new(self, target, rx, handle);
+        (watch, process)
     }
 
     /// Returns the gas limit for the network as a U256

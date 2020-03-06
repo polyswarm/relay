@@ -155,14 +155,14 @@ impl<T: DuplexTransport + 'static> WatchAnchors<T> {
     fn process_header(&self, header: &BlockHeader) {
         header
             .number
-            .map_or_else(|| self.no_block_number(), |number| self.spawn_to_anchor(number));
+            .map_or_else(|| self.no_block_number(), |number| self.send_anchor(number));
     }
 
     fn no_block_number(&self) {
         warn!("no block number in block head event on {:?}", self.source.network_type);
     }
 
-    fn spawn_to_anchor(&self, block_number: U64) {
+    fn send_anchor(&self, block_number: U64) {
         let tx = self.tx.clone();
         let network_type = self.source.network_type;
         let web3 = self.source.web3.clone();

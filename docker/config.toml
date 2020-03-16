@@ -13,7 +13,7 @@
     timeout = 15
 
 [relay.sidechain]
-    wsuri = "ws://sidechain:8546"
+    wsuri = "ws://sidechain:7546"
     free = true
     interval = 30
     timeout = 15

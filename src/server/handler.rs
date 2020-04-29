@@ -1,6 +1,3 @@
-use crate::relay::{Network, NetworkType};
-use crate::server::endpoint::{NetworkStatus, RequestType, StatusResponse};
-use crate::transfers::past::{FindTransferInTransaction, ValidateAndApproveTransfer};
 use tokio_core::reactor;
 use web3::contract::Options;
 use web3::futures::future;
@@ -9,6 +6,9 @@ use web3::futures::sync::mpsc;
 use web3::futures::try_ready;
 use web3::types::{BlockNumber, U256};
 use web3::DuplexTransport;
+use crate::relay::network::{Network, NetworkType};
+use crate::server::endpoint::{NetworkStatus, RequestType, StatusResponse};
+use crate::events::transfers::past::{FindTransferInTransaction, ValidateAndApproveTransfer};
 
 pub struct HandleRequests<T: DuplexTransport + 'static> {
     listen: mpsc::UnboundedReceiver<RequestType>,

@@ -11,7 +11,7 @@ use web3::DuplexTransport;
 use crate::eth::transaction::SendTransaction;
 use crate::extensions::flushed::Flushed;
 use crate::extensions::timeout::Timeout;
-use crate::relay::Network;
+use crate::relay::network::Network;
 
 /// Represents a block on the sidechain to be anchored to the homechain
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]

@@ -2,7 +2,7 @@ use web3::futures::prelude::*;
 use web3::types::H256;
 use web3::DuplexTransport;
 
-use crate::relay::{Network, TransferApprovalState};
+use crate::relay::network::{Network, TransferApprovalState};
 
 pub struct ExitOnLogRemoved<T, I, E>
 where

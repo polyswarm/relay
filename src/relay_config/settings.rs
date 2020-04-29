@@ -6,7 +6,7 @@ use std::ffi::OsString;
 use std::path::Path;
 
 use crate::errors::ConfigError;
-use crate::transfers::past::{LOOKBACK_LEEWAY, LOOKBACK_RANGE};
+use crate::events::transfers::past::{LOOKBACK_LEEWAY, LOOKBACK_RANGE};
 
 /// Settings for the application
 #[derive(Debug, Deserialize)]

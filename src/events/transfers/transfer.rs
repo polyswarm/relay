@@ -7,8 +7,8 @@ use web3::DuplexTransport;
 
 use crate::eth::transaction::SendTransaction;
 use crate::extensions::removed::{CancelRemoved, ExitOnLogRemoved};
-use crate::relay::Network;
-use crate::transfers::withdrawal::{ApproveWithdrawal, DoesRequireApproval, UnapproveParams};
+use crate::relay::network::Network;
+use crate::events::transfers::withdrawal::{ApproveWithdrawal, DoesRequireApproval, UnapproveParams};
 
 /// Add CheckRemoved trait to SendTransaction, which is called by Transfer::approve_withdrawal
 impl<T, P> CancelRemoved<T, (), ()> for SendTransaction<T, P>

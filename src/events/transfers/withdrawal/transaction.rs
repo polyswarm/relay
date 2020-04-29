@@ -2,7 +2,7 @@ use ethabi::Token;
 use web3::contract::tokens::Tokenize;
 use web3::types::{Address, H256, U256, U64};
 
-use crate::transfers::transfer::Transfer;
+use crate::events::transfers::transfer::Transfer;
 
 /// Parameters for the approveWithdrawal function.
 ///

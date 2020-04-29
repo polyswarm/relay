@@ -6,17 +6,15 @@ use failure;
 use tokio_core;
 use web3;
 
-pub mod anchors;
 pub mod errors;
 pub mod eth;
 pub mod extensions;
-pub mod flush;
+pub mod events;
 #[cfg(test)]
 mod mock;
 pub mod relay;
 pub mod relay_config;
 pub mod server;
-pub mod transfers;
 
 use clap::{App, Arg};
 use failure::{Error, SyncFailure};
@@ -31,7 +29,8 @@ use web3::Web3;
 
 use crate::endpoint::{Endpoint, RequestType};
 use crate::errors::{ConfigError, OperationError};
-use crate::relay::{Network, Relay};
+use crate::relay::relay::Relay;
+use crate::relay::network::Network;
 use crate::relay_config::{consul_configs, logger, settings};
 use crate::server::endpoint;
 use crate::settings::Settings;

@@ -11,7 +11,7 @@ use super::transfer::Transfer;
 use crate::eth::contracts::TRANSFER_EVENT_SIGNATURE;
 use crate::extensions::flushed::Flushed;
 use crate::extensions::timeout::Timeout;
-use crate::relay::Network;
+use crate::relay::network::Network;
 
 pub const LOOKBACK_RANGE: u64 = 1_000;
 pub const LOOKBACK_LEEWAY: u64 = 5;

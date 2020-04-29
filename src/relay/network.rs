@@ -2,29 +2,26 @@ use failure::{Error, SyncFailure};
 use lru::LruCache;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, RwLock};
-use std::{process, time};
+use std::time;
 use tokio_core::reactor;
 use web3::confirm::{wait_for_transaction_confirmation, SendTransactionWithConfirmation};
 use web3::contract::Contract;
-use web3::futures::future::{err, Either};
+use web3::futures::future::Either;
 use web3::futures::sync::mpsc;
 use web3::futures::Future;
 use web3::types::{Address, FilterBuilder, TransactionReceipt, H256, U256};
 use web3::{DuplexTransport, Web3};
 
-use super::anchors::anchor::ProcessAnchors;
-use super::errors::OperationError;
-use super::eth::contracts::{FLUSH_EVENT_SIGNATURE, TRANSFER_EVENT_SIGNATURE};
-use super::eth::utils::clean_0x;
-use super::extensions::removed::{CancelRemoved, ExitOnLogRemoved};
-use super::flush::{CheckForPastFlush, ProcessFlush};
-use super::server::{HandleRequests, RequestType};
-use super::transfers::live::ProcessTransfer;
-use super::transfers::live::WatchLiveLogs;
-use super::transfers::past::ProcessPastTransfers;
-use crate::anchors::anchor::WatchAnchors;
+use crate::extensions::removed::{CancelRemoved, ExitOnLogRemoved};
 use crate::eth::Event;
-use crate::transfers::past::WatchPastTransfers;
+use crate::errors::OperationError;
+use crate::eth::utils::clean_0x;
+use crate::eth::contracts::{FLUSH_EVENT_SIGNATURE, TRANSFER_EVENT_SIGNATURE};
+use crate::events::flush::{CheckForPastFlush, ProcessFlush};
+use crate::events::transfers::live::{WatchLiveLogs, ProcessTransfer};
+use crate::events::transfers::past::{WatchPastTransfers, ProcessPastTransfers};
+use crate::events::anchors::anchor::{WatchAnchors, ProcessAnchors};
+
 
 const FREE_GAS_PRICE: u64 = 0;
 const GAS_LIMIT: u64 = 200_000;
@@ -43,87 +40,6 @@ where
     }
 }
 
-/// Token relay between two Ethereum networks
-pub struct Relay<T: DuplexTransport + 'static> {
-    homechain: Network<T>,
-    sidechain: Network<T>,
-}
-
-impl<T: DuplexTransport + 'static> Relay<T> {
-    /// Constructs a token relay given two Ethereum networks
-    ///
-    /// # Arguments
-    ///
-    /// * `homechain` - Network to be used as the home chain
-    /// * `sidechain` - Network to be used as the side chain
-    pub fn new(homechain: Network<T>, sidechain: Network<T>) -> Self {
-        Self { homechain, sidechain }
-    }
-
-    fn handle_requests(
-        homechain: &Network<T>,
-        sidechain: &Network<T>,
-        rx: mpsc::UnboundedReceiver<RequestType>,
-        handle: &reactor::Handle,
-    ) -> HandleRequests<T> {
-        HandleRequests::new(homechain, sidechain, rx, handle)
-    }
-
-    pub fn unlock(&self, password: &str) -> impl Future<Item = (), Error = Error> {
-        self.homechain
-            .unlock(password)
-            .join(self.sidechain.unlock(password))
-            .and_then(|_| Ok(()))
-    }
-
-    /// Returns a Future representing the operation of the token relay, including forwarding
-    /// Transfer events and anchoring sidechain blocks onto the homechain
-    ///
-    /// # Arguments
-    ///
-    /// * `handle` - Handle to the event loop to spawn additional futures
-    pub fn run(
-        &self,
-        rx: mpsc::UnboundedReceiver<RequestType>,
-        handle: &reactor::Handle,
-    ) -> impl Future<Item = (), Error = ()> {
-        let sidechain = self.sidechain.clone();
-        let homechain = self.homechain.clone();
-        let handle = handle.clone();
-        sidechain
-            .check_flush_block()
-            .and_then(move |flush_option| {
-                if let Ok(mut lock) = sidechain.flushed.write() {
-                    *lock = flush_option.clone();
-                } else {
-                    error!("error getting lock on startup");
-                    return Either::B(err(()));
-                }
-
-                let (watch_anchors, process_anchors) = sidechain.handle_anchors(&homechain, &handle);
-                let (watch_side_past, process_side_past) = sidechain.recheck_past_transfer_logs(&homechain, &handle);
-                let (watch_home_past, process_home_past) = homechain.recheck_past_transfer_logs(&sidechain, &handle);
-
-                Either::A(
-                    watch_anchors
-                        .join(process_anchors)
-                        .join(watch_side_past)
-                        .join(process_side_past)
-                        .join(watch_home_past)
-                        .join(process_home_past)
-                        .join(homechain.watch_transfer_logs(&sidechain, &handle))
-                        .join(sidechain.watch_transfer_logs(&homechain, &handle))
-                        .join(sidechain.watch_flush_logs(&homechain, flush_option, &handle))
-                        .join(Relay::handle_requests(&homechain, &sidechain, rx, &handle))
-                        .and_then(|_| Ok(())),
-                )
-            })
-            .map_err(|e| {
-                error!("error at top level: {:?}", e);
-                process::exit(-1);
-            })
-    }
-}
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq)]
 pub enum TransferApprovalState {

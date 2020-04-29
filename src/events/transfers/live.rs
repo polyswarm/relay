@@ -11,8 +11,8 @@ use web3::Error;
 
 use super::transfer::Transfer;
 use crate::eth::Event;
-use crate::extensions::flushed::{Flushed, FlushedStream};
-use crate::relay::{Network, TransferApprovalState};
+use crate::extensions::flushed::{FlushedStream, Flushed};
+use crate::relay::network::{Network, TransferApprovalState};
 
 /// Stream of events that have match the given filter.
 /// Passes the transaction receipt and log over the given tx upon confirmation (or removal)

@@ -7,9 +7,9 @@ use web3::types::{Address, BlockNumber, FilterBuilder, Log, H256, U256, U64};
 
 use crate::eth::contracts::TRANSFER_EVENT_SIGNATURE;
 use crate::eth::transaction::SendTransaction;
-use crate::relay::Network;
-use crate::transfers::transfer::Transfer;
-use crate::transfers::withdrawal::ApproveParams;
+use crate::relay::network::Network;
+use crate::events::transfers::transfer::Transfer;
+use crate::events::transfers::withdrawal::ApproveParams;
 use web3::DuplexTransport;
 
 pub enum CheckBalancesState {

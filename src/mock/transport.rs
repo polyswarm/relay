@@ -15,7 +15,7 @@ use web3::types::{BlockHeader, Log, H160, H2048, H256, U256};
 use web3::{BatchTransport, DuplexTransport, Error, RequestId, Transport};
 
 use crate::errors::OperationError;
-use crate::relay::{Network, NetworkType};
+use crate::relay::network::{Network, NetworkType};
 
 // Result from a MockTask
 pub type MockTask<T> = Box<dyn Future<Item = T, Error = Error>>;

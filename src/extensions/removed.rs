@@ -67,7 +67,7 @@ where
 mod tests {
     use super::*;
     use crate::mock::transport::MockTransport;
-    use crate::relay::NetworkType;
+    use crate::relay::network::NetworkType;
     use std::time::Duration;
     use tokio_core::reactor;
     use web3::futures::try_ready;

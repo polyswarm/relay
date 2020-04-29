@@ -258,7 +258,7 @@ impl<T: DuplexTransport + 'static> Future for ProcessTransfer<T> {
 mod tests {
     use super::*;
     use crate::mock::transport::MockTransport;
-    use crate::relay::NetworkType;
+    use crate::relay::network::NetworkType;
     use web3::types::{H256, U256, U64};
 
     #[test]

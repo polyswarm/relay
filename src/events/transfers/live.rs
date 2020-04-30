@@ -11,8 +11,8 @@ use web3::Error;
 
 use super::transfer::Transfer;
 use crate::eth::Event;
-use crate::extensions::flushed::{FlushedStream, Flushed};
-use crate::relay::network::{Network, TransferApprovalState};
+use crate::extensions::flushed::{Flushed, FlushedStream};
+use crate::network::{Network, TransferApprovalState};
 
 /// Stream of events that have match the given filter.
 /// Passes the transaction receipt and log over the given tx upon confirmation (or removal)
@@ -258,7 +258,7 @@ impl<T: DuplexTransport + 'static> Future for ProcessTransfer<T> {
 mod tests {
     use super::*;
     use crate::mock::transport::MockTransport;
-    use crate::relay::network::NetworkType;
+    use crate::network::NetworkType;
     use web3::types::{H256, U256, U64};
 
     #[test]

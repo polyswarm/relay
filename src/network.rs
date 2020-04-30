@@ -12,16 +12,15 @@ use web3::futures::Future;
 use web3::types::{Address, FilterBuilder, TransactionReceipt, H256, U256};
 use web3::{DuplexTransport, Web3};
 
-use crate::extensions::removed::{CancelRemoved, ExitOnLogRemoved};
-use crate::eth::Event;
 use crate::errors::OperationError;
-use crate::eth::utils::clean_0x;
 use crate::eth::contracts::{FLUSH_EVENT_SIGNATURE, TRANSFER_EVENT_SIGNATURE};
+use crate::eth::utils::clean_0x;
+use crate::eth::Event;
+use crate::events::anchors::anchor::{ProcessAnchors, WatchAnchors};
 use crate::events::flush::{CheckForPastFlush, ProcessFlush};
-use crate::events::transfers::live::{WatchLiveLogs, ProcessTransfer};
-use crate::events::transfers::past::{WatchPastTransfers, ProcessPastTransfers};
-use crate::events::anchors::anchor::{WatchAnchors, ProcessAnchors};
-
+use crate::events::transfers::live::{ProcessTransfer, WatchLiveLogs};
+use crate::events::transfers::past::{ProcessPastTransfers, WatchPastTransfers};
+use crate::extensions::removed::{CancelRemoved, ExitOnLogRemoved};
 
 const FREE_GAS_PRICE: u64 = 0;
 const GAS_LIMIT: u64 = 200_000;
@@ -39,7 +38,6 @@ where
         ExitOnLogRemoved::new(target, tx_hash, Box::new(self))
     }
 }
-
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq)]
 pub enum TransferApprovalState {

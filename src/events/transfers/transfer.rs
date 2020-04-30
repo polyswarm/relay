@@ -6,9 +6,9 @@ use web3::types::{Address, TransactionReceipt, H256, U256, U64};
 use web3::DuplexTransport;
 
 use crate::eth::transaction::SendTransaction;
-use crate::extensions::removed::{CancelRemoved, ExitOnLogRemoved};
-use crate::relay::network::Network;
 use crate::events::transfers::withdrawal::{ApproveWithdrawal, DoesRequireApproval, UnapproveParams};
+use crate::extensions::removed::{CancelRemoved, ExitOnLogRemoved};
+use crate::network::Network;
 
 /// Add CheckRemoved trait to SendTransaction, which is called by Transfer::approve_withdrawal
 impl<T, P> CancelRemoved<T, (), ()> for SendTransaction<T, P>

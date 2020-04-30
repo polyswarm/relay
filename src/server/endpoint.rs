@@ -10,7 +10,7 @@ use web3::types::{H256, U256};
 
 use crate::errors::EndpointError;
 use crate::eth::utils;
-use crate::relay::network::NetworkType;
+use crate::network::NetworkType;
 
 pub const HOME: &str = "HOME";
 pub const SIDE: &str = "SIDE";

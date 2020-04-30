@@ -9,7 +9,7 @@ use super::transfer::Transfer;
 use super::ApproveParams;
 use crate::eth::transaction::SendTransaction;
 use crate::extensions::removed::CancelRemoved;
-use crate::relay::network::Network;
+use crate::network::Network;
 
 pub enum DoesRequireApprovalState {
     GetFees(Box<dyn Future<Item = U256, Error = ()>>),

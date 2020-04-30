@@ -1,14 +1,13 @@
-use std::process;
 use failure::Error;
+use std::process;
 use tokio_core::reactor;
 use web3::futures::future::{err, Either};
 use web3::futures::sync::mpsc;
 use web3::futures::Future;
 use web3::DuplexTransport;
 
-use crate::relay::network::Network;
-use crate::server::{RequestType, HandleRequests};
-
+use crate::network::Network;
+use crate::server::{HandleRequests, RequestType};
 
 /// Token relay between two Ethereum networks
 pub struct Relay<T: DuplexTransport + 'static> {

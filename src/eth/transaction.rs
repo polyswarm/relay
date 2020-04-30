@@ -11,7 +11,7 @@ use web3::types::{TransactionReceipt, U256};
 use web3::DuplexTransport;
 
 use crate::errors::OperationError;
-use crate::relay::network::Network;
+use crate::network::Network;
 
 pub enum TransactionState<T, P>
 where

@@ -8,10 +8,11 @@ use web3;
 
 pub mod errors;
 pub mod eth;
-pub mod extensions;
 pub mod events;
+pub mod extensions;
 #[cfg(test)]
 mod mock;
+pub mod network;
 pub mod relay;
 pub mod relay_config;
 pub mod server;
@@ -29,8 +30,8 @@ use web3::Web3;
 
 use crate::endpoint::{Endpoint, RequestType};
 use crate::errors::{ConfigError, OperationError};
-use crate::relay::relay::Relay;
-use crate::relay::network::Network;
+use crate::network::Network;
+use crate::relay::Relay;
 use crate::relay_config::{consul_configs, logger, settings};
 use crate::server::endpoint;
 use crate::settings::Settings;
